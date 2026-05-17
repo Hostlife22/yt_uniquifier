@@ -53,6 +53,10 @@ target-version = "py311"
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+# typer.Argument/Option as defaults is the idiomatic pattern.
+"src/yt_uniquifier/cli/*.py" = ["B008"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

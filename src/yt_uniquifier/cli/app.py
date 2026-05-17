@@ -1,5 +1,7 @@
 import typer
 
+from yt_uniquifier.cli.cmd_probe import probe_cmd
+
 app = typer.Typer(
     no_args_is_help=True,
     help=(
@@ -18,10 +20,7 @@ def version() -> None:
     typer.echo(__version__)
 
 
-@app.command()
-def probe() -> None:
-    """Probe an input file. (Implemented in Phase 1 — see specs/01-probe-encoder-models.md)"""
-    raise typer.Exit(code=2)
+app.command("probe")(probe_cmd)
 
 
 @app.command()

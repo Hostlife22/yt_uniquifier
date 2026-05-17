@@ -1,0 +1,208 @@
+"""Data contracts shared across the core. Pydantic v2.
+
+These models are JSON-serializable and contain no ffmpeg-specific logic.
+The Plan model is the durable input to the rest of the pipeline.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+ColorTransfer = Literal[
+    "bt709",
+    "smpte2084",
+    "arib-std-b67",
+    "bt470bg",
+    "smpte170m",
+    "iec61966-2-1",
+    "unknown",
+]
+ColorPrimaries = Literal[
+    "bt709",
+    "bt2020",
+    "bt470bg",
+    "smpte170m",
+    "smpte432",
+    "unknown",
+]
+ColorSpace = Literal[
+    "bt709",
+    "bt2020nc",
+    "bt2020c",
+    "bt470bg",
+    "smpte170m",
+    "unknown",
+]
+ColorRange = Literal["tv", "pc", "unknown"]
+EncoderKind = Literal["h264", "hevc"]
+EncoderVendor = Literal["nvenc", "qsv", "amf", "videotoolbox", "x264", "x265"]
+Container = Literal["mp4", "mov", "mkv"]
+AudioTracksOpt = Literal["first", "all"]
+
+
+class HDRInfo(BaseModel):
+    """Color characteristics of a video stream."""
+
+    model_config = ConfigDict(frozen=True)
+
+    is_hdr: bool
+    transfer: ColorTransfer = "unknown"
+    primaries: ColorPrimaries = "unknown"
+    space: ColorSpace = "unknown"
+    color_range: ColorRange = "unknown"
+    bit_depth: int = 8
+
+
+class VideoStream(BaseModel):
+    """One video stream in the source container."""
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int
+    codec: str
+    width: int
+    height: int
+    fps: float
+    duration_sec: float
+    pix_fmt: str
+    bit_rate: int | None = None
+    color: HDRInfo
+    is_default: bool = False
+
+
+class AudioStream(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    index: int
+    codec: str
+    sample_rate: int
+    channels: int
+    channel_layout: str | None = None
+    bit_rate: int | None = None
+    language: str | None = None
+    is_default: bool = False
+
+
+class SubtitleStream(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    index: int
+    codec: str
+    language: str | None = None
+    is_image_based: bool = False
+
+
+class Chapter(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    start_sec: float
+    end_sec: float
+    title: str | None = None
+
+
+class SourceMeta(BaseModel):
+    """Result of probing one input file."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    container: str
+    duration_sec: float
+    size_bytes: int
+    video: list[VideoStream] = Field(default_factory=list)
+    audio: list[AudioStream] = Field(default_factory=list)
+    subtitle: list[SubtitleStream] = Field(default_factory=list)
+    chapters: list[Chapter] = Field(default_factory=list)
+
+
+class EncoderCandidate(BaseModel):
+    """An ffmpeg encoder we considered for use, with the outcome of a test-run."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    vendor: EncoderVendor
+    codec: EncoderKind
+    works: bool
+    error: str | None = None
+
+
+class TransformConfig(BaseModel):
+    """One entry in a Profile: a transform id with overridden params."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    enabled: bool = True
+    params: dict[str, object] = Field(default_factory=dict)
+
+
+class Profile(BaseModel):
+    """User-facing recipe loaded from YAML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    transforms: list[TransformConfig] = Field(default_factory=list)
+    audio_tracks: AudioTracksOpt | list[int] = "first"
+    keep_hdr: bool = False
+    output_container: Container = "mp4"
+    target_codec: EncoderKind = "h264"
+    target_loudness_lufs: float = -14.0
+    seed: int | None = None
+
+
+class Plan(BaseModel):
+    """Concrete plan: source + profile + chosen encoder + deterministic hash.
+
+    plan_hash is the resume key. Two runs with identical source content + profile
+    + encoder should produce the same hash.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source: SourceMeta
+    profile: Profile
+    encoder: EncoderCandidate
+    plan_hash: str
+
+
+SegmentStatus = Literal["pending", "in_progress", "done", "failed"]
+
+
+class Segment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idx: int
+    start_sec: float
+    end_sec: float
+    status: SegmentStatus = "pending"
+    src_path: Path | None = None
+    out_path: Path | None = None
+
+
+class QAReport(BaseModel):
+    """Aggregated QA metrics for one (input, output) pair."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input_md5: str
+    output_md5: str
+    input_size_bytes: int
+    output_size_bytes: int
+    input_duration_sec: float
+    output_duration_sec: float
+    phash_samples: int
+    phash_distance_min: int
+    phash_distance_mean: float
+    phash_distance_max: int
+    phash_similarity: float
+    audio_fp_similarity: float | None = None
+    vmaf_mean: float | None = None
+    ssim_mean: float | None = None
+    duration_match: bool
+    notes: list[str] = Field(default_factory=list)
