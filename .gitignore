@@ -9,6 +9,7 @@ dist/
 .venv/
 venv/
 env/
+tests/fixtures
 
 .pytest_cache/
 .mypy_cache/

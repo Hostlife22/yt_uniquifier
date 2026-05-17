@@ -1,0 +1,29 @@
+name: medium_hdr
+description: |
+  HDR (PQ / HLG) preserved through color transforms via zscale linear roundtrip.
+  Requires an HDR-capable encoder (libx265 / hevc_nvenc / hevc_videotoolbox)
+  and ffmpeg built with zimg.
+transforms:
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.025, rng_seed: 42}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.008, contrast: 1.012, gamma: 0.997, saturation: 1.02}
+  - id: video.noise
+    enabled: true
+    params: {strength: 3}
+  # No video.rotate by default — pipeline handles HDR fill but skip for cleanest result.
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.0008, tempo: 1.0}
+  - id: audio.eq
+    enabled: true
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: true
+output_container: mp4
+target_codec: hevc
+target_loudness_lufs: -14.0
+seed: 42

@@ -49,14 +49,19 @@ register(
 
 class RotateParams(BaseModel):
     degrees: float = Field(default=0.15, ge=-2.0, le=2.0)
+    # For SDR sources black=0,0,0 is fine. For HDR (PQ/HLG) pure 0 is below
+    # legal video range and gets clipped by the encoder; near-black 16,16,16
+    # in 10-bit (0x101010 in 8-bit terms) reads as black after PQ EOTF.
+    fillcolor_sdr: str = "black"
+    fillcolor_pq: str = "0x101010"
 
 
 def _build_rotate(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
     assert isinstance(params, RotateParams)
     out = alloc.next("v")
-    # rotate by small angle, fill with black, then crop overflow back to original size.
+    # Default to SDR fill; pipeline rewrites filter_str for HDR (see FilterGraph).
     filt = (
-        f"rotate={params.degrees}*PI/180:fillcolor=black,"
+        f"rotate={params.degrees}*PI/180:fillcolor={params.fillcolor_sdr},"
         "crop=iw:ih"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)

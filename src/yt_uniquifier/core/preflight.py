@@ -121,6 +121,15 @@ def _check_fps(source: SourceMeta) -> list[PreflightFinding]:
     )]
 
 
+_HDR_CAPABLE_ENCODERS = {
+    "libx265",
+    "hevc_nvenc",
+    "hevc_qsv",
+    "hevc_amf",
+    "hevc_videotoolbox",
+}
+
+
 def _check_hdr(
     source: SourceMeta, plan: Plan, encoder: EncoderCandidate
 ) -> list[PreflightFinding]:
@@ -130,8 +139,8 @@ def _check_hdr(
     if not v.color.is_hdr:
         return []
     findings: list[PreflightFinding] = []
+
     if not plan.profile.keep_hdr:
-        # See if profile has color-touching transforms.
         offenders = [
             tc.id for tc in plan.profile.transforms
             if tc.enabled and tc.id in _COLOR_TRANSFORMS
@@ -143,16 +152,73 @@ def _check_hdr(
                     f"Source is HDR ({v.color.transfer}) but profile applies color "
                     f"transforms {offenders} without --keep-hdr. Output color will be wrong."
                 ),
-                suggestion="Set keep_hdr=true in the profile, or remove the color transforms.",
+                suggestion="Set keep_hdr: true in the profile, or remove the color transforms.",
             ))
-    # Encoder bit-depth check (only x264 lacks 10-bit by default).
-    if encoder.name == "libx264":
+        # Without keep_hdr we still re-encode to 8-bit yuv420p, which collapses HDR.
+        return findings
+
+    # keep_hdr=True path: need zscale (zimg) + 10-bit-capable encoder.
+    if not _ffmpeg_has_filter("zscale"):
         findings.append(PreflightFinding(
-            code="hdr.unsupported.encoder", severity="fail",
-            message=f"Selected encoder {encoder.name!r} cannot output 10-bit; HDR will be lost.",
-            suggestion="Use --encoder libx265 or hevc_nvenc/hevc_videotoolbox.",
+            code="hdr.zscale.missing", severity="fail",
+            message=(
+                "ffmpeg lacks the `zscale` filter (zimg) required to keep HDR "
+                "through color transforms."
+            ),
+            suggestion="Install ffmpeg built with --enable-libzimg (Homebrew default does).",
+        ))
+    if encoder.name not in _HDR_CAPABLE_ENCODERS:
+        findings.append(PreflightFinding(
+            code="hdr.encoder.8bit", severity="fail",
+            message=f"Encoder {encoder.name!r} cannot output 10-bit HDR; result will be SDR.",
+            suggestion=(
+                "Use --encoder libx265, hevc_nvenc, hevc_qsv, hevc_amf, or "
+                "hevc_videotoolbox."
+            ),
+        ))
+    # blend_b is technically a color op but its filter_str can't be wrapped — warn.
+    if any(tc.id == "video.blend_b" and tc.enabled for tc in plan.profile.transforms):
+        findings.append(PreflightFinding(
+            code="hdr.blend.unwrapped", severity="warn",
+            message=(
+                "video.blend_b runs in the source's transfer domain even with keep_hdr — "
+                "blend math may shift HDR colors."
+            ),
+            suggestion="Disable blend_b for HDR sources, or accept the colour shift.",
         ))
     return findings
+
+
+_FFMPEG_FILTERS_CACHE: dict[str, set[str]] = {}
+
+
+def _ffmpeg_has_filter(name: str) -> bool:
+    """Cached check whether ffmpeg has a given filter (e.g. zscale)."""
+    import subprocess
+
+    from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
+    key = "filters"
+    if key not in _FFMPEG_FILTERS_CACHE:
+        try:
+            proc = subprocess.run(
+                [ffmpeg_bin(), "-hide_banner", "-filters"],
+                capture_output=True, text=True, timeout=10, check=True,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            _FFMPEG_FILTERS_CACHE[key] = set()
+            return False
+        # Substring match on the filters listing is enough for our needs
+        # (filter names are space-delimited words; false positives unlikely).
+        names: set[str] = set()
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                names.add(parts[1])
+        if name in proc.stdout:
+            names.add(name)
+        _FFMPEG_FILTERS_CACHE[key] = names
+    return name in _FFMPEG_FILTERS_CACHE[key]
 
 
 def _check_subtitles(source: SourceMeta) -> list[PreflightFinding]:

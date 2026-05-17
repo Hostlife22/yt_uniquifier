@@ -90,7 +90,8 @@ def test_hdr_with_x264_encoder_fails(tmp_path: Path) -> None:
     plan = _plan(src, [], keep_hdr=True)
     f = preflight(src, plan, plan.encoder)
     assert has_fail(f)
-    assert "hdr.unsupported.encoder" in _codes(f)
+    # libx264 cannot output 10-bit HDR.
+    assert "hdr.encoder.8bit" in _codes(f)
 
 
 def test_unusual_fps_warns(tmp_path: Path) -> None:

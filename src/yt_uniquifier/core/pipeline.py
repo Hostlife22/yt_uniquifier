@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,11 +42,43 @@ from yt_uniquifier.core.transforms.audio_loudnorm import (
     measure,
 )
 from yt_uniquifier.core.transforms.base import LabelAllocator
+from yt_uniquifier.core.transforms.hdr_wrap import (
+    is_color_transform,
+    needs_linear_wrap,
+    wrap_linear,
+)
 from yt_uniquifier.core.transforms.video_blend import B_INPUT_PLACEHOLDER
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 LOUDNORM_ID = "audio.loudnorm"
 BLEND_B_ID = "video.blend_b"
+
+
+def _group_runs(
+    items: list[TransformConfig],
+    predicate: Callable[[str], bool],
+) -> list[tuple[bool, list[TransformConfig]]]:
+    """Split items into runs of `predicate(id)` True / False, preserving order.
+
+    Returns a list of (is_predicate_true, items_in_this_run) pairs.
+    """
+    runs: list[tuple[bool, list[TransformConfig]]] = []
+    current_flag: bool | None = None
+    current: list[TransformConfig] = []
+    for tc in items:
+        flag = predicate(tc.id)
+        if current_flag is None:
+            current_flag = flag
+            current = [tc]
+        elif flag == current_flag:
+            current.append(tc)
+        else:
+            runs.append((current_flag, current))
+            current_flag = flag
+            current = [tc]
+    if current and current_flag is not None:
+        runs.append((current_flag, current))
+    return runs
 
 
 @dataclass(frozen=True)
@@ -87,13 +120,35 @@ class FilterGraph:
         v_label = v_in
         extra_inputs: list[Path] = []
 
-        for tc in video_transforms:
-            spec = get(tc.id)
-            params = spec.schema.model_validate({**spec.defaults, **tc.params})
-            chain = spec.build(params, self.alloc, v_label)
-            v_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
-            v_label = chain.out_label
-            extra_inputs.extend(Path(p) for p in chain.extra_inputs)
+        hdr_wrap_enabled = (
+            self.plan.profile.keep_hdr
+            and bool(self.plan.source.video)
+            and needs_linear_wrap(self.plan.source.video[0].color)
+        )
+        for run_is_color, run in _group_runs(video_transforms, is_color_transform):
+            if hdr_wrap_enabled and run_is_color and len(run) >= 1:
+                v_label, chain_str, run_extras = self._wrap_color_run(run, v_label)
+                v_chains.append(chain_str)
+                extra_inputs.extend(run_extras)
+            else:
+                for tc in run:
+                    spec = get(tc.id)
+                    params = spec.schema.model_validate({**spec.defaults, **tc.params})
+                    chain = spec.build(params, self.alloc, v_label)
+                    filter_str = chain.filter_str
+                    # Swap rotate's SDR black fill for an HDR-safe near-black so
+                    # PQ encoders don't clip the legal video range.
+                    if hdr_wrap_enabled and tc.id == "video.rotate":
+                        sdr = getattr(params, "fillcolor_sdr", "black")
+                        hdr = getattr(params, "fillcolor_pq", "0x101010")
+                        filter_str = filter_str.replace(
+                            f"fillcolor={sdr}", f"fillcolor={hdr}", 1
+                        )
+                    v_chains.append(
+                        f"[{chain.in_label}]{filter_str}[{chain.out_label}]"
+                    )
+                    v_label = chain.out_label
+                    extra_inputs.extend(Path(p) for p in chain.extra_inputs)
 
         # Tail: round dims to even (required by libx264/H.264 profiles) and set pix_fmt.
         pix_fmt = self._target_pix_fmt()
@@ -184,6 +239,33 @@ class FilterGraph:
         )
 
     # ---- helpers ----
+
+    def _wrap_color_run(
+        self, run: list[TransformConfig], in_label: str
+    ) -> tuple[str, str, list[Path]]:
+        """Compose a single zscale-linear-wrapped block over `run` color transforms.
+
+        Returns (new_v_label, chain_str, extra_inputs).
+
+        Each transform's builder is called against a scratch allocator so we
+        only collect its `filter_str`; labels are dropped. The wrapped block
+        gets a single allocated output label from the real allocator.
+        """
+        scratch = LabelAllocator()
+        inner: list[str] = []
+        extras: list[Path] = []
+        for tc in run:
+            spec = get(tc.id)
+            params = spec.schema.model_validate({**spec.defaults, **tc.params})
+            scratch_chain = spec.build(params, scratch, "scratch_in")
+            inner.append(scratch_chain.filter_str)
+            extras.extend(Path(p) for p in scratch_chain.extra_inputs)
+
+        color = self.plan.source.video[0].color
+        wrapped = wrap_linear(inner, color)
+        out_label = self.alloc.next("v")
+        chain_str = f"[{in_label}]{wrapped}[{out_label}]"
+        return out_label, chain_str, extras
 
     def _enabled(self, kind: str) -> list[TransformConfig]:
         result: list[TransformConfig] = []
