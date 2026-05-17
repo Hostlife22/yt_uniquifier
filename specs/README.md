@@ -144,6 +144,22 @@
 - [ ] Acceptance-команды работают, выход соответствует описанию.
 - [ ] README/docs обновлены если фаза меняет CLI.
 
+## v0.3.1 — Audio CID resistance hotfix
+
+Реакция на post-v0.3 анализ против OSS-конкурентов: длинный CID опирается
+на аудио сильнее видео; calibrate loop работал на мусорной VMAF-метрике.
+
+| # | Файл | Дни | Статус |
+|---|------|-----|--------|
+| 14 | [14-audio-cid-resistance.md](./14-audio-cid-resistance.md) | 4 | ⏳ |
+
+Содержит 5 workitem'ов: calibrate quality fallback (VMAF→SSIM→pHash),
+rubberband pitch (formant-preserving, дефолт cid_aware 1.012→1.04),
+loudnorm target jitter ±LUFS, `audio.compand` (dynamic range jitter),
+`audio.reverb` (opt-in в cid_aggressive).
+
+---
+
 ## Roadmap дальше (v0.4+ — не план, идеи)
 
 - Multi-GPU dispatch (`CUDA_VISIBLE_DEVICES` round-robin).
