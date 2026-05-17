@@ -293,6 +293,188 @@ class FilterGraph:
         ]
 
 
+def build_video_segment_command(
+    plan: Plan,
+    segment_input: Path,
+    segment_output: Path,
+) -> BuiltCommand:
+    """Build an ffmpeg command that applies video transforms to one segment.
+
+    The segment file is the input (not the original source). Audio in the
+    segment is passed through with stream copy — main audio is handled
+    separately by build_main_audio_command on the full source.
+    """
+    alloc = LabelAllocator()
+    video_transforms = [
+        tc for tc in plan.profile.transforms
+        if tc.enabled and get(tc.id).kind == "video"
+    ]
+
+    v_label = "0:v:0"
+    v_chains: list[str] = []
+    extra_inputs: list[Path] = []
+    for tc in video_transforms:
+        spec = get(tc.id)
+        params = spec.schema.model_validate({**spec.defaults, **tc.params})
+        chain = spec.build(params, alloc, v_label)
+        v_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
+        v_label = chain.out_label
+        extra_inputs.extend(Path(p) for p in chain.extra_inputs)
+
+    pix_fmt = _segment_pix_fmt(plan)
+    v_out = alloc.next("v")
+    v_chains.append(
+        f"[{v_label}]scale=trunc(iw/2)*2:trunc(ih/2)*2,format={pix_fmt}[{v_out}]"
+    )
+
+    filter_complex = ";".join(v_chains)
+    for idx, _ in enumerate(extra_inputs, start=1):
+        filter_complex = filter_complex.replace(
+            f"[{B_INPUT_PLACEHOLDER}]", f"[{idx}:v]", 1
+        )
+
+    args: list[str] = [
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-y",
+        "-i", str(segment_input),
+    ]
+    for p in extra_inputs:
+        args += ["-i", str(p)]
+
+    args += ["-filter_complex", filter_complex]
+    args += ["-map", f"[{v_out}]"]
+    # Copy all audio + subs from the segment as-is.
+    args += ["-map", "0:a?", "-c:a", "copy"]
+    args += ["-map", "0:s?", "-c:s", "copy"]
+    args += ["-map_chapters", "-1"]
+    args += _encoder_args_for(plan)
+    args += ["-map_metadata", "-1"]
+    args += [str(segment_output)]
+
+    return BuiltCommand(
+        args=args,
+        filter_complex=filter_complex,
+        output_video_label=v_out,
+        output_audio_label=None,
+        passthrough_audio_maps=["-map", "0:a?", "-c:a", "copy"],
+        passthrough_sub_maps=["-map", "0:s?", "-c:s", "copy"],
+        extra_inputs=extra_inputs,
+    )
+
+
+def build_main_audio_command(
+    plan: Plan,
+    audio_output: Path,
+    *,
+    loudnorm_measurement: LoudnormMeasurement | None = None,
+) -> tuple[BuiltCommand, LoudnormMeasurement | None]:
+    """Build an ffmpeg command that processes ONLY the main audio dorozhka.
+
+    Runs over the full source (not segmented), so loudnorm and pitch shift
+    operate on a continuous signal — no seam artifacts.
+
+    Returns (command, measurement) — the measurement is returned so the
+    caller can cache it (state.json) for resume.
+    """
+    alloc = LabelAllocator()
+    audio_transforms = [
+        tc for tc in plan.profile.transforms
+        if tc.enabled and get(tc.id).kind == "audio"
+    ]
+    if not audio_transforms or not plan.source.audio:
+        # Nothing to process; signal caller to skip.
+        return (
+            BuiltCommand(args=[], filter_complex="", output_video_label=""),
+            loudnorm_measurement,
+        )
+
+    measurement = loudnorm_measurement
+    needs_loudnorm = any(tc.id == LOUDNORM_ID for tc in audio_transforms)
+    if needs_loudnorm and measurement is None:
+        ln_params = _loudnorm_params_from(audio_transforms)
+        measurement = measure(plan.source.path, ln_params)
+
+    a_label = "0:a:0"
+    a_chains: list[str] = []
+    for tc in audio_transforms:
+        spec = get(tc.id)
+        params = spec.schema.model_validate({**spec.defaults, **tc.params})
+        if tc.id == LOUDNORM_ID:
+            ln_params = LoudnormParams.model_validate({**spec.defaults, **tc.params})
+            assert measurement is not None
+            chain = build_apply(ln_params, measurement, alloc, a_label)
+        else:
+            chain = spec.build(params, alloc, a_label)
+        a_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
+        a_label = chain.out_label
+
+    filter_complex = ";".join(a_chains)
+    args: list[str] = [
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-y",
+        "-i", str(plan.source.path),
+        "-vn",
+        "-filter_complex", filter_complex,
+        "-map", f"[{a_label}]",
+        "-c:a", "aac", "-b:a", "256k",
+        "-map_metadata", "-1",
+        str(audio_output),
+    ]
+    return (
+        BuiltCommand(
+            args=args,
+            filter_complex=filter_complex,
+            output_video_label="",
+            output_audio_label=a_label,
+            loudnorm_measurement=measurement,
+        ),
+        measurement,
+    )
+
+
+def _segment_pix_fmt(plan: Plan) -> str:
+    if not plan.source.video:
+        return "yuv420p"
+    v = plan.source.video[0]
+    if v.color.is_hdr and plan.profile.keep_hdr:
+        return "yuv420p10le"
+    return "yuv420p"
+
+
+def _encoder_args_for(plan: Plan) -> list[str]:
+    """Same encoder args as FilterGraph._encoder_args, but free function."""
+    enc = plan.encoder
+    name = enc.name
+    if enc.vendor == "nvenc":
+        mb = _max_bitrate_for(plan)
+        return [
+            "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", "19",
+            "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
+        ]
+    if enc.vendor == "qsv":
+        return ["-c:v", name, "-global_quality", "19", "-look_ahead", "1"]
+    if enc.vendor == "amf":
+        return ["-c:v", name, "-rc", "cqp", "-qp_i", "19", "-qp_p", "19"]
+    if enc.vendor == "videotoolbox":
+        return ["-c:v", name, "-q:v", "50"]
+    return ["-c:v", name, "-preset", "slow", "-crf", "18"]
+
+
+def _max_bitrate_for(plan: Plan) -> int:
+    v = plan.source.video[0] if plan.source.video else None
+    base = v.bit_rate if (v and v.bit_rate) else 8_000_000
+    return int(base * 1.25)
+
+
+def _loudnorm_params_from(audio_tcs: list[TransformConfig]) -> LoudnormParams:
+    for tc in audio_tcs:
+        if tc.id == LOUDNORM_ID:
+            return LoudnormParams.model_validate(tc.params or {})
+    return LoudnormParams()
+
+
 def compute_plan_hash(
     source: SourceMeta, profile: Profile, encoder: EncoderCandidate
 ) -> str:

@@ -1,0 +1,164 @@
+"""End-to-end orchestration: probe → preflight → segment → resume → concat → metadata.
+
+`run_full` is the single entry point that CLI (cmd_run, cmd_batch) and the
+GUI Worker all call. It accepts an event callback so any UI can stream
+progress events (RunEvent + custom phase markers).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+from yt_uniquifier.core.checkpoint import CheckpointStore
+from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
+from yt_uniquifier.core.errors import PipelineError, PreflightFailure
+from yt_uniquifier.core.metadata import build_metadata_args
+from yt_uniquifier.core.models import Plan, Profile
+from yt_uniquifier.core.pipeline import compute_plan_hash
+from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
+from yt_uniquifier.core.probe import probe as probe_file
+from yt_uniquifier.core.runner import CancelToken, RunEvent
+from yt_uniquifier.core.segmenter import (
+    concat_segments,
+    plan_segments,
+    process_main_audio,
+    process_video_segment,
+)
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    work_dir: Path
+    output: Path
+    encoder_override: str | None = None
+    title_template: str | None = None
+    target_segment_sec: float = 600.0
+    keep_segments: bool = False
+    enforce_preflight: bool = True
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    output: Path
+    plan: Plan
+    segments_done: int
+    preflight_findings: list[PreflightFinding]
+
+
+def build_plan(input_path: Path, profile: Profile, encoder_override: str | None) -> Plan:
+    source = probe_file(input_path)
+    enc = pick_encoder(
+        detect_encoders(),
+        prefer=[encoder_override] if encoder_override else None,
+        codec=profile.target_codec,
+    )
+    return Plan(
+        source=source,
+        profile=profile,
+        encoder=enc,
+        plan_hash=compute_plan_hash(source, profile, enc),
+    )
+
+
+def run_full(
+    plan: Plan,
+    options: RunOptions,
+    *,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
+) -> RunSummary:
+    """Process one input from probe to final mp4."""
+    emit = on_event or (lambda _e: None)
+
+    findings = preflight(plan.source, plan, plan.encoder)
+    if options.enforce_preflight and has_fail(findings):
+        emit(RunEvent(kind="error", payload={"phase": "preflight",
+                                             "findings": [f.model_dump() for f in findings]}))
+        raise PreflightFailure(_format_findings(findings))
+    emit(RunEvent(kind="log", payload={"phase": "preflight",
+                                       "findings": [f.model_dump() for f in findings]}))
+
+    store = CheckpointStore(options.work_dir, plan)
+    segments = store.init_or_resume(
+        plan_segments(plan, target_size_sec=options.target_segment_sec)
+    )
+    emit(RunEvent(kind="log", payload={"phase": "plan",
+                                       "segments": len(segments)}))
+
+    # Process pending video segments.
+    for seg in segments:
+        if seg.status == "done":
+            continue
+        if cancel_token and cancel_token.is_cancelled():
+            raise PipelineError("cancelled by user")
+        store.mark(seg.idx, "in_progress")
+
+        def _segment_emit(e: RunEvent, i: int = seg.idx) -> None:
+            emit(RunEvent(
+                kind=e.kind,
+                payload={**e.payload, "phase": "segment", "segment": i},
+            ))
+
+        try:
+            src, out = process_video_segment(
+                seg, plan, options.work_dir,
+                on_event=_segment_emit,
+                cancel_token=cancel_token,
+            )
+            store.mark(seg.idx, "done", src_path=src, out_path=out)
+        except Exception:
+            store.mark(seg.idx, "failed")
+            raise
+
+    # Main audio (cached via state.json).
+    main_audio = store.get_main_audio()
+    measurement = store.get_loudnorm()
+    if main_audio is None or not main_audio.exists():
+        main_audio, measurement = process_main_audio(
+            plan, options.work_dir,
+            loudnorm_measurement=measurement,
+            on_event=lambda e: emit(RunEvent(
+                kind=e.kind, payload={**e.payload, "phase": "main_audio"}
+            )),
+            cancel_token=cancel_token,
+        )
+        if measurement is not None:
+            store.set_loudnorm(measurement)
+        if main_audio is not None:
+            store.set_main_audio(main_audio)
+
+    # Concat + metadata.
+    final_segments = [s.out_path for s in store.all_segments() if s.out_path]
+    if not final_segments:
+        raise PipelineError("no processed segments to concatenate")
+    options.output.parent.mkdir(parents=True, exist_ok=True)
+    concat_segments(
+        final_segments,
+        main_audio,
+        options.output,
+        build_metadata_args(plan, title_template=options.title_template),
+    )
+    emit(RunEvent(kind="done", payload={"output": str(options.output)}))
+
+    if not options.keep_segments:
+        for s in store.all_segments():
+            for p in (s.src_path, s.out_path):
+                if p and p.exists():
+                    p.unlink(missing_ok=True)
+        if main_audio and main_audio.exists():
+            main_audio.unlink(missing_ok=True)
+
+    return RunSummary(
+        output=options.output,
+        plan=plan,
+        segments_done=len(final_segments),
+        preflight_findings=findings,
+    )
+
+
+def _format_findings(findings: list[PreflightFinding]) -> str:
+    fails = [f for f in findings if f.severity == "fail"]
+    parts = [f"[{f.severity.upper()}] {f.code}: {f.message}" for f in fails]
+    return "preflight failed:\n  " + "\n  ".join(parts)

@@ -1,8 +1,4 @@
-"""`yt-uniq run` — single-pass uniquification of one input file.
-
-This Phase-2 command does not yet implement segmentation/resume; it builds
-a single ffmpeg invocation for the whole file. Segmentation lands in Phase 3.
-"""
+"""`yt-uniq run` — full pipeline with segmentation + resume."""
 
 from __future__ import annotations
 
@@ -10,27 +6,19 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    TextColumn,
-    TimeRemainingColumn,
-)
+from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
-from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import YtUniquifierError
-from yt_uniquifier.core.models import Plan, Profile, TransformConfig
-from yt_uniquifier.core.pipeline import FilterGraph, compute_plan_hash
-from yt_uniquifier.core.probe import probe as probe_file
+from yt_uniquifier.core.models import Profile, TransformConfig
+from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.runner import CancelToken, RunEvent
-from yt_uniquifier.core.runner import run as run_ffmpeg
 
 console = Console()
 
 
 def run_cmd(
-    input: Path = typer.Argument(  # noqa: A002 - matches user-facing CLI naming
+    input: Path = typer.Argument(  # noqa: A002
         ..., exists=True, dir_okay=False, readable=True, help="Source media file."
     ),
     profile: Path = typer.Option(..., "--profile", help="YAML profile file."),
@@ -41,74 +29,66 @@ def run_cmd(
     b_video: Path | None = typer.Option(
         None, "--b-video", help="Path to B-video for video.blend_b transform."
     ),
+    work_dir: Path = typer.Option(
+        Path(".yt_uniq_work"), "--work-dir",
+        help="Directory for segments + state.json (enables resume).",
+    ),
+    target_segment_sec: float = typer.Option(
+        600.0, "--segment-sec", help="Target segment length in seconds."
+    ),
+    keep_segments: bool = typer.Option(
+        False, "--keep-segments", help="Don't delete segment files after concat."
+    ),
+    no_preflight: bool = typer.Option(
+        False, "--no-preflight", help="Skip preflight enforcement (warnings only)."
+    ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
 ) -> None:
     """Run uniquification on an input."""
     try:
-        source = probe_file(input)
         prof = load_profile(profile)
         if b_video is not None:
             prof = _inject_b_video(prof, b_video)
-        enc = pick_encoder(
-            detect_encoders(),
-            prefer=[encoder_override] if encoder_override else None,
-            codec=prof.target_codec,
-        )
-        plan = Plan(
-            source=source,
-            profile=prof,
-            encoder=enc,
-            plan_hash=compute_plan_hash(source, prof, enc),
+        plan = build_plan(input, prof, encoder_override)
+
+        total_us = int(plan.source.duration_sec * 1_000_000)
+        console.print(f"[dim]Encoder: {plan.encoder.name} ({plan.encoder.vendor})[/dim]")
+        cancel = CancelToken()
+        options = RunOptions(
+            work_dir=work_dir / plan.plan_hash,
+            output=output,
+            encoder_override=encoder_override,
+            target_segment_sec=target_segment_sec,
+            keep_segments=keep_segments,
+            enforce_preflight=not no_preflight,
         )
 
-        total_us = int(source.duration_sec * 1_000_000)
-        progress = (
-            Progress(
+        if no_progress:
+            run_full(plan, options, on_event=lambda _e: None, cancel_token=cancel)
+        else:
+            with Progress(
                 TextColumn("[bold blue]{task.description}"),
                 BarColumn(),
                 TextColumn("{task.percentage:>3.0f}%"),
                 TimeRemainingColumn(),
                 console=console,
                 transient=False,
-            )
-            if not no_progress
-            else None
-        )
-        cancel = CancelToken()
-
-        graph = FilterGraph(plan, output)
-        console.print(f"[dim]Encoder: {enc.name} ({enc.vendor})[/dim]")
-        console.print("[dim]Measuring loudness (one-pass scan)…[/dim]")
-        built = graph.build()
-
-        output.parent.mkdir(parents=True, exist_ok=True)
-        log_path = output.with_suffix(output.suffix + ".log")
-
-        if progress is not None:
-            with progress:
+            ) as progress:
                 task_id = progress.add_task("encoding", total=total_us)
+                # Track progress across segments by summing per-segment out_time.
+                seg_offsets: dict[int, int] = {}
 
                 def on_event(ev: RunEvent) -> None:
                     if ev.kind != "progress":
                         return
-                    done_us = _extract_out_time_us(ev)
-                    progress.update(task_id, completed=min(done_us, total_us))
+                    seg = ev.payload.get("segment")
+                    out_us = _extract_out_time_us(ev)
+                    if isinstance(seg, int):
+                        seg_offsets[seg] = out_us
+                    total = sum(seg_offsets.values())
+                    progress.update(task_id, completed=min(total, total_us))
 
-                run_ffmpeg(
-                    built,
-                    output=output,
-                    on_event=on_event,
-                    cancel_token=cancel,
-                    log_path=log_path,
-                )
-        else:
-            run_ffmpeg(
-                built,
-                output=output,
-                on_event=lambda _e: None,
-                cancel_token=cancel,
-                log_path=log_path,
-            )
+                run_full(plan, options, on_event=on_event, cancel_token=cancel)
 
         console.print(f"[green]Done:[/green] {output}")
     except YtUniquifierError as exc:
@@ -117,22 +97,20 @@ def run_cmd(
 
 
 def _inject_b_video(profile: Profile, b_video: Path) -> Profile:
-    """Return a copy of profile with b_video_path set on video.blend_b transforms."""
     new_transforms: list[TransformConfig] = []
     for tc in profile.transforms:
         if tc.id == "video.blend_b":
             new_params = dict(tc.params or {})
             new_params.setdefault("b_video_path", str(b_video))
-            new_transforms.append(TransformConfig(
-                id=tc.id, enabled=tc.enabled, params=new_params
-            ))
+            new_transforms.append(
+                TransformConfig(id=tc.id, enabled=tc.enabled, params=new_params)
+            )
         else:
             new_transforms.append(tc)
     return profile.model_copy(update={"transforms": new_transforms})
 
 
 def _extract_out_time_us(ev: RunEvent) -> int:
-    """Parse out_time_us (preferred) or out_time_ms from a progress payload."""
     payload = ev.payload
     raw_us = payload.get("out_time_us")
     if isinstance(raw_us, str):
