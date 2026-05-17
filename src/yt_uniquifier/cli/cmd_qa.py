@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.qa.corpus import Corpus
 from yt_uniquifier.core.qa.report import build_report, render_html, verdict, write_json
 
 console = Console()
@@ -32,15 +33,27 @@ def qa_cmd(
     html_out: Path | None = typer.Option(
         None, "--html", help="Override path for the HTML report."
     ),
+    no_cid_predict: bool = typer.Option(
+        False, "--no-cid-predict",
+        help="Skip the per-chunk Content ID prediction.",
+    ),
+    vs_corpus: bool = typer.Option(
+        False, "--vs-corpus",
+        help="Also search the local corpus for matches against the output.",
+    ),
+    corpus_dir: Path | None = typer.Option(None, "--corpus-dir"),
 ) -> None:
     """Compute similarity metrics for an (input, output) pair."""
     try:
+        corpus = Corpus(corpus_dir) if vs_corpus else None
         report = build_report(
             input, output,
             samples=samples,
             run_vmaf=not no_vmaf,
             run_audio_fp=not no_audio_fp,
             run_ssim=not no_ssim,
+            predict_cid=not no_cid_predict,
+            vs_corpus=corpus,
         )
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
@@ -63,6 +76,14 @@ def qa_cmd(
         console.print(f"  SSIM mean:        {report.ssim_mean:.4f}")
     if report.audio_fp_similarity is not None:
         console.print(f"  Audio FP:         {report.audio_fp_similarity:.4f}")
+    if report.cid_predict_self is not None:
+        console.print(f"  CID self-match:   {report.cid_predict_self:.4f}")
+    if report.corpus_matches:
+        console.print(
+            f"  Corpus matches:   {len(report.corpus_matches)} above threshold"
+        )
+        for m in report.corpus_matches[:3]:
+            console.print(f"    [red]✗[/red] {m['path']} — combined {m['combined']:.3f}")
     for n in report.notes:
         console.print(f"  [dim]note:[/dim] {n}")
     console.print(f"Wrote: {json_path}")

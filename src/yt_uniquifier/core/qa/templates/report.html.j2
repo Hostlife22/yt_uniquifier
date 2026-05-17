@@ -22,6 +22,14 @@
                 background: #f4f4f4; padding: 0.1em 0.3em; border-radius: 3px; }
     .note { color: #b78400; font-size: 0.9em; }
     .section { margin-top: 2em; }
+    .heatmap { display: flex; flex-wrap: wrap; gap: 1px;
+               border: 1px solid #ddd; padding: 1px; max-width: 100%; }
+    .heatmap .cell { width: 12px; height: 28px; display: inline-block;
+                     cursor: help; }
+    .legend { display: flex; align-items: center; gap: 8px;
+              margin-top: 6px; font-size: 0.85em; color: #666; }
+    .legend .swatch { display: inline-block; width: 16px; height: 12px;
+                       border: 1px solid #ccc; }
   </style>
 </head>
 <body>
@@ -101,6 +109,64 @@
         </ul>
       </td>
     </tr>
+  </table>
+</div>
+{% endif %}
+
+{% if report.chunk_similarities %}
+<div class="section">
+  <h2>Content ID prediction (per 4-second chunk)</h2>
+  <table>
+    <tr>
+      <th>Predicted self-match probability</th>
+      <td>
+        {% if report.cid_predict_self is not none %}
+          {{ "%.3f"|format(report.cid_predict_self) }}
+        {% else %}<em>n/a</em>{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <th>Weakest chunk (closest to source)</th>
+      <td>
+        {% if report.weakest_chunk_sec %}
+          {{ "%.1f"|format(report.weakest_chunk_sec[0]) }}s –
+          {{ "%.1f"|format(report.weakest_chunk_sec[1]) }}s
+        {% else %}<em>n/a</em>{% endif %}
+      </td>
+    </tr>
+  </table>
+  <div class="heatmap">
+    {% for c in report.chunk_similarities %}
+    <span class="cell" style="background: {{ c.combined|heatmap_color }}"
+          title="{{ '%.1f'|format(c.start_sec) }}s–{{ '%.1f'|format(c.end_sec) }}s
+combined: {{ '%.3f'|format(c.combined) }}
+visual: {{ '%.3f'|format(c.visual) }}
+audio: {{ '%.3f'|format(c.audio) }}"></span>
+    {% endfor %}
+  </div>
+  <div class="legend">
+    <span class="swatch" style="background: {{ 0.0|heatmap_color }}"></span> low (different)
+    <span class="swatch" style="background: {{ 0.5|heatmap_color }}"></span> mid
+    <span class="swatch" style="background: {{ 1.0|heatmap_color }}"></span> high (similar)
+    <em style="margin-left: 1em;">informational — not a definitive Content ID prediction.</em>
+  </div>
+</div>
+{% endif %}
+
+{% if report.corpus_matches %}
+<div class="section">
+  <h2>Corpus matches</h2>
+  <p>Output is similar to these previously-indexed files (your <code>yt-uniq corpus add</code>'d uploads).</p>
+  <table>
+    <tr><th>entry</th><th>combined</th><th>visual</th><th>audio</th></tr>
+    {% for m in report.corpus_matches %}
+    <tr>
+      <td><code>{{ m.path }}</code></td>
+      <td>{{ "%.3f"|format(m.combined) }}</td>
+      <td>{{ "%.3f"|format(m.visual) }}</td>
+      <td>{{ "%.3f"|format(m.audio) }}</td>
+    </tr>
+    {% endfor %}
   </table>
 </div>
 {% endif %}

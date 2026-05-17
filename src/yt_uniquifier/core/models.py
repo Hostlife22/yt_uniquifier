@@ -216,3 +216,9 @@ class QAReport(BaseModel):
     ssim_mean: float | None = None
     duration_match: bool
     notes: list[str] = Field(default_factory=list)
+    # v0.2 — Content ID prediction & corpus matches (optional; only populated
+    # when build_report is invoked with predict_cid=True / vs_corpus=True).
+    cid_predict_self: float | None = None
+    weakest_chunk_sec: tuple[float, float] | None = None
+    chunk_similarities: list[dict[str, float]] = Field(default_factory=list)
+    corpus_matches: list[dict[str, float | str]] = Field(default_factory=list)

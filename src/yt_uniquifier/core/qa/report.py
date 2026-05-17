@@ -12,7 +12,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from yt_uniquifier.core.models import Plan, QAReport
 from yt_uniquifier.core.probe import probe as probe_file
-from yt_uniquifier.core.qa import audio_fp, hashes, phash, ssim, vmaf
+from yt_uniquifier.core.qa import audio_fp, cid_predict, hashes, phash, ssim, vmaf
+from yt_uniquifier.core.qa.corpus import Corpus
 
 ProgressFn = Callable[[str, float], None]  # phase name, fraction in [0..1]
 
@@ -73,6 +74,8 @@ def build_report(
     run_vmaf: bool = True,
     run_ssim: bool = True,
     run_audio_fp: bool = True,
+    predict_cid: bool = True,
+    vs_corpus: Corpus | None = None,
     progress: ProgressFn | None = None,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order."""
@@ -125,6 +128,41 @@ def build_report(
 
     duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
 
+    cid_self: float | None = None
+    weakest_window: tuple[float, float] | None = None
+    chunk_dump: list[dict[str, float]] = []
+    corpus_dump: list[dict[str, float | str]] = []
+    if predict_cid:
+        p("cid_predict", 0.0)
+        cid = cid_predict.predict(
+            input_path, output_path,
+            corpus=vs_corpus,
+        )
+        cid_self = cid.match_probability_self
+        if cid.weakest_chunk is not None:
+            weakest_window = (cid.weakest_chunk.start_sec, cid.weakest_chunk.end_sec)
+        chunk_dump = [
+            {
+                "start_sec": c.start_sec,
+                "end_sec": c.end_sec,
+                "visual": c.visual_similarity,
+                "audio": c.audio_similarity,
+                "combined": c.combined,
+            }
+            for c in cid.chunks
+        ]
+        corpus_dump = [
+            {
+                "id": m.entry.id,
+                "path": str(m.entry.path),
+                "visual": m.visual_similarity,
+                "audio": m.audio_similarity,
+                "combined": m.combined,
+            }
+            for m in cid.corpus_matches
+        ]
+        p("cid_predict", 1.0)
+
     return QAReport(
         input_md5=md5_in,
         output_md5=md5_out,
@@ -142,6 +180,10 @@ def build_report(
         ssim_mean=ssim_mean,
         duration_match=duration_match,
         notes=notes,
+        cid_predict_self=cid_self,
+        weakest_chunk_sec=weakest_window,
+        chunk_similarities=chunk_dump,
+        corpus_matches=corpus_dump,
     )
 
 
@@ -156,11 +198,26 @@ def write_json(report: QAReport, dest: Path) -> None:
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
+def heatmap_color(value: float) -> str:
+    """Map 0..1 similarity to a CSS rgb() string (green→yellow→red).
+
+    0   → bright green  (#2ecc71)
+    0.5 → yellow        (#f1c40f)
+    1   → red           (#e74c3c)
+    Linear interpolation through HSL hue space (green=120°, red=0°).
+    """
+    v = max(0.0, min(1.0, value))
+    # hue 120 (green) at v=0 → hue 0 (red) at v=1
+    hue = (1.0 - v) * 120.0
+    return f"hsl({hue:.0f}, 70%, 55%)"
+
+
 def render_html(report: QAReport, plan: Plan | None, dest: Path) -> None:
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
         autoescape=select_autoescape(["html", "j2"]),
     )
+    env.filters["heatmap_color"] = heatmap_color
     tpl = env.get_template("report.html.j2")
     v = verdict(report)
     html = tpl.render(
