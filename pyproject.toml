@@ -38,6 +38,7 @@ dev = [
 
 [project.scripts]
 yt-uniq = "yt_uniquifier.cli.app:app"
+yt-uniq-gui = "yt_uniquifier.gui.app_pyqt:main"
 
 [build-system]
 requires = ["hatchling"]
