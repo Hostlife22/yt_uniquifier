@@ -2,6 +2,7 @@ import typer
 
 from yt_uniquifier.cli.cmd_preflight import preflight_cmd
 from yt_uniquifier.cli.cmd_probe import probe_cmd
+from yt_uniquifier.cli.cmd_qa import qa_cmd
 from yt_uniquifier.cli.cmd_run import run_cmd
 
 app = typer.Typer(
@@ -25,3 +26,4 @@ def version() -> None:
 app.command("probe")(probe_cmd)
 app.command("run")(run_cmd)
 app.command("preflight")(preflight_cmd)
+app.command("qa")(qa_cmd)

@@ -9,9 +9,10 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from yt_uniquifier.core.errors import YtUniquifierError
-from yt_uniquifier.core.models import Profile, TransformConfig
+from yt_uniquifier.core.models import Plan, Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.core.qa.report import build_report, render_html, write_json
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 console = Console()
@@ -41,6 +42,10 @@ def run_cmd(
     ),
     no_preflight: bool = typer.Option(
         False, "--no-preflight", help="Skip preflight enforcement (warnings only)."
+    ),
+    no_qa: bool = typer.Option(False, "--no-qa", help="Skip auto QA report after the run."),
+    fast_qa: bool = typer.Option(
+        False, "--fast-qa", help="Cheaper QA: skip VMAF, halve sample count."
     ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
 ) -> None:
@@ -91,9 +96,26 @@ def run_cmd(
                 run_full(plan, options, on_event=on_event, cancel_token=cancel)
 
         console.print(f"[green]Done:[/green] {output}")
+        if not no_qa:
+            _run_qa(plan, output, fast=fast_qa)
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+
+
+def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
+    console.print("[dim]Building QA report…[/dim]")
+    report = build_report(
+        plan.source.path,
+        output,
+        samples=60 if fast else 120,
+        run_vmaf=not fast,
+    )
+    json_path = output.with_suffix(output.suffix + ".qa.json")
+    html_path = output.with_suffix(output.suffix + ".qa.html")
+    write_json(report, json_path)
+    render_html(report, plan, html_path)
+    console.print(f"[dim]QA report:[/dim] {html_path}")
 
 
 def _inject_b_video(profile: Profile, b_video: Path) -> Profile:

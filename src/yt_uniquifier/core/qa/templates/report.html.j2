@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>yt-uniquifier QA report</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px;
+           margin: 2em auto; padding: 0 1em; color: #222; line-height: 1.5; }
+    h1 { margin-bottom: 0.2em; }
+    .sub { color: #666; margin-top: 0; }
+    .verdict { padding: 1em; border-radius: 6px; margin: 1em 0;
+               font-size: 1.1em; }
+    .verdict.green  { background: #e6f7e7; border: 1px solid #4caf50; }
+    .verdict.yellow { background: #fff8e1; border: 1px solid #ffc107; }
+    .verdict.red    { background: #fdecea; border: 1px solid #d32f2f; }
+    .verdict ul { margin: 0.5em 0 0; padding-left: 1.5em; }
+    table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+    th, td { padding: 0.5em 0.6em; text-align: left;
+             border-bottom: 1px solid #eee; vertical-align: top; }
+    th { background: #f6f6f6; width: 38%; font-weight: 600; }
+    code, pre { font-family: SFMono-Regular, Menlo, monospace;
+                background: #f4f4f4; padding: 0.1em 0.3em; border-radius: 3px; }
+    .note { color: #b78400; font-size: 0.9em; }
+    .section { margin-top: 2em; }
+  </style>
+</head>
+<body>
+
+<h1>QA report</h1>
+<p class="sub">yt-uniquifier · pHash / VMAF / SSIM / audio fingerprint similarity</p>
+
+<div class="verdict {{ verdict_band }}">
+  <strong>Verdict: {{ verdict_band|upper }}</strong>
+  <ul>
+    {% for r in verdict_reasons %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+</div>
+
+<div class="section">
+  <h2>Files</h2>
+  <table>
+    <tr><th>Input MD5</th><td><code>{{ report.input_md5 }}</code></td></tr>
+    <tr><th>Output MD5</th><td><code>{{ report.output_md5 }}</code></td></tr>
+    <tr><th>Input size</th><td>{{ "{:,}".format(report.input_size_bytes) }} bytes</td></tr>
+    <tr><th>Output size</th><td>{{ "{:,}".format(report.output_size_bytes) }} bytes</td></tr>
+    <tr><th>Input duration</th><td>{{ "%.3f"|format(report.input_duration_sec) }} s</td></tr>
+    <tr><th>Output duration</th><td>{{ "%.3f"|format(report.output_duration_sec) }} s</td></tr>
+    <tr><th>Duration match (±0.5s)</th><td>{{ report.duration_match }}</td></tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>Similarity metrics</h2>
+  <table>
+    <tr>
+      <th>pHash similarity <small>(1.0 = identical)</small></th>
+      <td>{{ "%.4f"|format(report.phash_similarity) }}
+        <small>(samples: {{ report.phash_samples }},
+        distance min/mean/max:
+        {{ report.phash_distance_min }} /
+        {{ "%.2f"|format(report.phash_distance_mean) }} /
+        {{ report.phash_distance_max }})</small></td>
+    </tr>
+    <tr>
+      <th>Audio fingerprint similarity</th>
+      <td>{% if report.audio_fp_similarity is not none %}
+        {{ "%.4f"|format(report.audio_fp_similarity) }}
+      {% else %}<em>not available</em>{% endif %}</td>
+    </tr>
+    <tr>
+      <th>VMAF <small>(0..100, higher = closer to source)</small></th>
+      <td>{% if report.vmaf_mean is not none %}
+        {{ "%.2f"|format(report.vmaf_mean) }}
+      {% else %}<em>not available</em>{% endif %}</td>
+    </tr>
+    <tr>
+      <th>SSIM <small>(0..1)</small></th>
+      <td>{% if report.ssim_mean is not none %}
+        {{ "%.4f"|format(report.ssim_mean) }}
+      {% else %}<em>not available</em>{% endif %}</td>
+    </tr>
+  </table>
+</div>
+
+{% if plan %}
+<div class="section">
+  <h2>Plan</h2>
+  <table>
+    <tr><th>Profile</th><td><code>{{ plan.profile.name }}</code>{% if plan.profile.description %} — {{ plan.profile.description }}{% endif %}</td></tr>
+    <tr><th>Encoder</th><td><code>{{ plan.encoder.name }}</code> ({{ plan.encoder.vendor }})</td></tr>
+    <tr><th>plan_hash</th><td><code>{{ plan.plan_hash }}</code></td></tr>
+    <tr>
+      <th>Transforms</th>
+      <td>
+        <ul style="margin: 0; padding-left: 1.2em;">
+        {% for t in plan.profile.transforms if t.enabled %}
+          <li><code>{{ t.id }}</code>{% if t.params %} — {{ t.params }}{% endif %}</li>
+        {% else %}
+          <li><em>(none enabled)</em></li>
+        {% endfor %}
+        </ul>
+      </td>
+    </tr>
+  </table>
+</div>
+{% endif %}
+
+{% if report.notes %}
+<div class="section">
+  <h2>Notes</h2>
+  <ul>
+    {% for n in report.notes %}
+      <li class="note">{{ n }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+</body>
+</html>

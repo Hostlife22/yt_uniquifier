@@ -46,6 +46,17 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/yt_uniquifier"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"src/yt_uniquifier/profiles" = "yt_uniquifier/profiles"
+"src/yt_uniquifier/core/qa/templates" = "yt_uniquifier/core/qa/templates"
+
+[tool.hatch.build]
+include = [
+    "src/yt_uniquifier/**/*.py",
+    "src/yt_uniquifier/profiles/*.yaml",
+    "src/yt_uniquifier/core/qa/templates/*.j2",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
