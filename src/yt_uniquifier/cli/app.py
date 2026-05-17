@@ -1,6 +1,7 @@
 import typer
 
 from yt_uniquifier.cli.cmd_batch import batch_cmd
+from yt_uniquifier.cli.cmd_calibrate import calibrate_cmd
 from yt_uniquifier.cli.cmd_corpus import corpus_app
 from yt_uniquifier.cli.cmd_preflight import preflight_cmd
 from yt_uniquifier.cli.cmd_probe import probe_cmd
@@ -30,4 +31,5 @@ app.command("run")(run_cmd)
 app.command("preflight")(preflight_cmd)
 app.command("qa")(qa_cmd)
 app.command("batch")(batch_cmd)
+app.command("calibrate")(calibrate_cmd)
 app.add_typer(corpus_app, name="corpus")

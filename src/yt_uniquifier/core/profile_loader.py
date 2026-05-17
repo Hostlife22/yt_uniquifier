@@ -15,6 +15,14 @@ class ProfileLoadError(YtUniquifierError):
     """The YAML profile is missing or invalid."""
 
 
+def dump_profile(profile: Profile, path: Path) -> None:
+    """Serialize a Profile to YAML, suitable for round-tripping through load_profile."""
+    data = profile.model_dump(mode="json", exclude_none=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8")
+
+
 def load_profile(path: Path) -> Profile:
     if not path.exists():
         raise ProfileLoadError(f"profile file not found: {path}")
