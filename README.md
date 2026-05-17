@@ -1,22 +1,37 @@
 # yt-uniquifier
 
-> Production-grade re-encoder with controlled micro-transforms for owned or
-> licensed video content.
+> Production-grade re-encoder with controlled, calibrated micro-transforms for
+> owned or licensed video content. **Current release: v0.3.0** —
+> CID-aware profiles, HDR→SDR tonemap, parallel CPU/GPU encoding, distributed
+> batch on shared filesystems.
 
 ## What it does
 
-- One CLI + optional PyQt6 GUI on top of `ffmpeg`.
-- Applies a configurable set of micro-transforms (crop+rescale, color jitter,
-  noise, rotation, frame-blend, pitch / tempo, EQ, EBU R128 loudness norm)
-  composed into a single `-filter_complex` per ffmpeg invocation.
-- Keyframe-aware split → per-segment process → concat demuxer, so multi-hour
+- **One CLI** (10 commands) + optional **PyQt6 GUI** on top of `ffmpeg`.
+- **13 micro-transforms** composed into a single `-filter_complex` per ffmpeg
+  invocation: crop+rescale, color jitter, noise, rotation, mirror, frame-blend,
+  HDR→SDR tonemap, pitch / tempo, EQ, audio resample, spectral smear,
+  EBU R128 loudness normalization.
+- **Keyframe-aware split** → per-segment process → concat demuxer, so multi-hour
   files survive Ctrl+C and resume from `state.json` on the next run.
-- Multi-track audio, soft subtitles, and chapters are passed through.
-- HDR-aware (10-bit pix_fmt + color tags when `keep_hdr: true`).
-- Multi-vendor encoder detect (NVENC, QSV, AMF, VideoToolbox, libx264/x265)
-  with real test-run on a null source.
-- QA report on every run: pHash, audio fingerprint (chromaprint), VMAF, SSIM,
-  MD5 — rendered to a single-page HTML.
+- **Multi-track audio**, soft subtitles, and chapters are passed through.
+- **Real HDR support** via zscale linear-light wrap when keeping HDR, or via
+  `video.tonemap_sdr` (hable / reinhard / mobius / aces) when targeting SDR.
+- **Multi-vendor encoder detect** (NVENC / QSV / AMF / VideoToolbox /
+  libx264 / libx265) with real test-run on a null source; each candidate
+  carries its own `max_parallel` cap (NVENC consumer = 3, pro = 8, CPU = ½ cores).
+- **Per-run variability**: every invocation rolls a fresh `run_seed`, so two
+  runs of the same profile against the same source produce different
+  fingerprints — useful for uploading N distinct variants.
+- **Content-ID-aware QA**: chunked per-4-sec pHash + audio Jaccard
+  predictor, optional check against a local **corpus** of previously
+  uploaded files (`yt-uniq corpus add ...`). HTML report includes a
+  per-chunk heatmap so the **weakest chunk** is visible at a glance.
+- **Automated calibration** (`yt-uniq calibrate`): bisects profile intensity
+  against a target `match_probability` for your specific content.
+- **Distributed batch** via shared filesystem: `yt-uniq worker` drains a
+  queue across N machines using atomic POSIX rename leasing —
+  **no redis / no database**, just NFSv4 with `noac` (or ZFS / ext4).
 
 ## What it is NOT
 
@@ -36,10 +51,25 @@ pip install -e ".[dev,gui]"       # also installs PyQt6 for the desktop UI
 pip install -e ".[dev,qa]"        # adds chromaprint (fpcalc) Python bindings
 ```
 
-Optional binaries (graceful skip in the QA report if missing):
+Optional binaries (graceful skip / fallback when missing):
 
-- `fpcalc` (chromaprint) — audio fingerprint similarity
-- ffmpeg built with `libvmaf` — VMAF score
+- `fpcalc` (chromaprint) — audio fingerprint similarity & corpus matching
+- ffmpeg with `libvmaf` — VMAF score
+- ffmpeg with `zscale` (zimg) — HDR-keep wrap, HDR→SDR tonemap
+- `nvidia-smi` — auto-detect NVENC concurrent-session cap (else fallback to 3)
+
+## Shipped profiles
+
+| Profile | Intent |
+|---|---|
+| `soft.yaml` | Minimal change, highest quality. Conservative defaults. |
+| `medium.yaml` | Balanced (v0.1 baseline). VMAF ≥ 92 on natural footage. |
+| `aggressive.yaml` | Larger crop / noise / pitch shifts. |
+| `legacy_ab.yaml` | Port of the legacy frame-blend with a B-video. |
+| `medium_hdr.yaml` | Keep HDR (PQ/HLG) through transforms via zscale wrap. |
+| `cid_aware.yaml` | **CID-divergence calibrated** (v0.2 default for own re-uploads). |
+| `cid_aggressive.yaml` | Stronger shifts: video.speed 0.99, audio.spectral_smear, etc. |
+| `cid_aware_hdr_to_sdr.yaml` | HDR source → SDR output with cid_aware transforms. |
 
 ## Quickstart
 
@@ -49,25 +79,51 @@ yt-uniq probe /path/to/master.mp4 | jq '.video[0]'
 
 # 2. Validate against YouTube targets + HDR sanity.
 yt-uniq preflight /path/to/master.mp4 \
-  --profile src/yt_uniquifier/profiles/medium.yaml
+  --profile src/yt_uniquifier/profiles/cid_aware.yaml
 
-# 3. Re-encode with micro-transforms (resume-capable).
+# 3. (Optional) Index a previous upload so the QA report can warn about
+#    self-collisions in Content ID.
+yt-uniq corpus add /path/to/old_upload.mp4
+
+# 4. (Optional) Auto-tune intensity for THIS source.
+yt-uniq calibrate /path/to/master.mp4 \
+  --base src/yt_uniquifier/profiles/cid_aware.yaml \
+  --out  /path/to/tuned.yaml \
+  --target 0.2
+
+# 5. Re-encode with micro-transforms (resume-capable, parallel CPU).
 yt-uniq run /path/to/master.mp4 \
-  --profile src/yt_uniquifier/profiles/medium.yaml \
-  --out    /path/to/uniq.mp4
+  --profile /path/to/tuned.yaml \
+  --out     /path/to/uniq_v1.mp4 \
+  --workers 4
 
-# 4. Inspect the QA report.
-open /path/to/uniq.mp4.qa.html
+# 6. Inspect the QA report (heatmap + corpus matches).
+open /path/to/uniq_v1.mp4.qa.html
 
-# 5. Standalone QA on a pre-existing pair (no encode).
-yt-uniq qa /path/to/master.mp4 /path/to/uniq.mp4 --no-vmaf
+# 7. Generate a second, distinct variant.
+yt-uniq run /path/to/master.mp4 \
+  --profile /path/to/tuned.yaml \
+  --out     /path/to/uniq_v2.mp4 \
+  --new-variant
 
-# 6. Batch a directory.
+# 8. Standalone QA on a pre-existing pair (no encode).
+yt-uniq qa /path/to/master.mp4 /path/to/uniq_v1.mp4 --vs-corpus
+
+# 9. Batch a directory on one machine.
 yt-uniq batch /path/to/movies/ \
-  --profile src/yt_uniquifier/profiles/soft.yaml \
-  --out /path/to/uniq/
+  --profile src/yt_uniquifier/profiles/cid_aware.yaml \
+  --out     /path/to/uniq/
 
-# 7. Launch the GUI (requires [gui] extra).
+# 10. Distributed batch across N machines (NFSv4 + noac mount).
+yt-uniq queue init /shared/queue
+yt-uniq queue add  /shared/queue /shared/sources/*.mp4
+# On each worker machine:
+yt-uniq worker /shared/queue \
+  --profile /shared/profiles/cid_aware.yaml \
+  --out-dir /shared/uniq/ \
+  --workers 4
+
+# 11. Launch the GUI (requires [gui] extra).
 yt-uniq-gui
 ```
 
@@ -77,11 +133,18 @@ yt-uniq-gui
 |---------|--------------|
 | `yt-uniq version` | Print version |
 | `yt-uniq probe <path>` | Print SourceMeta JSON |
-| `yt-uniq probe --encoders` | List working encoders (cached) |
-| `yt-uniq preflight <in> --profile p.yaml` | YouTube target validation |
+| `yt-uniq probe --encoders` | List working encoders with `max_parallel` cap |
+| `yt-uniq preflight <in> --profile p.yaml` | YouTube target + HDR validation |
 | `yt-uniq run <in> --profile p.yaml --out o.mp4` | Single-file run with resume + auto QA |
+| `yt-uniq run … --workers N` | Parallel segment encoding (CPU only; GPU auto-caps) |
+| `yt-uniq run … --new-variant` | Roll a fresh seed even if state.json exists |
 | `yt-uniq batch <dir> --profile p.yaml --out <dir>` | Sequential directory processing |
-| `yt-uniq qa <in> <out>` | Standalone similarity report |
+| `yt-uniq qa <in> <out> [--vs-corpus]` | Similarity report + optional corpus match |
+| `yt-uniq calibrate <in> --base p.yaml --out tuned.yaml` | Bisect intensity to target self-match |
+| `yt-uniq corpus add/list/remove` | Manage local fingerprint corpus |
+| `yt-uniq queue init/add/status/reset` | Manage a shared-FS distributed queue |
+| `yt-uniq worker <queue_dir> --profile p.yaml --out-dir D` | Long-running queue drainer |
+| `yt-uniq-gui` | PyQt6 desktop UI (`[gui]` extra) |
 
 Run any command with `--help` for full flag listings.
 
@@ -91,7 +154,19 @@ Run any command with `--help` for full flag listings.
 - [Profiles](./docs/profiles.md)
 - [Filter graph](./docs/filter_graph.md)
 - [YouTube targets](./docs/youtube_targets.md)
-- [Implementation specs](./specs/README.md)
+- [Distributed batch](./docs/distributed.md) — shared-FS workflow + NFS notes
+- [Implementation specs](./specs/README.md) — phase-by-phase v0.1 → v0.3
+
+## Status
+
+- **v0.1.0** — foundation pipeline, single-host single-file flow ✅
+- **v0.2.0** — CID-divergence calibration, corpus, calibrate loop, scale tools ✅
+- **v0.3.0** — HDR→SDR tonemap, parallel GPU detect, distributed batch ✅
+- **v0.4** — multi-GPU dispatch, S3/cloud queue backend, HDR10+ metadata —
+  see [specs/v0.3-plan.md §after-v0.3](./specs/v0.3-plan.md)
+
+305 tests passing (unit + integration + smoke). `ruff` + `mypy --strict`
+clean (62 source files). CI runs on Ubuntu + macOS for Python 3.11 / 3.12.
 
 ## Development
 
@@ -102,7 +177,16 @@ mypy src/yt_uniquifier
 pytest -q
 ```
 
-CI runs lint + tests on Ubuntu and macOS for Python 3.11 and 3.12.
+Real-fixture benchmarks live under `tools/`:
+
+```bash
+python tools/benchmark.py /path/to/movie.mp4 \
+  --profile src/yt_uniquifier/profiles/cid_aware.yaml \
+  --out /tmp/uniq.mp4 --encoder libx264 --workers 4 \
+  --csv benchmark.csv
+
+python tools/seam_test.py /tmp/uniq.mp4 --work-dir .yt_uniq_work/<hash>
+```
 
 ## License
 
