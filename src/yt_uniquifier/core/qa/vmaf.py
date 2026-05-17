@@ -43,12 +43,17 @@ def compute(
     *,
     threads: int = 4,
     subsample: int = 1,
+    hdr_aware: bool = False,
 ) -> VMAFResult:
     """Run libvmaf comparing output (distorted) to input (reference).
 
     `subsample=N` tells libvmaf to score every N-th frame, cutting runtime
-    by ~N× — useful for long files. The score is the harmonic mean over the
-    sampled frames so it's still comparable across runs.
+    by ~N× — useful for long files.
+
+    `hdr_aware=True` switches to libvmaf's phone_model=0 (more lenient,
+    perceptually-tuned for tonemapped HDR↔SDR pairs). Use for any pair where
+    one side is HDR and the other is SDR; without this flag VMAF will look
+    artificially low.
     """
     if not vmaf_available():
         return VMAFResult(
@@ -58,6 +63,8 @@ def compute(
     libvmaf_args = f"libvmaf=n_threads={threads}"
     if subsample > 1:
         libvmaf_args += f":n_subsample={subsample}"
+    if hdr_aware:
+        libvmaf_args += ":phone_model=0"
     # scale2ref the reference to match the distorted's dims; libvmaf needs them
     # identical and the encoder side may have shaved 2px via micro-crop.
     cmd = [

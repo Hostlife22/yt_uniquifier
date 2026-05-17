@@ -121,6 +121,27 @@ def _check_fps(source: SourceMeta) -> list[PreflightFinding]:
     )]
 
 
+def _check_tonemap_order(plan: Plan) -> list[PreflightFinding]:
+    """Warn if video.tonemap_sdr is not the first enabled transform.
+
+    Other color/eq/noise ops applied BEFORE tonemap operate on PQ-encoded
+    values (which are nonlinear with light), giving wrong colors. Placing
+    tonemap first means everything after sees plain BT.709 SDR.
+    """
+    enabled = [tc for tc in plan.profile.transforms if tc.enabled]
+    for i, tc in enumerate(enabled):
+        if tc.id == "video.tonemap_sdr" and i != 0:
+            return [PreflightFinding(
+                code="tonemap.not_first", severity="warn",
+                message=(
+                    "video.tonemap_sdr should be the first enabled transform "
+                    f"(currently position {i + 1} of {len(enabled)})."
+                ),
+                suggestion="Move video.tonemap_sdr to the top of profile.transforms.",
+            )]
+    return []
+
+
 _HDR_CAPABLE_ENCODERS = {
     "libx265",
     "hevc_nvenc",
@@ -140,6 +161,22 @@ def _check_hdr(
         return []
     findings: list[PreflightFinding] = []
 
+    # Tonemap path: source HDR will be collapsed into BT.709 SDR explicitly.
+    # Supersedes both the color-transforms restriction and the encoder bit-depth
+    # restriction (both apply only when we're trying to KEEP HDR).
+    tonemap_present = any(
+        tc.enabled and tc.id == "video.tonemap_sdr" for tc in plan.profile.transforms
+    )
+    if tonemap_present:
+        findings.append(PreflightFinding(
+            code="hdr.tonemap.ok", severity="ok",
+            message=(
+                f"HDR source ({v.color.transfer}) will be tonemapped to BT.709 SDR."
+            ),
+        ))
+        findings.extend(_check_tonemap_order(plan))
+        return findings
+
     if not plan.profile.keep_hdr:
         offenders = [
             tc.id for tc in plan.profile.transforms
@@ -152,7 +189,10 @@ def _check_hdr(
                     f"Source is HDR ({v.color.transfer}) but profile applies color "
                     f"transforms {offenders} without --keep-hdr. Output color will be wrong."
                 ),
-                suggestion="Set keep_hdr: true in the profile, or remove the color transforms.",
+                suggestion=(
+                    "Set keep_hdr: true, add video.tonemap_sdr first, or "
+                    "remove the color transforms."
+                ),
             ))
         # Without keep_hdr we still re-encode to 8-bit yuv420p, which collapses HDR.
         return findings

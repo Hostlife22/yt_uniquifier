@@ -11,6 +11,7 @@ from yt_uniquifier.core.transforms import (
     video_geom,
     video_noise,
     video_speed,
+    video_tonemap,
 )
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -38,4 +39,5 @@ __all__ = [
     "video_geom",
     "video_noise",
     "video_speed",
+    "video_tonemap",
 ]

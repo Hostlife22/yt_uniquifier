@@ -1,0 +1,42 @@
+name: cid_aware_hdr_to_sdr
+description: |
+  HDR (PQ / HLG) source → SDR (BT.709) output with CID-divergence transforms
+  applied AFTER tonemapping. Output is plain yuv420p; any libx264-class
+  encoder works.
+
+  IMPORTANT: video.tonemap_sdr must be the first enabled transform — the
+  preflight emits a warning if not. All subsequent transforms then operate
+  in plain pixel-space (no zscale roundtrips needed).
+transforms:
+  - id: video.tonemap_sdr            # MUST be first
+    enabled: true
+    params:
+      algorithm: hable               # use 'aces' for cinema-graded sources
+      peak: 1000.0                   # mastering display peak (nits)
+      desat: 0.0                     # raise to 0.5 if highlights look oversaturated
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.04}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.015, contrast: 1.022, gamma: 0.99, saturation: 1.04}
+  - id: video.noise
+    enabled: true
+    params: {strength: 5}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.012, randomize_within: 0.003}
+  - id: audio.eq
+    enabled: true
+    params: {randomize_bands: true}
+  - id: audio.resample
+    enabled: true
+    params: {intermediate_sr: 47999}
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+output_container: mp4
+target_codec: h264
+target_loudness_lufs: -14.0
+seed_strategy: per_run

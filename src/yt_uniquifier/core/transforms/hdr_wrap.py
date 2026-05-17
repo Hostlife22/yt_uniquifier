@@ -17,6 +17,8 @@ filter-string fragment.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from yt_uniquifier.core.models import ColorTransfer, HDRInfo
 
 # Color transforms whose math is meaningful only in linear light. Geometry
@@ -72,6 +74,20 @@ def wrap_linear(inner_filters: list[str], color: HDRInfo) -> str:
             inner_joined,
             f"zscale=transfer={target_transfer}:npl={npl}",
         ]
+    )
+
+
+def is_tonemap_active(transforms: Iterable[object] | None) -> bool:
+    """True if any enabled transform converts HDR to SDR via tonemap.
+
+    Loose typing because importing TransformConfig here would create a
+    cycle (models has imports that reach back into transforms).
+    """
+    if transforms is None:
+        return False
+    return any(
+        getattr(tc, "enabled", True) and getattr(tc, "id", "") == "video.tonemap_sdr"
+        for tc in transforms
     )
 
 

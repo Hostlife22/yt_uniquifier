@@ -45,6 +45,7 @@ from yt_uniquifier.core.transforms.audio_loudnorm import (
 from yt_uniquifier.core.transforms.base import LabelAllocator, call_build
 from yt_uniquifier.core.transforms.hdr_wrap import (
     is_color_transform,
+    is_tonemap_active,
     needs_linear_wrap,
     wrap_linear,
 )
@@ -122,8 +123,13 @@ class FilterGraph:
         v_label = v_in
         extra_inputs: list[Path] = []
 
+        # Tonemap supersedes the HDR-keep wrap: the very first transform
+        # collapses HDR into BT.709 SDR, so the rest of the chain operates
+        # in plain pixel-space and doesn't need zscale roundtrips.
+        tonemap = is_tonemap_active(self.plan.profile.transforms)
         hdr_wrap_enabled = (
             self.plan.profile.keep_hdr
+            and not tonemap
             and bool(self.plan.source.video)
             and needs_linear_wrap(self.plan.source.video[0].color)
         )
@@ -295,6 +301,10 @@ class FilterGraph:
         if not self.plan.source.video:
             return "yuv420p"
         v = self.plan.source.video[0]
+        # Tonemap converts to SDR — output is always 8-bit yuv420p regardless
+        # of source HDR / keep_hdr flag.
+        if is_tonemap_active(self.plan.profile.transforms):
+            return "yuv420p"
         if v.color.is_hdr and self.plan.profile.keep_hdr:
             return "yuv420p10le"
         return "yuv420p"
@@ -525,6 +535,8 @@ def _segment_pix_fmt(plan: Plan) -> str:
     if not plan.source.video:
         return "yuv420p"
     v = plan.source.video[0]
+    if is_tonemap_active(plan.profile.transforms):
+        return "yuv420p"
     if v.color.is_hdr and plan.profile.keep_hdr:
         return "yuv420p10le"
     return "yuv420p"
