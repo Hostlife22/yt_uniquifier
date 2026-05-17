@@ -129,6 +129,10 @@ class EncoderCandidate(BaseModel):
     codec: EncoderKind
     works: bool
     error: str | None = None
+    # v0.3: how many concurrent encode sessions are safe for this encoder
+    # on this machine. NVENC consumer drivers cap at 3; pro/Quadro at 8;
+    # CPU encoders default to cpu_count() // 2; others 2.
+    max_parallel: int = Field(default=1, ge=1, le=64)
 
 
 class TransformConfig(BaseModel):

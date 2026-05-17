@@ -41,6 +41,23 @@ class CancelToken:
         return self._cancelled
 
 
+_NVENC_OOM_PATTERNS = (
+    "openencodesessionex failed",
+    "no encode capable devices",
+    "no nvenc capable devices",
+    "out of memory",
+)
+
+
+def _is_nvenc_oom(log_lines: list[str]) -> bool:
+    """Heuristic: NVENC session-exhaustion vs other ffmpeg failures.
+
+    Matches against the last 50 lines of stderr (case-insensitive).
+    """
+    tail = "\n".join(log_lines[-50:]).lower()
+    return any(p in tail for p in _NVENC_OOM_PATTERNS)
+
+
 def run(
     cmd: BuiltCommand,
     *,
@@ -49,6 +66,7 @@ def run(
     cancel_token: CancelToken | None = None,
     log_path: Path | None = None,
     progress_via_stdout: bool = True,
+    _retried: bool = False,
 ) -> RunResult:
     """Execute the BuiltCommand and stream progress events.
 
@@ -114,6 +132,18 @@ def run(
         raise PipelineError("cancelled by user")
 
     if rc != 0:
+        # NVENC session exhaustion: another encode session has the GPU.
+        # Wait a moment and retry exactly once before propagating.
+        if not _retried and _is_nvenc_oom(log_lines):
+            on_event(RunEvent(kind="log", payload={
+                "phase": "retry", "reason": "nvenc oom",
+            }))
+            time.sleep(2.0)
+            return run(
+                cmd, output=output, on_event=on_event,
+                cancel_token=cancel_token, log_path=log_path,
+                progress_via_stdout=progress_via_stdout, _retried=True,
+            )
         tail = "\n".join(log_lines[-30:])
         on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": tail}))
         raise PipelineError(f"ffmpeg exited with {rc}; last log:\n{tail}")

@@ -193,13 +193,16 @@ def process_video_segment(
     return src, out
 
 
-def parallel_safe(plan: Plan) -> bool:
-    """Only CPU encoders (libx264/libx265) are safe for parallel segment runs.
+def parallel_safe(plan: Plan) -> int:
+    """Return max concurrent encode workers safe for this plan's encoder.
 
-    GPU encoders share a single VRAM context; parallel calls oversubscribe
-    NVENC/QSV/AMF/VideoToolbox and either fail or serialise internally.
+    v0.3+: each EncoderCandidate carries `max_parallel` (detected at probe
+    time — NVENC consumer=3, pro=8, CPU=cpu_count()//2, etc.). The
+    orchestrator caps user-requested workers at this number.
+
+    Returns >= 1 always.
     """
-    return plan.encoder.vendor in {"x264", "x265"}
+    return max(1, plan.encoder.max_parallel)
 
 
 def process_video_segments_parallel(
@@ -221,7 +224,18 @@ def process_video_segments_parallel(
     Returns list of (idx, src_path, out_path) tuples in completion order.
     Cancel: best-effort — already-running workers finish their current ffmpeg.
     """
-    if workers <= 1 or not parallel_safe(plan):
+    cap = parallel_safe(plan)
+    effective = min(max(1, workers), cap)
+    if effective < workers and on_event is not None:
+        on_event(RunEvent(kind="log", payload={
+            "phase": "workers",
+            "message": (
+                f"workers downgraded {workers} → {effective} "
+                f"({plan.encoder.name} cap)"
+            ),
+        }))
+
+    if effective <= 1:
         results: list[tuple[int, Path, Path]] = []
         for seg in pending:
             if cancel_token and cancel_token.is_cancelled():
@@ -235,12 +249,12 @@ def process_video_segments_parallel(
                 on_segment_done(seg.idx, src, out)
         return results
 
-    # CPU parallel: ThreadPoolExecutor + per-call OMP_NUM_THREADS=1.
+    # Parallel path: ThreadPoolExecutor + per-call OMP_NUM_THREADS=1.
     # We use threads (not processes) because each segment spawns its own ffmpeg
     # subprocess via run_ffmpeg, which already releases the GIL.
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
         futures = {
             pool.submit(
                 process_video_segment, seg, plan, work_dir,
