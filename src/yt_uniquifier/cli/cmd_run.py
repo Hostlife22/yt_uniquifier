@@ -47,6 +47,11 @@ def run_cmd(
     fast_qa: bool = typer.Option(
         False, "--fast-qa", help="Cheaper QA: skip VMAF, halve sample count."
     ),
+    new_variant: bool = typer.Option(
+        False, "--new-variant",
+        help="Ignore any stored run_seed in state.json and roll a fresh one "
+             "(produces a different output even if work-dir has prior state).",
+    ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
 ) -> None:
     """Run uniquification on an input."""
@@ -66,6 +71,7 @@ def run_cmd(
             target_segment_sec=target_segment_sec,
             keep_segments=keep_segments,
             enforce_preflight=not no_preflight,
+            force_new_variant=new_variant,
         )
 
         if no_progress:

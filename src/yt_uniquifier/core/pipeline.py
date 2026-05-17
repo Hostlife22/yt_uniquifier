@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +42,7 @@ from yt_uniquifier.core.transforms.audio_loudnorm import (
     build_apply,
     measure,
 )
-from yt_uniquifier.core.transforms.base import LabelAllocator
+from yt_uniquifier.core.transforms.base import LabelAllocator, call_build
 from yt_uniquifier.core.transforms.hdr_wrap import (
     is_color_transform,
     needs_linear_wrap,
@@ -113,6 +114,7 @@ class FilterGraph:
     def build(self) -> BuiltCommand:
         video_transforms = self._enabled(kind="video")
         audio_transforms = self._enabled(kind="audio")
+        rng = random.Random(self.plan.run_seed)
 
         # ---- video chain ----
         v_in = "0:v:0"
@@ -127,14 +129,14 @@ class FilterGraph:
         )
         for run_is_color, run in _group_runs(video_transforms, is_color_transform):
             if hdr_wrap_enabled and run_is_color and len(run) >= 1:
-                v_label, chain_str, run_extras = self._wrap_color_run(run, v_label)
+                v_label, chain_str, run_extras = self._wrap_color_run(run, v_label, rng)
                 v_chains.append(chain_str)
                 extra_inputs.extend(run_extras)
             else:
                 for tc in run:
                     spec = get(tc.id)
                     params = spec.schema.model_validate({**spec.defaults, **tc.params})
-                    chain = spec.build(params, self.alloc, v_label)
+                    chain = call_build(spec, params, self.alloc, v_label, rng=rng)
                     filter_str = chain.filter_str
                     # Swap rotate's SDR black fill for an HDR-safe near-black so
                     # PQ encoders don't clip the legal video range.
@@ -179,7 +181,7 @@ class FilterGraph:
                         params, self._loudnorm_measurement, self.alloc, a_label or a_in
                     )
                 else:
-                    chain = spec.build(params, self.alloc, a_label or a_in)
+                    chain = call_build(spec, params, self.alloc, a_label or a_in, rng=rng)
                 a_chains.append(
                     f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"
                 )
@@ -241,7 +243,8 @@ class FilterGraph:
     # ---- helpers ----
 
     def _wrap_color_run(
-        self, run: list[TransformConfig], in_label: str
+        self, run: list[TransformConfig], in_label: str,
+        rng: random.Random | None = None,
     ) -> tuple[str, str, list[Path]]:
         """Compose a single zscale-linear-wrapped block over `run` color transforms.
 
@@ -257,7 +260,7 @@ class FilterGraph:
         for tc in run:
             spec = get(tc.id)
             params = spec.schema.model_validate({**spec.defaults, **tc.params})
-            scratch_chain = spec.build(params, scratch, "scratch_in")
+            scratch_chain = call_build(spec, params, scratch, "scratch_in", rng=rng)
             inner.append(scratch_chain.filter_str)
             extras.extend(Path(p) for p in scratch_chain.extra_inputs)
 
@@ -387,6 +390,7 @@ def build_video_segment_command(
     separately by build_main_audio_command on the full source.
     """
     alloc = LabelAllocator()
+    rng = random.Random(plan.run_seed)
     video_transforms = [
         tc for tc in plan.profile.transforms
         if tc.enabled and get(tc.id).kind == "video"
@@ -398,7 +402,7 @@ def build_video_segment_command(
     for tc in video_transforms:
         spec = get(tc.id)
         params = spec.schema.model_validate({**spec.defaults, **tc.params})
-        chain = spec.build(params, alloc, v_label)
+        chain = call_build(spec, params, alloc, v_label, rng=rng)
         v_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
         v_label = chain.out_label
         extra_inputs.extend(Path(p) for p in chain.extra_inputs)
@@ -460,6 +464,7 @@ def build_main_audio_command(
     caller can cache it (state.json) for resume.
     """
     alloc = LabelAllocator()
+    rng = random.Random(plan.run_seed)
     audio_transforms = [
         tc for tc in plan.profile.transforms
         if tc.enabled and get(tc.id).kind == "audio"
@@ -487,7 +492,7 @@ def build_main_audio_command(
             assert measurement is not None
             chain = build_apply(ln_params, measurement, alloc, a_label)
         else:
-            chain = spec.build(params, alloc, a_label)
+            chain = call_build(spec, params, alloc, a_label, rng=rng)
         a_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
         a_label = chain.out_label
 

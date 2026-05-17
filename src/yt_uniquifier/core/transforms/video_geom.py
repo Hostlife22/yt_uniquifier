@@ -76,3 +76,30 @@ register(
         defaults={"degrees": 0.15},
     )
 )
+
+
+class MirrorParams(BaseModel):
+    """Horizontal flip. Completely destroys pHash similarity.
+
+    WARNING: visible on any content with on-screen text, logos, or
+    lateralized framing. Default-disabled in shipped CID profiles; the user
+    opts in by adding `video.mirror` explicitly to their profile.
+    """
+
+
+def _build_mirror(
+    params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
+) -> FilterChain:
+    out = alloc.next("v")
+    return FilterChain(in_label=in_lbl, out_label=out, filter_str="hflip")
+
+
+register(
+    TransformSpec(
+        id="video.mirror",
+        kind="video",
+        schema=MirrorParams,
+        build=_build_mirror,
+        defaults={},
+    )
+)

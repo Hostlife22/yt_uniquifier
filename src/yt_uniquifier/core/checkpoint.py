@@ -62,12 +62,18 @@ class CheckpointStore:
             "schema_version": SCHEMA_VERSION,
             "tool_version": _tool_version(),
             "plan_hash": self.plan.plan_hash,
+            "run_seed": self.plan.run_seed,
             "loudnorm_measurement": None,
             "main_audio_path": None,
             "segments": [s.model_dump(mode="json") for s in fresh_segments],
         }
         self._flush()
         return list(fresh_segments)
+
+    def stored_run_seed(self) -> int | None:
+        """Return the run_seed persisted in state.json, if any."""
+        raw = self._state.get("run_seed")
+        return int(raw) if raw is not None else None
 
     # ---- segment ops ----
 

@@ -1,0 +1,33 @@
+name: cid_aware
+description: |
+  Calibrated for Content ID divergence on owned / licensed content. Each
+  run randomizes within safe bounds (variability for batch uploads of N
+  variants). Visually clean — no mirror, no speed change. Audio shift is
+  perceptible only on close listening (~21 cents pitch).
+transforms:
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.04}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.015, contrast: 1.022, gamma: 0.99, saturation: 1.04}
+  - id: video.noise
+    enabled: true
+    params: {strength: 5}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.012, randomize_within: 0.003}
+  - id: audio.eq
+    enabled: true
+    params: {randomize_bands: true}
+  - id: audio.resample
+    enabled: true
+    params: {intermediate_sr: 47999}
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+output_container: mp4
+target_codec: h264
+target_loudness_lufs: -14.0
+seed_strategy: per_run

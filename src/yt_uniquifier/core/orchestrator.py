@@ -20,6 +20,7 @@ from yt_uniquifier.core.pipeline import compute_plan_hash
 from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
 from yt_uniquifier.core.probe import probe as probe_file
 from yt_uniquifier.core.runner import CancelToken, RunEvent
+from yt_uniquifier.core.seed_resolver import resolve_run_seed
 from yt_uniquifier.core.segmenter import (
     concat_segments,
     plan_segments,
@@ -37,6 +38,9 @@ class RunOptions:
     target_segment_sec: float = 600.0
     keep_segments: bool = False
     enforce_preflight: bool = True
+    # If True, ignore an existing state.json's run_seed and force a fresh
+    # seed (per the profile's seed_strategy). Used by `yt-uniq run --new-variant`.
+    force_new_variant: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,11 +58,13 @@ def build_plan(input_path: Path, profile: Profile, encoder_override: str | None)
         prefer=[encoder_override] if encoder_override else None,
         codec=profile.target_codec,
     )
+    run_seed = resolve_run_seed(profile, source)
     return Plan(
         source=source,
         profile=profile,
         encoder=enc,
         plan_hash=compute_plan_hash(source, profile, enc),
+        run_seed=run_seed,
     )
 
 
@@ -80,10 +86,33 @@ def run_full(
     emit(RunEvent(kind="log", payload={"phase": "preflight",
                                        "findings": [f.model_dump() for f in findings]}))
 
+    # --new-variant: archive any existing state so we start fresh with the
+    # newly-resolved run_seed (otherwise the existing 'done' segments would be
+    # concat'd as-is and the new seed would be applied to nothing).
+    options.work_dir.mkdir(parents=True, exist_ok=True)
+    if options.force_new_variant:
+        state_path = options.work_dir / "state.json"
+        if state_path.exists():
+            import time as _time
+            state_path.rename(state_path.with_suffix(
+                f".json.stale-variant-{int(_time.time())}"
+            ))
+
     store = CheckpointStore(options.work_dir, plan)
     segments = store.init_or_resume(
         plan_segments(plan, target_size_sec=options.target_segment_sec)
     )
+    # Resume: if state.json carried a run_seed from an earlier run, reuse it
+    # so the resumed encoding reproduces the same stochastic transforms.
+    if not options.force_new_variant:
+        stored_seed = store.stored_run_seed()
+        if stored_seed is not None and stored_seed != plan.run_seed:
+            plan = plan.model_copy(update={"run_seed": stored_seed})
+            emit(RunEvent(kind="log", payload={
+                "phase": "resume",
+                "message": "restored run_seed from state.json",
+                "run_seed": stored_seed,
+            }))
     emit(RunEvent(kind="log", payload={"phase": "plan",
                                        "segments": len(segments)}))
 

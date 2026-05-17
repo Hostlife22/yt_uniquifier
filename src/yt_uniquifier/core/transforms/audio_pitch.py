@@ -26,9 +26,14 @@ ATEMPO_MAX = 2.0  # conservative; modern ffmpeg supports 0.5..100 but old builds
 
 
 class PitchTempoParams(BaseModel):
-    pitch: float = Field(default=1.005, ge=0.5, le=2.0)
+    # NOTE (v0.2): default bumped from 1.005 (perceptually invisible but useless
+    # against chromaprint fingerprinting) to 1.012 (~21 cents, still subtle on
+    # dialogue, measurably shifts the fingerprint).
+    pitch: float = Field(default=1.012, ge=0.5, le=2.0)
     tempo: float = Field(default=1.0, ge=0.5, le=2.0)
     sample_rate: int = Field(default=48000, ge=8000, le=192000)
+    # If > 0, each run jitters the actual pitch by uniform(-rw, +rw).
+    randomize_within: float = Field(default=0.0, ge=0.0, le=0.05)
 
 
 def cascade_atempo(target: float) -> str:
@@ -56,14 +61,21 @@ def cascade_atempo(target: float) -> str:
 
 
 def _build_pitch_tempo(
-    params: BaseModel, alloc: LabelAllocator, in_lbl: str
+    params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
     assert isinstance(params, PitchTempoParams)
     out = alloc.next("a")
-    compensate = params.tempo / params.pitch
+    pitch = params.pitch
+    if params.randomize_within > 0 and rng is not None:
+        from random import Random as _Random
+        assert isinstance(rng, _Random)
+        pitch = pitch + rng.uniform(-params.randomize_within, params.randomize_within)
+        # Stay within sanity bounds.
+        pitch = max(0.5, min(2.0, pitch))
+    compensate = params.tempo / pitch
     atempo_chain = cascade_atempo(compensate)
     filt = (
-        f"asetrate={params.sample_rate}*{params.pitch:.6f},"
+        f"asetrate={params.sample_rate}*{pitch:.6f},"
         f"aresample={params.sample_rate},"
         f"{atempo_chain}"
     )

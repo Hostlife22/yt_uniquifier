@@ -11,11 +11,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from random import Random
 from typing import Literal
 
 from pydantic import BaseModel
 
 Kind = Literal["video", "audio"]
+
+# Builders may accept an optional `rng` keyword for per-run randomization.
+# Backward-compat: builders that don't need it ignore the keyword.
+BuildFn = Callable[..., "FilterChain"]
 
 
 class LabelAllocator:
@@ -51,7 +56,9 @@ class TransformSpec:
     id: str
     kind: Kind
     schema: type[BaseModel]
-    build: Callable[[BaseModel, LabelAllocator, str], FilterChain]
+    # Callable signature: (params, allocator, in_label, *, rng=None) -> FilterChain
+    # Old builders that don't need rng simply ignore the kwarg.
+    build: BuildFn
     defaults: dict[str, object] = field(default_factory=dict)
     incompatible_with: tuple[str, ...] = ()
 
@@ -78,3 +85,22 @@ def all_ids() -> list[str]:
 def reset_for_tests() -> None:
     """Clear the registry. Only call from tests that need a clean slate."""
     _REGISTRY.clear()
+
+
+def call_build(
+    spec: TransformSpec,
+    params: BaseModel,
+    alloc: LabelAllocator,
+    in_label: str,
+    *,
+    rng: Random | None = None,
+) -> FilterChain:
+    """Invoke a builder, transparently passing rng if it accepts it.
+
+    Lets old builders stay positional-only without burdening every transform
+    with `**_` boilerplate.
+    """
+    try:
+        return spec.build(params, alloc, in_label, rng=rng)
+    except TypeError:
+        return spec.build(params, alloc, in_label)

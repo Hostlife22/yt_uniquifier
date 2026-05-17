@@ -41,6 +41,7 @@ EncoderKind = Literal["h264", "hevc"]
 EncoderVendor = Literal["nvenc", "qsv", "amf", "videotoolbox", "x264", "x265"]
 Container = Literal["mp4", "mov", "mkv"]
 AudioTracksOpt = Literal["first", "all"]
+SeedStrategy = Literal["fixed", "per_run", "per_file"]
 
 
 class HDRInfo(BaseModel):
@@ -154,6 +155,11 @@ class Profile(BaseModel):
     target_codec: EncoderKind = "h264"
     target_loudness_lufs: float = -14.0
     seed: int | None = None
+    # NEW (v0.2): controls run-time randomization of transform parameters.
+    #   fixed    — `seed` used verbatim, every run identical.
+    #   per_run  — fresh random seed on each invocation (default).
+    #   per_file — deterministic seed derived from the input path.
+    seed_strategy: SeedStrategy = "per_run"
 
 
 class Plan(BaseModel):
@@ -169,6 +175,10 @@ class Plan(BaseModel):
     profile: Profile
     encoder: EncoderCandidate
     plan_hash: str
+    # NEW (v0.2): per-invocation seed for stochastic transforms.
+    # NOT part of plan_hash — the same Plan can be replayed with the same
+    # seed on resume. Strategy resolution lives in orchestrator.build_plan.
+    run_seed: int = 0
 
 
 SegmentStatus = Literal["pending", "in_progress", "done", "failed"]

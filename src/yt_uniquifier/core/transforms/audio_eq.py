@@ -17,14 +17,28 @@ class AudioEqParams(BaseModel):
         default_factory=lambda: [(120.0, -0.6), (4500.0, 0.4)]
     )
     width_q: float = Field(default=1.0, ge=0.1, le=10.0)
+    # If True, freq is multiplied by uniform(0.95, 1.05) and gain shifted by
+    # uniform(-0.2, +0.2) on each run. Keeps the spectral shaping in the same
+    # neighbourhood but moves the chromaprint sub-fingerprint.
+    randomize_bands: bool = False
 
 
-def _build_audio_eq(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
+def _build_audio_eq(
+    params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
+) -> FilterChain:
     assert isinstance(params, AudioEqParams)
     out = alloc.next("a")
+    bands = list(params.bands)
+    if params.randomize_bands and rng is not None:
+        from random import Random as _Random
+        assert isinstance(rng, _Random)
+        bands = [
+            (freq * rng.uniform(0.95, 1.05), gain + rng.uniform(-0.2, 0.2))
+            for freq, gain in bands
+        ]
     parts = [
-        f"equalizer=f={freq}:t=q:w={params.width_q}:g={gain}"
-        for freq, gain in params.bands
+        f"equalizer=f={freq:.2f}:t=q:w={params.width_q}:g={gain:.2f}"
+        for freq, gain in bands
     ]
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=",".join(parts))
 
