@@ -25,7 +25,7 @@ from yt_uniquifier.core.segmenter import (
     concat_segments,
     plan_segments,
     process_main_audio,
-    process_video_segment,
+    process_video_segments_parallel,
 )
 
 
@@ -41,6 +41,9 @@ class RunOptions:
     # If True, ignore an existing state.json's run_seed and force a fresh
     # seed (per the profile's seed_strategy). Used by `yt-uniq run --new-variant`.
     force_new_variant: bool = False
+    # >1 enables parallel segment encoding on CPU (libx264/libx265 only).
+    # GPU encoders silently fall back to sequential (single VRAM context).
+    workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -116,30 +119,29 @@ def run_full(
     emit(RunEvent(kind="log", payload={"phase": "plan",
                                        "segments": len(segments)}))
 
-    # Process pending video segments.
-    for seg in segments:
-        if seg.status == "done":
-            continue
-        if cancel_token and cancel_token.is_cancelled():
-            raise PipelineError("cancelled by user")
-        store.mark(seg.idx, "in_progress")
+    # Process pending video segments — sequentially (workers <= 1) or in
+    # parallel on CPU encoders (libx264/libx265). GPU encoders silently
+    # fall back to sequential inside process_video_segments_parallel.
+    pending = [s for s in segments if s.status != "done"]
+    if cancel_token and cancel_token.is_cancelled():
+        raise PipelineError("cancelled by user")
+    if pending:
+        for seg in pending:
+            store.mark(seg.idx, "in_progress")
 
-        def _segment_emit(e: RunEvent, i: int = seg.idx) -> None:
-            emit(RunEvent(
+        def _on_segment_done(idx: int, src: Path, out: Path) -> None:
+            store.mark(idx, "done", src_path=src, out_path=out)
+
+        process_video_segments_parallel(
+            pending, plan, options.work_dir,
+            workers=options.workers,
+            on_event=lambda e: emit(RunEvent(
                 kind=e.kind,
-                payload={**e.payload, "phase": "segment", "segment": i},
-            ))
-
-        try:
-            src, out = process_video_segment(
-                seg, plan, options.work_dir,
-                on_event=_segment_emit,
-                cancel_token=cancel_token,
-            )
-            store.mark(seg.idx, "done", src_path=src, out_path=out)
-        except Exception:
-            store.mark(seg.idx, "failed")
-            raise
+                payload={**e.payload, "phase": "segment"},
+            )),
+            cancel_token=cancel_token,
+            on_segment_done=_on_segment_done,
+        )
 
     # Main audio (cached via state.json).
     main_audio = store.get_main_audio()

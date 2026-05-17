@@ -37,13 +37,27 @@ def vmaf_available() -> bool:
 _SCORE_RE = re.compile(r"VMAF score:\s*([0-9.]+)")
 
 
-def compute(input_path: Path, output_path: Path, threads: int = 4) -> VMAFResult:
-    """Run libvmaf comparing output (distorted) to input (reference)."""
+def compute(
+    input_path: Path,
+    output_path: Path,
+    *,
+    threads: int = 4,
+    subsample: int = 1,
+) -> VMAFResult:
+    """Run libvmaf comparing output (distorted) to input (reference).
+
+    `subsample=N` tells libvmaf to score every N-th frame, cutting runtime
+    by ~N× — useful for long files. The score is the harmonic mean over the
+    sampled frames so it's still comparable across runs.
+    """
     if not vmaf_available():
         return VMAFResult(
             available=False, score=None,
             note="ffmpeg has no libvmaf filter (build/install missing)",
         )
+    libvmaf_args = f"libvmaf=n_threads={threads}"
+    if subsample > 1:
+        libvmaf_args += f":n_subsample={subsample}"
     # scale2ref the reference to match the distorted's dims; libvmaf needs them
     # identical and the encoder side may have shaved 2px via micro-crop.
     cmd = [
@@ -54,7 +68,7 @@ def compute(input_path: Path, output_path: Path, threads: int = 4) -> VMAFResult
         "-lavfi",
         "[1:v][0:v]scale2ref=w=iw:h=ih[ref][dist];"
         "[dist]setsar=1[d];[ref]setsar=1[r];"
-        f"[d][r]libvmaf=n_threads={threads}",
+        f"[d][r]{libvmaf_args}",
         "-f", "null",
         "-",
     ]

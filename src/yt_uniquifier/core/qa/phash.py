@@ -99,7 +99,20 @@ def _split_png_stream(blob: bytes) -> list[Image.Image]:
     return out
 
 
-def compare(input_path: Path, output_path: Path, n: int = 120) -> PHashStats:
+def adaptive_n(duration_sec: float, floor: int = 60, ceiling: int = 600) -> int:
+    """Pick a sample count proportional to duration (~30 frames per minute)."""
+    if duration_sec <= 0:
+        return floor
+    return max(floor, min(ceiling, int(duration_sec / 60 * 30)))
+
+
+def compare(input_path: Path, output_path: Path, n: int | None = 120) -> PHashStats:
+    """Sample frames from both files and compute distance distribution.
+
+    Pass n=None to auto-scale to duration via adaptive_n().
+    """
+    if n is None:
+        n = adaptive_n(_probe_duration(input_path))
     a = sample_frames(input_path, n)
     b = sample_frames(output_path, n)
     pairs = min(len(a), len(b))

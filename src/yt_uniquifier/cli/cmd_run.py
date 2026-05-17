@@ -52,6 +52,11 @@ def run_cmd(
         help="Ignore any stored run_seed in state.json and roll a fresh one "
              "(produces a different output even if work-dir has prior state).",
     ),
+    workers: int = typer.Option(
+        1, "--workers",
+        help="Parallel segment workers (libx264 / libx265 only; GPU encoders "
+             "stay sequential).",
+    ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
 ) -> None:
     """Run uniquification on an input."""
@@ -72,6 +77,7 @@ def run_cmd(
             keep_segments=keep_segments,
             enforce_preflight=not no_preflight,
             force_new_variant=new_variant,
+            workers=workers,
         )
 
         if no_progress:

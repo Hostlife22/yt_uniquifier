@@ -7,8 +7,11 @@ source for clean loudnorm / pitch behaviour.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import os
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,20 +21,28 @@ from yt_uniquifier.core.pipeline import (
     build_main_audio_command,
     build_video_segment_command,
 )
+from yt_uniquifier.core.qa.hashes import md5_file
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
+KEYFRAME_CACHE_DIR = Path.home() / ".cache" / "yt_uniquifier" / "keyframes"
+KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
+
 # ---- planning ----------------------------------------------------------------
 
-def list_keyframes(source: Path) -> list[float]:
+def list_keyframes(source: Path, *, force: bool = False) -> list[float]:
     """Return keyframe presentation timestamps (seconds) for stream v:0.
 
-    Uses ffprobe `-skip_frame nokey` so only keyframes are read.
-    For very long files this still reads metadata for each keyframe — fast
-    relative to encoding, but not free.
+    Cached at ~/.cache/yt_uniquifier/keyframes/<md5>.json for 30 days. For
+    1080p+ feature-length files this saves 30-60s per resume.
+    Pass force=True to bypass.
     """
+    cached = _load_keyframe_cache(source) if not force else None
+    if cached is not None:
+        return cached
+
     cmd = [
         ffprobe_bin(),
         "-v", "error",
@@ -63,7 +74,41 @@ def list_keyframes(source: Path) -> list[float]:
             ks.append(float(t))
         except (TypeError, ValueError):
             continue
-    return sorted(set(ks))
+    result = sorted(set(ks))
+    _save_keyframe_cache(source, result)
+    return result
+
+
+def _keyframe_cache_path(source: Path) -> Path:
+    digest = md5_file(source)
+    return KEYFRAME_CACHE_DIR / f"{digest}.json"
+
+
+def _load_keyframe_cache(source: Path) -> list[float] | None:
+    path = _keyframe_cache_path(source)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    if time.time() - raw.get("written_at", 0) > KEYFRAME_CACHE_TTL_SEC:
+        return None
+    kfs = raw.get("keyframes")
+    if not isinstance(kfs, list):
+        return None
+    return [float(x) for x in kfs]
+
+
+def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
+    path = _keyframe_cache_path(source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"schema_version": 1, "written_at": time.time(), "keyframes": kfs}
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
@@ -146,6 +191,70 @@ def process_video_segment(
         log_path=out.with_suffix(".mkv.log"),
     )
     return src, out
+
+
+def parallel_safe(plan: Plan) -> bool:
+    """Only CPU encoders (libx264/libx265) are safe for parallel segment runs.
+
+    GPU encoders share a single VRAM context; parallel calls oversubscribe
+    NVENC/QSV/AMF/VideoToolbox and either fail or serialise internally.
+    """
+    return plan.encoder.vendor in {"x264", "x265"}
+
+
+def process_video_segments_parallel(
+    pending: list[Segment],
+    plan: Plan,
+    work_dir: Path,
+    *,
+    workers: int = 1,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
+    on_segment_done: Callable[[int, Path, Path], None] | None = None,
+) -> list[tuple[int, Path, Path]]:
+    """Run `process_video_segment` over `pending` segments concurrently.
+
+    Falls back to sequential when workers <= 1 or the encoder isn't CPU-only.
+    Each worker is encouraged to use a single ffmpeg thread (`OMP_NUM_THREADS=1`)
+    so concurrency doesn't oversubscribe the CPU.
+
+    Returns list of (idx, src_path, out_path) tuples in completion order.
+    Cancel: best-effort — already-running workers finish their current ffmpeg.
+    """
+    if workers <= 1 or not parallel_safe(plan):
+        results: list[tuple[int, Path, Path]] = []
+        for seg in pending:
+            if cancel_token and cancel_token.is_cancelled():
+                raise PipelineError("cancelled by user")
+            src, out = process_video_segment(
+                seg, plan, work_dir,
+                on_event=on_event, cancel_token=cancel_token,
+            )
+            results.append((seg.idx, src, out))
+            if on_segment_done:
+                on_segment_done(seg.idx, src, out)
+        return results
+
+    # CPU parallel: ThreadPoolExecutor + per-call OMP_NUM_THREADS=1.
+    # We use threads (not processes) because each segment spawns its own ffmpeg
+    # subprocess via run_ffmpeg, which already releases the GIL.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                process_video_segment, seg, plan, work_dir,
+                on_event=on_event, cancel_token=cancel_token,
+            ): seg
+            for seg in pending
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            seg = futures[fut]
+            src, out = fut.result()
+            results.append((seg.idx, src, out))
+            if on_segment_done:
+                on_segment_done(seg.idx, src, out)
+    return results
 
 
 def process_main_audio(
