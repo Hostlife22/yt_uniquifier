@@ -1,0 +1,30 @@
+name: aggressive
+description: Strong fingerprint shifts. Target VMAF ~85.
+transforms:
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.04, rng_seed: 42}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.02, contrast: 1.03, gamma: 0.99, saturation: 1.05}
+  - id: video.noise
+    enabled: true
+    params: {strength: 8}
+  - id: video.rotate
+    enabled: true
+    params: {degrees: 0.2}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.0015, tempo: 1.0}
+  - id: audio.eq
+    enabled: true
+    params:
+      bands: [[110.0, -0.9], [3800.0, 0.6]]
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+output_container: mp4
+target_codec: h264
+target_loudness_lufs: -14.0
+seed: 42

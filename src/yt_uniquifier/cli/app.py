@@ -1,6 +1,7 @@
 import typer
 
 from yt_uniquifier.cli.cmd_probe import probe_cmd
+from yt_uniquifier.cli.cmd_run import run_cmd
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -21,9 +22,4 @@ def version() -> None:
 
 
 app.command("probe")(probe_cmd)
-
-
-@app.command()
-def run() -> None:
-    """Run uniquification on an input. (Implemented in Phase 2 — see specs/02.md)"""
-    raise typer.Exit(code=2)
+app.command("run")(run_cmd)
