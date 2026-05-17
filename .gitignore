@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+.venv/
+venv/
+env/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# yt-uniquifier work artifacts
+.yt_uniq_work/
+*.qa.json
+*.qa.html
+
+.DS_Store
+.idea/
+.vscode/
