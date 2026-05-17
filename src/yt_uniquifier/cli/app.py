@@ -6,7 +6,9 @@ from yt_uniquifier.cli.cmd_corpus import corpus_app
 from yt_uniquifier.cli.cmd_preflight import preflight_cmd
 from yt_uniquifier.cli.cmd_probe import probe_cmd
 from yt_uniquifier.cli.cmd_qa import qa_cmd
+from yt_uniquifier.cli.cmd_queue import queue_app
 from yt_uniquifier.cli.cmd_run import run_cmd
+from yt_uniquifier.cli.cmd_worker import worker_cmd
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -32,4 +34,6 @@ app.command("preflight")(preflight_cmd)
 app.command("qa")(qa_cmd)
 app.command("batch")(batch_cmd)
 app.command("calibrate")(calibrate_cmd)
+app.command("worker")(worker_cmd)
 app.add_typer(corpus_app, name="corpus")
+app.add_typer(queue_app, name="queue")
