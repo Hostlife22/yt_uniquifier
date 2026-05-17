@@ -18,7 +18,8 @@ transforms:
     params: {rate: 0.99}
   - id: audio.pitch_tempo
     enabled: true
-    params: {pitch: 1.02, tempo: 0.99, randomize_within: 0.005}
+    # rubberband for natural voice at larger shifts.
+    params: {pitch: 1.06, tempo: 0.99, randomize_within: 0.01, method: rubberband}
   - id: audio.eq
     enabled: true
     params:
@@ -27,11 +28,18 @@ transforms:
   - id: audio.resample
     enabled: true
     params: {intermediate_sr: 47997}
+  - id: audio.compand
+    enabled: true
+    params: {threshold_db: -18.0, ratio: 3.0, randomize_within: true}
   - id: audio.spectral_smear
     enabled: true
     params: {intensity: 0.025}
+  - id: audio.reverb
+    enabled: true
+    params: {intensity: 0.10, style: small_room}
   - id: audio.loudnorm
     enabled: true
+    params: {target_jitter_lufs: 2.0}
 audio_tracks: first
 keep_hdr: false
 output_container: mp4

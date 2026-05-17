@@ -2,8 +2,12 @@ name: cid_aware
 description: |
   Calibrated for Content ID divergence on owned / licensed content. Each
   run randomizes within safe bounds (variability for batch uploads of N
-  variants). Visually clean — no mirror, no speed change. Audio shift is
-  perceptible only on close listening (~21 cents pitch).
+  variants). Visually clean — no mirror, no speed change.
+
+  v0.3.1: pitch bumped 1.012 → 1.04 (~70 cents, past CID audio threshold)
+  via the formant-preserving rubberband filter (voice stays natural).
+  Adds loudnorm target jitter (±1.5 LUFS) and compand dynamic-range jitter
+  to break audio-envelope fingerprinting.
 transforms:
   - id: video.crop_resize
     enabled: true
@@ -16,15 +20,21 @@ transforms:
     params: {strength: 5}
   - id: audio.pitch_tempo
     enabled: true
-    params: {pitch: 1.012, randomize_within: 0.003}
+    # rubberband preserves formants — voice stays natural even at 4%.
+    params: {pitch: 1.04, randomize_within: 0.005, method: rubberband}
   - id: audio.eq
     enabled: true
     params: {randomize_bands: true}
   - id: audio.resample
     enabled: true
     params: {intermediate_sr: 47999}
+  - id: audio.compand
+    enabled: true
+    params: {threshold_db: -20.0, ratio: 2.5, randomize_within: true}
   - id: audio.loudnorm
     enabled: true
+    # ±1.5 LUFS jitter per run; loudness footprint stops being a stable signal.
+    params: {target_jitter_lufs: 1.5}
 audio_tracks: first
 keep_hdr: false
 output_container: mp4

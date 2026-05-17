@@ -12,6 +12,8 @@ older ffmpeg builds.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from yt_uniquifier.core.transforms.base import (
@@ -24,16 +26,24 @@ from yt_uniquifier.core.transforms.base import (
 ATEMPO_MIN = 0.5
 ATEMPO_MAX = 2.0  # conservative; modern ffmpeg supports 0.5..100 but old builds cap at 2.0
 
+PitchMethod = Literal["asetrate", "rubberband"]
+
 
 class PitchTempoParams(BaseModel):
-    # NOTE (v0.2): default bumped from 1.005 (perceptually invisible but useless
-    # against chromaprint fingerprinting) to 1.012 (~21 cents, still subtle on
-    # dialogue, measurably shifts the fingerprint).
+    # v0.2 default bumped 1.005 → 1.012 (~21 cents); v0.3.1 introduces
+    # method='rubberband' which preserves formants and lets cid_aware push
+    # pitch to 1.04 without the "chipmunk" effect.
     pitch: float = Field(default=1.012, ge=0.5, le=2.0)
     tempo: float = Field(default=1.0, ge=0.5, le=2.0)
     sample_rate: int = Field(default=48000, ge=8000, le=192000)
     # If > 0, each run jitters the actual pitch by uniform(-rw, +rw).
     randomize_within: float = Field(default=0.0, ge=0.0, le=0.05)
+    # 'asetrate' (legacy, default) shifts the sample-rate header — fast but
+    # changes formants, so anything above ~2% sounds chipmunk-like.
+    # 'rubberband' uses the ffmpeg rubberband filter (phase vocoder) which
+    # preserves formants — larger shifts stay natural. Requires ffmpeg
+    # built with --enable-librubberband (Homebrew default has it).
+    method: PitchMethod = "asetrate"
 
 
 def cascade_atempo(target: float) -> str:
@@ -72,13 +82,19 @@ def _build_pitch_tempo(
         pitch = pitch + rng.uniform(-params.randomize_within, params.randomize_within)
         # Stay within sanity bounds.
         pitch = max(0.5, min(2.0, pitch))
-    compensate = params.tempo / pitch
-    atempo_chain = cascade_atempo(compensate)
-    filt = (
-        f"asetrate={params.sample_rate}*{pitch:.6f},"
-        f"aresample={params.sample_rate},"
-        f"{atempo_chain}"
-    )
+    if params.method == "rubberband":
+        # rubberband does both pitch+tempo in one pass without sample-rate
+        # tricks, so formants are preserved.
+        filt = f"rubberband=pitch={pitch:.6f}:tempo={params.tempo:.6f}"
+    else:
+        # Legacy asetrate path — fast, but distorts formants past ~2% shift.
+        compensate = params.tempo / pitch
+        atempo_chain = cascade_atempo(compensate)
+        filt = (
+            f"asetrate={params.sample_rate}*{pitch:.6f},"
+            f"aresample={params.sample_rate},"
+            f"{atempo_chain}"
+        )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
 
 

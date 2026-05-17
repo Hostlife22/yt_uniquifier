@@ -41,6 +41,7 @@ def preflight(
     findings.extend(_check_subtitles(source))
     findings.extend(_check_loudnorm(plan))
     findings.extend(_check_bitrate(source))
+    findings.extend(_check_pitch_rubberband(plan))
     return findings
 
 
@@ -118,6 +119,30 @@ def _check_fps(source: SourceMeta) -> list[PreflightFinding]:
         code="fps.unusual", severity="warn",
         message=f"FPS {v.fps:.3f} is non-standard; playback may be smoothed by YouTube.",
         suggestion="Consider re-encoding to 24/25/30/50/60 fps.",
+    )]
+
+
+def _check_pitch_rubberband(plan: Plan) -> list[PreflightFinding]:
+    """Verify ffmpeg has the `rubberband` filter when a profile asks for it."""
+    needs_rb = any(
+        tc.enabled and tc.id == "audio.pitch_tempo"
+        and (tc.params or {}).get("method") == "rubberband"
+        for tc in plan.profile.transforms
+    )
+    if not needs_rb:
+        return []
+    if _ffmpeg_has_filter("rubberband"):
+        return []
+    return [PreflightFinding(
+        code="audio.pitch.rubberband.missing", severity="fail",
+        message=(
+            "Profile asks for audio.pitch_tempo method='rubberband' but ffmpeg "
+            "lacks the `rubberband` filter."
+        ),
+        suggestion=(
+            "Use ffmpeg built with --enable-librubberband (Homebrew default), or "
+            "switch the profile to method='asetrate'."
+        ),
     )]
 
 

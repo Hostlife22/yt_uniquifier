@@ -26,15 +26,18 @@ from yt_uniquifier.core.calibration.intensity import scale_profile
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
-from yt_uniquifier.core.qa import vmaf as vmaf_mod
 from yt_uniquifier.core.qa.cid_predict import predict
+from yt_uniquifier.core.qa.quality import QualityMetric, quality_score
 from yt_uniquifier.core.segmenter import stream_copy_extract
 
 
 @dataclass(frozen=True)
 class CalibrationTarget:
     max_self_match: float = 0.2
-    min_vmaf: float = 88.0
+    # 0..100 on the unified scale (VMAF, SSIM × 100, or pHash × 100). 88
+    # is a sane VMAF target on natural footage; SSIM-fallback would treat
+    # the same number as a stricter bar.
+    min_quality: float = 88.0
     max_iterations: int = 5
     test_clip_sec: float = 60.0
 
@@ -45,7 +48,8 @@ class CalibrationStep:
     intensity_factor: float
     profile: Profile
     self_match: float
-    vmaf: float | None
+    quality: float | None
+    quality_metric: QualityMetric | None
     duration_sec: float
     note: str | None = None
 
@@ -57,7 +61,8 @@ class CalibratedResult:
     steps: list[CalibrationStep]
     converged: bool
     final_self_match: float
-    final_vmaf: float | None
+    final_quality: float | None
+    final_quality_metric: QualityMetric | None
     note: str | None = None
 
 
@@ -98,11 +103,14 @@ def calibrate(
                 force_new_variant=True,
             ))
             cid = predict(clip, out_path)
-            vmaf = vmaf_mod.compute(clip, out_path)
-            vmaf_score = vmaf.score
+            q = quality_score(clip, out_path)
+            q_value = q.value
+            q_metric = q.metric
+            q_note = q.note
         except Exception as exc:
             step = _step(i, factor, scaled, cid_self=1.0,
-                         vmaf=None, note=f"iteration failed: {exc}")
+                         quality=None, quality_metric=None,
+                         note=f"iteration failed: {exc}")
             steps.append(step)
             if on_step:
                 on_step(step)
@@ -111,20 +119,21 @@ def calibrate(
 
         step = _step(i, factor, scaled,
                      cid_self=cid.match_probability_self,
-                     vmaf=vmaf_score, note=None)
+                     quality=q_value, quality_metric=q_metric,
+                     note=q_note)
         steps.append(step)
         if on_step:
             on_step(step)
         best = _better(best, step, target)
 
         if cid.match_probability_self <= target.max_self_match and \
-                (vmaf_score is None or vmaf_score >= target.min_vmaf):
+                q_value >= target.min_quality:
             converged = True
             break
 
         if cid.match_probability_self > target.max_self_match:
             factor *= 1.5
-        elif vmaf_score is not None and vmaf_score < target.min_vmaf:
+        elif q_value < target.min_quality:
             factor /= 1.3
         else:
             converged = True
@@ -141,17 +150,21 @@ def calibrate(
         steps=steps,
         converged=converged,
         final_self_match=best.self_match,
-        final_vmaf=best.vmaf,
+        final_quality=best.quality,
+        final_quality_metric=best.quality_metric,
         note=None if converged
             else "did not converge within max_iterations; returning best-so-far",
     )
 
 
 def _step(i: int, factor: float, profile: Profile, *,
-          cid_self: float, vmaf: float | None, note: str | None) -> CalibrationStep:
+          cid_self: float, quality: float | None,
+          quality_metric: QualityMetric | None,
+          note: str | None) -> CalibrationStep:
     return CalibrationStep(
         iteration=i, intensity_factor=factor, profile=profile,
-        self_match=cid_self, vmaf=vmaf, duration_sec=0.0, note=note,
+        self_match=cid_self, quality=quality,
+        quality_metric=quality_metric, duration_sec=0.0, note=note,
     )
 
 
@@ -159,23 +172,22 @@ def _better(
     current: CalibrationStep | None, candidate: CalibrationStep,
     target: CalibrationTarget,
 ) -> CalibrationStep:
-    """Keep the step closest to (self_match <= target, vmaf >= min)."""
+    """Keep the step closest to (self_match <= target, quality >= min)."""
     if current is None:
         return candidate
-    # Prefer the one that respects both constraints.
     c_ok = candidate.self_match <= target.max_self_match and \
-        (candidate.vmaf is None or candidate.vmaf >= target.min_vmaf)
+        (candidate.quality is None or candidate.quality >= target.min_quality)
     cur_ok = current.self_match <= target.max_self_match and \
-        (current.vmaf is None or current.vmaf >= target.min_vmaf)
+        (current.quality is None or current.quality >= target.min_quality)
     if c_ok and not cur_ok:
         return candidate
     if cur_ok and not c_ok:
         return current
-    # Both satisfy or both don't — pick lower self_match; tiebreak on higher VMAF.
+    # Both satisfy or both don't — pick lower self_match; tiebreak on higher quality.
     if candidate.self_match < current.self_match:
         return candidate
     if candidate.self_match == current.self_match and \
-            (candidate.vmaf or 0) > (current.vmaf or 0):
+            (candidate.quality or 0) > (current.quality or 0):
         return candidate
     return current
 

@@ -1,10 +1,12 @@
 """Import each transform submodule so its register() runs at import time."""
 
 from yt_uniquifier.core.transforms import (
+    audio_compand,
     audio_eq,
     audio_loudnorm,
     audio_pitch,
     audio_resample,
+    audio_reverb,
     audio_spectral_smear,
     video_blend,
     video_color,
@@ -27,10 +29,12 @@ __all__ = [
     "LabelAllocator",
     "TransformSpec",
     "all_ids",
+    "audio_compand",
     "audio_eq",
     "audio_loudnorm",
     "audio_pitch",
     "audio_resample",
+    "audio_reverb",
     "audio_spectral_smear",
     "get",
     "register",

@@ -36,6 +36,10 @@ class LoudnormParams(BaseModel):
     integrated: float = Field(default=DEFAULT_TARGET_I, ge=-70.0, le=-5.0)
     true_peak: float = Field(default=-1.5, ge=-9.0, le=0.0)
     lra: float = Field(default=11.0, ge=1.0, le=20.0)
+    # v0.3.1: per-run jitter on the integrated target. Removes the
+    # always-same -14 LUFS envelope footprint that batch uploads otherwise
+    # share. 0 = legacy deterministic behaviour. 1.5 ≈ ±0.5 dB perceptual.
+    target_jitter_lufs: float = Field(default=0.0, ge=0.0, le=4.0)
 
 
 class LoudnormMeasurement(BaseModel):
@@ -106,11 +110,25 @@ def build_apply(
     m: LoudnormMeasurement,
     alloc: LabelAllocator,
     in_lbl: str,
+    *,
+    rng: object = None,
 ) -> FilterChain:
-    """Pass 2 filter: applies the measured normalisation linearly."""
+    """Pass 2 filter: applies the measured normalisation linearly.
+
+    With `target_jitter_lufs > 0` and an rng, the integrated target is
+    randomised in ±jitter around `params.integrated`. Same source + same
+    seed = same output (resume-friendly).
+    """
+    target_i = params.integrated
+    if params.target_jitter_lufs > 0 and rng is not None:
+        from random import Random as _Random
+        assert isinstance(rng, _Random)
+        target_i += rng.uniform(
+            -params.target_jitter_lufs, params.target_jitter_lufs,
+        )
     out = alloc.next("a")
     filt = (
-        f"loudnorm=I={params.integrated}:TP={params.true_peak}:LRA={params.lra}:"
+        f"loudnorm=I={target_i}:TP={params.true_peak}:LRA={params.lra}:"
         f"measured_I={m.input_i}:measured_TP={m.input_tp}:measured_LRA={m.input_lra}:"
         f"measured_thresh={m.input_thresh}:offset={m.target_offset}:"
         "linear=true:print_format=summary"

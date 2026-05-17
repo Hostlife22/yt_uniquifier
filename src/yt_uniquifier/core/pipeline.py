@@ -184,7 +184,8 @@ class FilterGraph:
                     assert isinstance(params, LoudnormParams)
                     assert self._loudnorm_measurement is not None
                     chain = build_apply(
-                        params, self._loudnorm_measurement, self.alloc, a_label or a_in
+                        params, self._loudnorm_measurement, self.alloc,
+                        a_label or a_in, rng=rng,
                     )
                 else:
                     chain = call_build(spec, params, self.alloc, a_label or a_in, rng=rng)
@@ -500,7 +501,7 @@ def build_main_audio_command(
         if tc.id == LOUDNORM_ID:
             ln_params = LoudnormParams.model_validate({**spec.defaults, **tc.params})
             assert measurement is not None
-            chain = build_apply(ln_params, measurement, alloc, a_label)
+            chain = build_apply(ln_params, measurement, alloc, a_label, rng=rng)
         else:
             chain = call_build(spec, params, alloc, a_label, rng=rng)
         a_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")

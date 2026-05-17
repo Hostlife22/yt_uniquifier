@@ -30,7 +30,10 @@ def calibrate_cmd(
         0.2, "--target",
         help="Target maximum predicted Content ID self-match (0..1).",
     ),
-    min_vmaf: float = typer.Option(88.0, "--min-vmaf"),
+    min_quality: float = typer.Option(
+        88.0, "--min-quality",
+        help="Minimum quality score (VMAF / SSIM × 100 / pHash × 100, unified scale).",
+    ),
     iterations: int = typer.Option(5, "--iterations"),
     clip_sec: float = typer.Option(
         60.0, "--clip-sec",
@@ -51,7 +54,7 @@ def calibrate_cmd(
 
     target = CalibrationTarget(
         max_self_match=target_match,
-        min_vmaf=min_vmaf,
+        min_quality=min_quality,
         max_iterations=iterations,
         test_clip_sec=clip_sec,
     )
@@ -60,16 +63,23 @@ def calibrate_cmd(
     table.add_column("#", justify="right")
     table.add_column("factor", justify="right")
     table.add_column("self_match", justify="right")
-    table.add_column("vmaf", justify="right")
+    table.add_column("quality", justify="right")
     table.add_column("note")
 
     def on_step(s: CalibrationStep) -> None:
+        quality_str = "—"
+        if s.quality is not None:
+            quality_str = f"{s.quality:.1f} ({s.quality_metric})"
+        note = s.note or ""
+        # Trim long notes so the table stays readable.
+        if len(note) > 60:
+            note = note[:57] + "..."
         table.add_row(
             str(s.iteration),
             f"{s.intensity_factor:.2f}",
             f"{s.self_match:.4f}",
-            f"{s.vmaf:.1f}" if s.vmaf is not None else "—",
-            s.note or "",
+            quality_str,
+            note,
         )
 
     try:
@@ -84,9 +94,14 @@ def calibrate_cmd(
 
     console.print(table)
     status = "[green]converged[/green]" if result.converged else "[yellow]not converged[/yellow]"
+    quality_str = ""
+    if result.final_quality is not None:
+        quality_str = (
+            f" · quality={result.final_quality:.1f} ({result.final_quality_metric})"
+        )
     console.print(
         f"{status} · final self_match={result.final_self_match:.4f}"
-        + (f" · vmaf={result.final_vmaf:.1f}" if result.final_vmaf is not None else "")
+        + quality_str
         + f" · factor={result.factor:.2f}"
     )
     if result.note:
