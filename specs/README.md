@@ -151,12 +151,73 @@
 
 | # | Файл | Дни | Статус |
 |---|------|-----|--------|
-| 14 | [14-audio-cid-resistance.md](./14-audio-cid-resistance.md) | 4 | ⏳ |
+| 14 | [14-audio-cid-resistance.md](./14-audio-cid-resistance.md) | 4 | ✅ |
 
 Содержит 5 workitem'ов: calibrate quality fallback (VMAF→SSIM→pHash),
 rubberband pitch (formant-preserving, дефолт cid_aware 1.012→1.04),
 loudnorm target jitter ±LUFS, `audio.compand` (dynamic range jitter),
 `audio.reverb` (opt-in в cid_aggressive).
+
+---
+
+## v0.3.2 + v0.3.3 — Доказуемая CID-устойчивость
+
+[Мастер-план](./v0.3.2-3-plan.md). Реакция на пост-v0.3.1 ресерч: cross-check
+с независимым отчётом выявил критическую дыру (`cid_aware.pitch = 1.04`
+внутри документированного Smitelli match-zone ±5%) и четыре измеримых
+пробела с верифицированными академическими источниками
+(Smitelli 2010, Fojcik & Syga arXiv:2501.11171 2025).
+
+### Граф зависимостей
+
+```
+v0.3.1 (current) ─► 15-pitch-haas-hotfix ─► 16-temporal-jitter-and-divergence
+                    (v0.3.2)                 (v0.3.3)
+```
+
+v0.3.3 строго зависит от v0.3.2: bumped pitch — это baseline, поверх
+которого ложится temporal jitter и остальное.
+
+### Порядок реализации
+
+| # | Файл | Релиз | Дни | Статус |
+|---|------|-------|-----|--------|
+| 15 | [15-pitch-haas-hotfix.md](./15-pitch-haas-hotfix.md) | v0.3.2 | 1 | ⏳ |
+| 16 | [16-temporal-jitter-and-divergence.md](./16-temporal-jitter-and-divergence.md) | v0.3.3 | 4 | ⏳ |
+
+**Итого v0.3.2 + v0.3.3:** 5 дней.
+
+### Содержание спек
+
+- **Spec 15 (v0.3.2 hotfix):** bump `cid_aware.pitch` 1.04→1.06, bump
+  `cid_aggressive.pitch` 1.06→1.08 (выход за Smitelli ±5% match-threshold);
+  новый transform `audio.haas_stereo` (15–25 ms delay одного канала,
+  mono-compatible вариант phase inversion); обновление `docs/profiles.md`
+  с цитатой Smitelli 2010.
+
+- **Spec 16 (v0.3.3 main):** `video.temporal_jitter` (random blackout / dup
+  / drop по Fojcik 2025 — 60%+ μAP drop в VSC2022); audio FP Hamming delta
+  как явный KPI в `qa.json` и HTML-отчёте; `seed_strategy: divergent`
+  (per-segment seed = hash(plan_hash, segment_idx)); `audio.noise_overlay`
+  (parametric pink/white noise mix через `anoisesrc + amix`).
+
+### Ключевые метрики v0.3.3 (target после релиза)
+
+| Метрика | До v0.3.2 | После v0.3.3 | Источник target |
+|---|---|---|---|
+| `cid_aware.pitch` | 1.04 (in match zone) | 1.06 (above threshold) | Smitelli 2010 |
+| pHash mean | ~0.78 | < 0.70 | Fojcik 2025 |
+| pHash worst chunk | 0.91 | < 0.80 | Fojcik 2025 |
+| Audio FP Hamming/frame | не виден | ≥ 30 bits | chromaprint heuristic |
+| Per-segment cross-pHash | n/a | < 0.85 | Fojcik 2025 |
+| VMAF mean | ~92 | ≥ 85 | acceptable trade-off |
+
+### Что НЕ входит (discredited research)
+
+Watermark overlay; adversarial gradient attacks (требуют CID API);
+`-map_metadata -1` как primary technique; GOP/PTS jitter; reverse audio;
+AB-style frame interleaving 60/120/240fps (платформа коллапсирует);
+face morphing; mobile-app "anti-CID" features (mythological).
 
 ---
 
