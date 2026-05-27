@@ -18,13 +18,19 @@ transforms:
     params: {rate: 0.99}
   - id: audio.pitch_tempo
     enabled: true
-    # rubberband for natural voice at larger shifts.
-    params: {pitch: 1.06, tempo: 0.99, randomize_within: 0.01, method: rubberband}
+    # rubberband for natural voice. 1.08 = comfortable margin past Smitelli
+    # ±5% match-zone (1.04–1.05). randomize_within keeps lower bound ≥ 1.07.
+    params: {pitch: 1.08, tempo: 0.99, randomize_within: 0.01, method: rubberband}
   - id: audio.eq
     enabled: true
     params:
       bands: [[110.0, -0.9], [3800.0, 0.6]]
       randomize_bands: true
+  - id: audio.haas_stereo
+    enabled: true
+    # Wider delay on aggressive — audible as stereo widening but still
+    # within psychoacoustic fusion (single-source perception).
+    params: {delay_ms: 25.0, randomize_within_ms: 8.0}
   - id: audio.resample
     enabled: true
     params: {intermediate_sr: 47997}

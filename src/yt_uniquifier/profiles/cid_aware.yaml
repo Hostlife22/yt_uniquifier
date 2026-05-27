@@ -8,6 +8,10 @@ description: |
   via the formant-preserving rubberband filter (voice stays natural).
   Adds loudnorm target jitter (±1.5 LUFS) and compand dynamic-range jitter
   to break audio-envelope fingerprinting.
+
+  v0.3.2: pitch bumped 1.04 → 1.06 (Smitelli 2010 documented ±5% as the CID
+  match boundary — 1.04 was inside the match zone). Adds audio.haas_stereo
+  for mono-compatible cross-channel phase shift.
 transforms:
   - id: video.crop_resize
     enabled: true
@@ -20,11 +24,18 @@ transforms:
     params: {strength: 5}
   - id: audio.pitch_tempo
     enabled: true
-    # rubberband preserves formants — voice stays natural even at 4%.
-    params: {pitch: 1.04, randomize_within: 0.005, method: rubberband}
+    # rubberband preserves formants. 1.06 is just past Smitelli's ±5%
+    # match-threshold; randomize_within keeps the lower bound at 1.055.
+    params: {pitch: 1.06, randomize_within: 0.005, method: rubberband}
   - id: audio.eq
     enabled: true
     params: {randomize_bands: true}
+  - id: audio.haas_stereo
+    enabled: true
+    # 15 ms is inside the Haas fusion threshold — perceived as one source
+    # in mono; widens stereo image slightly. Breaks cross-channel phase
+    # relationship that audio fingerprinting relies on.
+    params: {delay_ms: 15.0, randomize_within_ms: 4.0}
   - id: audio.resample
     enabled: true
     params: {intermediate_sr: 47999}

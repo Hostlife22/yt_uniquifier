@@ -43,9 +43,14 @@ Unknown top-level fields are rejected (`extra=forbid`).
 | `video.noise`       | video | `strength` (0..100) |
 | `video.blend_b`     | video | `b_video_path`, `opacity` (0.01..0.15) |
 | `video.speed`       | video | `rate` (0.5..2.0) |
-| `audio.pitch_tempo` | audio | `pitch`, `tempo`, `sample_rate` |
+| `audio.pitch_tempo` | audio | `pitch`, `tempo`, `sample_rate`, `method` (rubberband / asetrate) |
 | `audio.eq`          | audio | `bands` (list of `(freq_hz, gain_db)`), `width_q` |
-| `audio.loudnorm`    | audio | `integrated` (LUFS), `true_peak`, `lra` |
+| `audio.resample`    | audio | `intermediate_sr` (e.g. 47999) |
+| `audio.compand`     | audio | `threshold_db`, `ratio`, `randomize_within` |
+| `audio.reverb`      | audio | `intensity`, `style` (small_room / hall / plate) |
+| `audio.spectral_smear` | audio | `intensity` |
+| `audio.haas_stereo` | audio | `delay_ms` (1..40), `randomize_within_ms` |
+| `audio.loudnorm`    | audio | `integrated` (LUFS), `true_peak`, `lra`, `target_jitter_lufs` |
 
 ## Writing your own profile
 
@@ -63,3 +68,34 @@ Unknown top-level fields are rejected (`extra=forbid`).
   full source and the result is cached in `state.json`, so resume runs skip it.
 - `video.blend_b` requires a B-video path. Pass it via `--b-video <path>` on
   the CLI; the value is injected into the transform's params at runtime.
+
+## Why these defaults? — Smitelli citation
+
+The `cid_aware` and `cid_aggressive` profiles target YouTube Content ID
+audio matching thresholds documented in Scott Smitelli's 2010 controlled
+experiment ("Fun with YouTube's Audio Content ID System",
+<https://www.scottsmitelli.com/articles/youtube-audio-content-id>).
+
+Verified historical thresholds:
+
+| Transform | CID matches | CID does not match |
+|---|---|---|
+| pitch shift | within ±5 % (1.04–1.05 was inside match zone) | ≥ ±6 % |
+| white-noise overlay | mix < 45 % | mix ≥ 45 % |
+| stereo phase | identity | full inversion |
+
+**v0.3.2 defaults that follow from these thresholds:**
+
+- `cid_aware.audio.pitch_tempo.pitch = 1.06` — just past the documented
+  +5 % match boundary; `randomize_within: 0.005` keeps the lower bound at
+  1.055 (still on the no-match side).
+- `cid_aggressive.audio.pitch_tempo.pitch = 1.08` — comfortable margin.
+- `audio.haas_stereo` with `delay_ms ≈ 15 ms` (cid_aware) or
+  `delay_ms ≈ 25 ms` (cid_aggressive) — mono-compatible variant of stereo
+  phase inversion; shifts cross-channel phase without the audible artefact
+  of true inversion.
+
+These are not guarantees, only verified historical thresholds. YouTube's
+CID has been updated since 2010; community reports suggest the thresholds
+sit in roughly the same ranges, but the only authoritative test is an
+upload against your own corpus.

@@ -1,17 +1,19 @@
 # yt-uniquifier
 
 > Production-grade re-encoder with controlled, calibrated micro-transforms for
-> owned or licensed video content. **Current release: v0.3.0** —
-> CID-aware profiles, HDR→SDR tonemap, parallel CPU/GPU encoding, distributed
-> batch on shared filesystems.
+> owned or licensed video content. **Current release: v0.3.2** —
+> CID-aware profiles past the documented Smitelli ±5 % pitch match-zone,
+> mono-compatible Haas stereo widening, HDR→SDR tonemap, parallel CPU/GPU
+> encoding, distributed batch on shared filesystems.
 
 ## What it does
 
 - **One CLI** (10 commands) + optional **PyQt6 GUI** on top of `ffmpeg`.
-- **13 micro-transforms** composed into a single `-filter_complex` per ffmpeg
+- **16 micro-transforms** composed into a single `-filter_complex` per ffmpeg
   invocation: crop+rescale, color jitter, noise, rotation, mirror, frame-blend,
-  HDR→SDR tonemap, pitch / tempo, EQ, audio resample, spectral smear,
-  EBU R128 loudness normalization.
+  HDR→SDR tonemap, pitch / tempo (formant-preserving rubberband), EQ, audio
+  resample, spectral smear, compand (dynamic-range jitter), reverb,
+  Haas stereo widening, EBU R128 loudness normalization with target jitter.
 - **Keyframe-aware split** → per-segment process → concat demuxer, so multi-hour
   files survive Ctrl+C and resume from `state.json` on the next run.
 - **Multi-track audio**, soft subtitles, and chapters are passed through.
@@ -162,11 +164,14 @@ Run any command with `--help` for full flag listings.
 - **v0.1.0** — foundation pipeline, single-host single-file flow ✅
 - **v0.2.0** — CID-divergence calibration, corpus, calibrate loop, scale tools ✅
 - **v0.3.0** — HDR→SDR tonemap, parallel GPU detect, distributed batch ✅
-- **v0.4** — multi-GPU dispatch, S3/cloud queue backend, HDR10+ metadata —
-  see [specs/v0.3-plan.md §after-v0.3](./specs/v0.3-plan.md)
+- **v0.3.1** — audio CID resistance: calibrate quality fallback, rubberband
+  pitch, loudnorm jitter, compand, reverb ✅
+- **v0.3.2** — Smitelli pitch threshold fix (1.04 → 1.06 / 1.06 → 1.08),
+  audio Haas stereo widener ✅
+- **v0.3.3** — video temporal jitter, audio FP Hamming KPI, divergent
+  per-segment seeds, parametric noise overlay — see [specs/16-temporal-jitter-and-divergence.md](./specs/16-temporal-jitter-and-divergence.md)
 
-305 tests passing (unit + integration + smoke). `ruff` + `mypy --strict`
-clean (62 source files). CI runs on Ubuntu + macOS for Python 3.11 / 3.12.
+`ruff` + `mypy --strict` clean. CI runs on Ubuntu + macOS for Python 3.11 / 3.12.
 
 ## Development
 

@@ -3,6 +3,7 @@
 from yt_uniquifier.core.transforms import (
     audio_compand,
     audio_eq,
+    audio_haas,
     audio_loudnorm,
     audio_pitch,
     audio_resample,
@@ -31,6 +32,7 @@ __all__ = [
     "all_ids",
     "audio_compand",
     "audio_eq",
+    "audio_haas",
     "audio_loudnorm",
     "audio_pitch",
     "audio_resample",
