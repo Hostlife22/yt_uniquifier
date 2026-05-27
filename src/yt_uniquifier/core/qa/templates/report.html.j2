@@ -76,6 +76,15 @@
       {% else %}<em>not available</em>{% endif %}</td>
     </tr>
     <tr>
+      <th>Audio FP Hamming distance <small>(bits / 32-bit frame; ≥30 = high-confidence non-match)</small></th>
+      <td>{% if report.audio_fp_hamming_per_frame is not none %}
+        {{ "%.1f"|format(report.audio_fp_hamming_per_frame) }} bits
+        {% if report.audio_fp_match_confidence is not none %}
+          <small>(match confidence: {{ "%.2f"|format(report.audio_fp_match_confidence) }})</small>
+        {% endif %}
+      {% else %}<em>not available</em>{% endif %}</td>
+    </tr>
+    <tr>
       <th>VMAF <small>(0..100, higher = closer to source)</small></th>
       <td>{% if report.vmaf_mean is not none %}
         {{ "%.2f"|format(report.vmaf_mean) }}

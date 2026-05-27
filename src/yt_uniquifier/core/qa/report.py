@@ -92,6 +92,8 @@ def build_report(
     p("phash", 1.0)
 
     af_sim: float | None = None
+    af_hamming: float | None = None
+    af_confidence: float | None = None
     if run_audio_fp:
         p("audio_fp", 0.0)
         af = audio_fp.compare(input_path, output_path)
@@ -99,6 +101,12 @@ def build_report(
             af_sim = af.similarity
         elif af.note:
             notes.append(f"audio_fp: {af.note}")
+        afh = audio_fp.compare_hamming(input_path, output_path)
+        if afh.available:
+            af_hamming = afh.hamming_per_frame
+            af_confidence = afh.match_confidence
+        # If afh.available is False, af.compare() above already produced an
+        # equivalent note about fpcalc missing/failing — no second log.
         p("audio_fp", 1.0)
 
     vmaf_mean: float | None = None
@@ -176,6 +184,8 @@ def build_report(
         phash_distance_max=ph.distance_max,
         phash_similarity=ph.similarity,
         audio_fp_similarity=af_sim,
+        audio_fp_hamming_per_frame=af_hamming,
+        audio_fp_match_confidence=af_confidence,
         vmaf_mean=vmaf_mean,
         ssim_mean=ssim_mean,
         duration_match=duration_match,

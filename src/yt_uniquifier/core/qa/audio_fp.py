@@ -25,6 +25,27 @@ class AudioFPResult:
     note: str | None
 
 
+@dataclass(frozen=True)
+class AudioFPHamming:
+    """Bit-level Hamming distance between paired chromaprint subfingerprints.
+
+    Each subfingerprint is a 32-bit integer. Pair frame i of input with
+    frame i of output, popcount(a XOR b), average over all paired frames.
+
+    Interpretation (chromaprint heuristic):
+      ≤ 5 bits/frame → high-confidence match
+      6 – 14         → match
+      15 – 25        → uncertain
+      ≥ 26           → no match
+      ≥ 30           → high-confidence non-match
+    """
+
+    available: bool
+    hamming_per_frame: float | None
+    match_confidence: float | None
+    note: str | None = None
+
+
 def fpcalc_available() -> bool:
     return shutil.which("fpcalc") is not None
 
@@ -75,3 +96,60 @@ def compare(input_path: Path, output_path: Path) -> AudioFPResult:
         return AudioFPResult(available=True, similarity=0.0, note=None)
     jaccard = len(set_a & set_b) / union
     return AudioFPResult(available=True, similarity=jaccard, note=None)
+
+
+def _hamming_per_frame(a: list[int], b: list[int]) -> float:
+    """Mean bits-different per paired 32-bit subfingerprint over min length."""
+    n = min(len(a), len(b))
+    if n == 0:
+        return 0.0
+    total = 0
+    for ai, bi in zip(a[:n], b[:n], strict=True):
+        total += int(ai ^ bi).bit_count()
+    return total / n
+
+
+def compare_hamming(input_path: Path, output_path: Path) -> AudioFPHamming:
+    """Bit-level Hamming distance over paired chromaprint subfingerprints.
+
+    Returns AudioFPHamming with available=False if fpcalc is missing.
+    `match_confidence` is `1 - mean_hamming / 32`, in [0, 1]: higher means
+    closer to the input fingerprint, i.e. *worse* for CID divergence.
+    """
+    if not fpcalc_available():
+        return AudioFPHamming(
+            available=False,
+            hamming_per_frame=None,
+            match_confidence=None,
+            note="fpcalc not in PATH (install chromaprint to enable)",
+        )
+    a = _run_fpcalc(input_path)
+    b = _run_fpcalc(output_path)
+    if a is None or b is None:
+        return AudioFPHamming(
+            available=False,
+            hamming_per_frame=None,
+            match_confidence=None,
+            note="fpcalc invocation failed for one of the inputs",
+        )
+    try:
+        ai = _decode_chromaprint(str(a["fingerprint"]))
+        bi = _decode_chromaprint(str(b["fingerprint"]))
+    except (KeyError, ValueError):
+        return AudioFPHamming(
+            available=False,
+            hamming_per_frame=None,
+            match_confidence=None,
+            note="malformed fpcalc output",
+        )
+    if not ai or not bi:
+        return AudioFPHamming(
+            available=True, hamming_per_frame=0.0, match_confidence=1.0, note=None,
+        )
+    mean = _hamming_per_frame(ai, bi)
+    return AudioFPHamming(
+        available=True,
+        hamming_per_frame=mean,
+        match_confidence=max(0.0, min(1.0, 1.0 - mean / 32.0)),
+        note=None,
+    )

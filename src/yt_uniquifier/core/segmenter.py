@@ -24,6 +24,7 @@ from yt_uniquifier.core.pipeline import (
 from yt_uniquifier.core.qa.hashes import md5_file
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
+from yt_uniquifier.core.seed_resolver import derive_segment_seed
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
@@ -173,6 +174,18 @@ def stream_copy_extract(segment: Segment, source: Path, dest: Path) -> None:
         ) from exc
 
 
+def _plan_for_segment(plan: Plan, segment_idx: int) -> Plan:
+    """For seed_strategy='divergent', return a Plan copy with a per-segment seed.
+
+    For all other strategies returns `plan` unchanged. The derived seed is
+    deterministic from (plan_hash, idx, run_seed) so resume reproduces it.
+    """
+    if plan.profile.seed_strategy != "divergent":
+        return plan
+    seg_seed = derive_segment_seed(plan.plan_hash, segment_idx, plan.run_seed)
+    return plan.model_copy(update={"run_seed": seg_seed})
+
+
 def process_video_segment(
     segment: Segment,
     plan: Plan,
@@ -185,7 +198,8 @@ def process_video_segment(
     src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
     out = work_dir / f"seg_{segment.idx:04d}.mkv"
     stream_copy_extract(segment, plan.source.path, src)
-    cmd = build_video_segment_command(plan, src, out)
+    seg_plan = _plan_for_segment(plan, segment.idx)
+    cmd = build_video_segment_command(seg_plan, src, out)
     run_ffmpeg(
         cmd, output=out, on_event=on_event, cancel_token=cancel_token,
         log_path=out.with_suffix(".mkv.log"),

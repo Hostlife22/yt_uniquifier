@@ -13,6 +13,10 @@ transforms:
   - id: video.noise
     enabled: true
     params: {strength: 7}
+  - id: video.temporal_jitter
+    enabled: true
+    # Stronger jitter on aggressive — closer to Fojcik's reference 1/10 rate.
+    params: {blackout_prob: 0.050, drop_prob: 0.040, blackout_blur: true}
   - id: video.speed
     enabled: true
     params: {rate: 0.99}
@@ -43,6 +47,11 @@ transforms:
   - id: audio.reverb
     enabled: true
     params: {intensity: 0.10, style: small_room}
+  - id: audio.noise_overlay
+    enabled: true
+    # -12 dB ≈ 25 % amplitude mix — past Smitelli's "audible" threshold,
+    # well below the 45 % destructive boundary. Pink noise = smoother spectrum.
+    params: {noise_db: -12.0, color: pink, randomize_within_db: 2.0}
   - id: audio.loudnorm
     enabled: true
     params: {target_jitter_lufs: 2.0}
@@ -51,4 +60,4 @@ keep_hdr: false
 output_container: mp4
 target_codec: h264
 target_loudness_lufs: -14.0
-seed_strategy: per_run
+seed_strategy: divergent

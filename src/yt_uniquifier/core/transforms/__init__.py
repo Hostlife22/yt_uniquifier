@@ -5,6 +5,7 @@ from yt_uniquifier.core.transforms import (
     audio_eq,
     audio_haas,
     audio_loudnorm,
+    audio_noise_overlay,
     audio_pitch,
     audio_resample,
     audio_reverb,
@@ -14,6 +15,7 @@ from yt_uniquifier.core.transforms import (
     video_geom,
     video_noise,
     video_speed,
+    video_temporal_jitter,
     video_tonemap,
 )
 from yt_uniquifier.core.transforms.base import (
@@ -34,6 +36,7 @@ __all__ = [
     "audio_eq",
     "audio_haas",
     "audio_loudnorm",
+    "audio_noise_overlay",
     "audio_pitch",
     "audio_resample",
     "audio_reverb",
@@ -45,5 +48,6 @@ __all__ = [
     "video_geom",
     "video_noise",
     "video_speed",
+    "video_temporal_jitter",
     "video_tonemap",
 ]

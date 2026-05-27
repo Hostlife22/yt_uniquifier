@@ -22,6 +22,11 @@ transforms:
   - id: video.noise
     enabled: true
     params: {strength: 5}
+  - id: video.temporal_jitter
+    enabled: true
+    # Fojcik 2025: random frame perturbation drops μAP 60%+ on neural copy
+    # detectors. Conservative defaults (~0.8 jittered frames/sec at 24 fps).
+    params: {blackout_prob: 0.033, drop_prob: 0.020, blackout_blur: true}
   - id: audio.pitch_tempo
     enabled: true
     # rubberband preserves formants. 1.06 is just past Smitelli's ±5%
@@ -51,4 +56,4 @@ keep_hdr: false
 output_container: mp4
 target_codec: h264
 target_loudness_lufs: -14.0
-seed_strategy: per_run
+seed_strategy: divergent

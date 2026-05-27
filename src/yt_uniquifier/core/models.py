@@ -41,7 +41,7 @@ EncoderKind = Literal["h264", "hevc"]
 EncoderVendor = Literal["nvenc", "qsv", "amf", "videotoolbox", "x264", "x265"]
 Container = Literal["mp4", "mov", "mkv"]
 AudioTracksOpt = Literal["first", "all"]
-SeedStrategy = Literal["fixed", "per_run", "per_file"]
+SeedStrategy = Literal["fixed", "per_run", "per_file", "divergent"]
 
 
 class HDRInfo(BaseModel):
@@ -160,9 +160,13 @@ class Profile(BaseModel):
     target_loudness_lufs: float = -14.0
     seed: int | None = None
     # NEW (v0.2): controls run-time randomization of transform parameters.
-    #   fixed    — `seed` used verbatim, every run identical.
-    #   per_run  — fresh random seed on each invocation (default).
-    #   per_file — deterministic seed derived from the input path.
+    #   fixed     — `seed` used verbatim, every run identical.
+    #   per_run   — fresh random seed on each invocation (default).
+    #   per_file  — deterministic seed derived from the input path.
+    #   divergent — (v0.3.3) fresh per-invocation base seed, AND each segment
+    #               derives its own seed from sha256(plan_hash, idx, base_seed).
+    #               Adjacent segments get distinct transform-param phases, so
+    #               a temporal-aware detector can't lock onto run-level uniformity.
     seed_strategy: SeedStrategy = "per_run"
 
 
@@ -216,6 +220,10 @@ class QAReport(BaseModel):
     phash_distance_max: int
     phash_similarity: float
     audio_fp_similarity: float | None = None
+    # v0.3.3 — bit-level Hamming distance between paired chromaprint
+    # subfingerprints. ≥30 bits/frame ≈ high-confidence non-match.
+    audio_fp_hamming_per_frame: float | None = None
+    audio_fp_match_confidence: float | None = None
     vmaf_mean: float | None = None
     ssim_mean: float | None = None
     duration_match: bool
