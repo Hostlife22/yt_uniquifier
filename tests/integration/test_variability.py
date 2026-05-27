@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,31 @@ def _md5(path: Path) -> str:
     return h.hexdigest()
 
 
+def _have_rubberband() -> bool:
+    """True iff the local ffmpeg was built with --enable-librubberband.
+
+    `cid_aware.yaml` ships `audio.pitch_tempo.method: rubberband` since
+    v0.3.1; some Homebrew bottles (and CI runners) don't carry that filter,
+    so the preflight check fails and these tests can't exercise the
+    full chain. Skip cleanly in that case.
+    """
+    if not shutil.which("ffmpeg"):
+        return False
+    res = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-filters"],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    return " rubberband " in res.stdout
+
+
+needs_rubberband = pytest.mark.skipif(
+    not _have_rubberband(),
+    reason="cid_aware profile requires ffmpeg with --enable-librubberband",
+)
+
+
 @needs_ffmpeg
+@needs_rubberband
 @pytest.mark.integration
 def test_two_runs_of_cid_aware_differ(
     tiny_clip: Path, tmp_path: Path, isolated_cache: Path
@@ -58,6 +84,7 @@ def test_two_runs_of_cid_aware_differ(
 
 
 @needs_ffmpeg
+@needs_rubberband
 @pytest.mark.integration
 def test_resume_same_work_dir_reuses_seed(
     tiny_clip: Path, tmp_path: Path, isolated_cache: Path
@@ -98,6 +125,7 @@ def test_resume_same_work_dir_reuses_seed(
 
 
 @needs_ffmpeg
+@needs_rubberband
 @pytest.mark.integration
 def test_new_variant_overrides_stored_seed(
     tiny_clip: Path, tmp_path: Path, isolated_cache: Path
