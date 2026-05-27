@@ -15,8 +15,8 @@ upload encoding settings before the run, and against HDR sanity.
 | `audio.sr.bad` | warn | Sample rate ≠ 44.1k / 48k (YouTube will resample) |
 | `fps.ok` / `fps.unusual` | ok / warn | FPS not within ±0.1 of `{23.976, 24, 25, 29.97, 30, 50, 59.94, 60}` |
 | `subs.image_based` | warn | PGS/DVB subtitles present — cannot copy into mp4, will be dropped |
-| `hdr.color.transforms` | **fail** | HDR source + profile has color/eq/noise transforms without `keep_hdr=true` |
-| `hdr.unsupported.encoder` | **fail** | HDR source + encoder is libx264 (no 10-bit profile) |
+| `hdr.color.transforms` | **fail** | HDR source + profile has color/eq/noise transforms without `keep_hdr=true` **and** without `video.tonemap_sdr` enabled (either keep HDR through a zscale wrap or collapse to SDR via tonemap) |
+| `hdr.unsupported.encoder` | **fail** | HDR source + encoder is libx264 (no 10-bit profile) and the profile keeps HDR (workaround: enable `video.tonemap_sdr` for SDR output, or pick `libx265`/HEVC encoder) |
 | `loudnorm.ok` / `loudnorm.missing` | ok / warn | Profile lacks `audio.loudnorm` — output won't hit -14 LUFS |
 | `bitrate.over` | warn | Projected output bitrate > YouTube ceiling for the resolution |
 

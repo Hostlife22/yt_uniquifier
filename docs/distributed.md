@@ -119,5 +119,6 @@ services:
 find /shared/queue/done -mtime +30 -delete
 ```
 
-(A `yt-uniq queue prune --done-older-than 30d` subcommand is on the
-v0.3.1 roadmap.)
+(A `yt-uniq queue prune --done-older-than 30d` subcommand is deferred to
+v0.4 — there's no work going into it before the real-CID validation
+harness lands. Use the `find` snippet above in cron until then.)
