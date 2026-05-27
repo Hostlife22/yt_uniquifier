@@ -87,11 +87,15 @@ When adding a transform: snapshot test the `filter_complex` fragment. Do not ass
 
 ## Specs
 
-`specs/` contains the phased implementation plan (00-bootstrap through 05-gui-docs) that the codebase was built from. They are the spec of record for module signatures and acceptance criteria — consult before significant changes to a module.
+`specs/` is the phased implementation plan — currently `00-bootstrap` through `16-temporal-jitter-and-divergence`, plus version roadmaps (`v0.2-plan.md`, `v0.3-plan.md`, `v0.3.2-3-plan.md`). They are the spec of record for module signatures and acceptance criteria — consult the matching phase before significant changes to a module. Phases 06+ extend the v0.1 baseline with HDR pipeline, audio CID-resistance, fingerprint-aware QA, calibration loop, parallel/distributed batch, and per-segment seed divergence; treat them as additive, not retroactive.
 
 ## Docs
 
-- `docs/architecture.md` — the layer diagram and data flow (authoritative)
+- `docs/architecture.md` — layer diagram and data flow (authoritative)
 - `docs/profiles.md` — YAML profile schema and transform reference
 - `docs/filter_graph.md` — how transforms compose into `-filter_complex`
 - `docs/youtube_targets.md` — preflight target matrix
+- `docs/seed_strategy.md` — deterministic per-segment/per-transform seed derivation (load-bearing for reproducibility and divergence guarantees)
+- `docs/qa_report.md` — schema and KPIs for `<out>.qa.json` / `.qa.html`
+- `docs/calibrate.md` — calibration loop (auto-tunes profile params against fingerprint deltas)
+- `docs/distributed.md` — multi-host batch coordination
