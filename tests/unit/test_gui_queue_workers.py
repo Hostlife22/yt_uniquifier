@@ -1,0 +1,87 @@
+"""QueueStatusWorker + QueueWorker — distributed queue UI workers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+from yt_uniquifier.core.models import Profile, TransformConfig
+from yt_uniquifier.gui.workers.queue_status_worker import QueueStatusWorker
+from yt_uniquifier.gui.workers.queue_worker import QueueWorker
+
+
+def _profile() -> Profile:
+    return Profile(name="t", transforms=[TransformConfig(id="video.crop_resize")])
+
+
+def test_status_worker_failed_when_queue_not_initialised(tmp_path: Path) -> None:
+    """Pointing at a non-init'd dir → failed signal."""
+    worker = QueueStatusWorker(tmp_path / "missing")
+    errors: list[str] = []
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert errors and "not initialised" in errors[0]
+
+
+def test_status_worker_emits_stats_then_cancels(tmp_path: Path) -> None:
+    """One stats emission, then we cancel — worker exits."""
+    from yt_uniquifier.core.queue.leasing import init_queue
+    init_queue(tmp_path)
+    worker = QueueStatusWorker(tmp_path, poll_sec=0.1)
+    received: list[dict] = []
+
+    def grab_stats(s: dict) -> None:
+        received.append(s)
+        worker.request_cancel()
+
+    worker.stats.connect(grab_stats)
+    worker.run()
+    assert received
+    assert "pending" in received[0]
+
+
+def test_queue_worker_empty_stops_when_flag(tmp_path: Path) -> None:
+    """Empty queue + stop_after_empty=True → finished_ok with queue_empty."""
+    from yt_uniquifier.core.queue.leasing import init_queue
+    init_queue(tmp_path)
+    worker = QueueWorker(
+        tmp_path, _profile(), tmp_path / "out",
+        stop_after_empty=True,
+    )
+    finished: list[dict] = []
+    worker.finished_ok.connect(finished.append)
+    worker.run()
+    assert finished and finished[0]["reason"] == "queue_empty"
+
+
+def test_queue_worker_processes_one_file(tmp_path: Path) -> None:
+    """Add 1 file, mock run_full, ensure lease+release flow."""
+    from yt_uniquifier.core.queue.leasing import FileQueue, init_queue
+    init_queue(tmp_path)
+    q = FileQueue(tmp_path)
+    src = tmp_path / "src.mp4"
+    src.touch()
+    q.add(src)
+
+    from tests.unit.test_pipeline_graph import _plan, _src
+    fake_plan = _plan(_src(tmp_path), [TransformConfig(id="video.crop_resize")])
+
+    leased_paths: list[str] = []
+    done: list[tuple[str, str]] = []
+
+    with (
+        patch(
+            "yt_uniquifier.gui.workers.queue_worker.build_plan",
+            return_value=fake_plan,
+        ),
+        patch("yt_uniquifier.gui.workers.queue_worker.run_full"),
+    ):
+        worker = QueueWorker(
+            tmp_path, _profile(), tmp_path / "out",
+            stop_after_empty=True,
+        )
+        worker.lease_acquired.connect(leased_paths.append)
+        worker.file_done.connect(lambda p, o: done.append((p, o)))
+        worker.run()
+    assert len(leased_paths) == 1
+    assert len(done) == 1
