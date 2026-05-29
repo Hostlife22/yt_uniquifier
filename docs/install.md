@@ -311,8 +311,54 @@ rm -rf .venv ~/.cache/yt_uniquifier ~/.config/yt_uniquifier
 
 ## TL;DR — три команды
 
+С `make` (рекомендуется на macOS/Linux):
+
+```bash
+git clone https://github.com/Hostlife22/yt_uniquifier.git && cd yt_uniquifier
+make dev                  # создаёт .venv + ставит [dev,gui] extras
+make gui                  # запуск desktop UI
+```
+
+Без `make` (Windows или системы без GNU make):
+
 ```bash
 git clone https://github.com/Hostlife22/yt_uniquifier.git && cd yt_uniquifier
 python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev,gui]"
-yt-uniq-gui                  # или yt-uniq run <input> ... для CLI
+yt-uniq-gui
+```
+
+## Make-таргеты
+
+```
+make help              # показывает все таргеты с описанием
+
+# environment
+make venv              # создать .venv
+make install           # .venv + production install ([gui])
+make dev               # .venv + dev install ([dev,gui]) — рекомендовано
+make dev-min           # .venv + [dev] only (без PyQt6 — CLI work)
+
+# quality gates
+make lint              # ruff check
+make lint-fix          # ruff check --fix
+make typecheck         # mypy --strict
+make test              # pytest -q (full suite, ~2 min)
+make test-unit         # только unit тесты (~10s)
+make test-gui          # GUI тесты headless
+make test-integration  # integration (нужен ffmpeg)
+make check             # lint + typecheck + test (всё сразу)
+
+# run
+make gui               # yt-uniq-gui
+make cli               # yt-uniq --help
+make probe-encoders    # список доступных ffmpeg encoders
+
+# packaging
+make build             # PyInstaller .app/.exe/binary в dist/
+make build-wheel       # pip-installable .whl в dist/
+
+# maintenance
+make reset-cache       # сбросить encoder/keyframe кеш
+make clean             # удалить dist/, build/, __pycache__, *_cache
+make distclean         # clean + удалить .venv (полный reset)
 ```
