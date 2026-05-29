@@ -160,6 +160,102 @@ loudnorm target jitter ±LUFS, `audio.compand` (dynamic range jitter),
 
 ---
 
+## v0.5 — Modern PyQt6 desktop UI
+
+[Мастер-план v0.5](./v0.5-plan.md). Полный rewrite GUI shell с 1
+функционального экрана (single-file Run в v0.4.x) на 10 экранов,
+покрывающих **все 10 CLI команд + v0.4.1 validation harness + inline
+profile editor + embedded QA HTML viewer**. Стек тот же (PyQt6),
+добавляется `PyQt6-WebEngine` для embedded QA report viewer.
+
+### Граф зависимостей
+
+```
+v0.4.x (current)
+    │
+    ▼
+21-gui-foundation (v0.5.0) — app shell, sidebar nav, WorkerBase, AppState, Run screen
+    │
+    ▼
+22-gui-batch-calibrate (v0.5.1) — Batch + Calibrate screens + ChartWidget
+    │
+    ▼
+23-gui-qa-profile-history (v0.5.2) — QA Viewer (QWebEngineView) + Profile Editor + History
+    │
+    ▼
+24-gui-queue-validation (v0.5.3) — Queue dashboard + Validation 3-step wizard (v0.4.1 integration)
+    │
+    ▼
+25-gui-polish-packaging (v0.5.4) — Settings, Corpus, theme switcher, docs/gui.md, PyInstaller
+```
+
+### Порядок реализации
+
+| # | Файл | Релиз | Дни | Статус |
+|---|------|-------|-----|--------|
+| 21 | [21-gui-foundation.md](./21-gui-foundation.md) | v0.5.0 | 3.0 | ⏳ |
+| 22 | [22-gui-batch-calibrate.md](./22-gui-batch-calibrate.md) | v0.5.1 | 2.0 | ⏳ |
+| 23 | [23-gui-qa-profile-history.md](./23-gui-qa-profile-history.md) | v0.5.2 | 3.0 | ⏳ |
+| 24 | [24-gui-queue-validation.md](./24-gui-queue-validation.md) | v0.5.3 | 3.0 | ⏳ |
+| 25 | [25-gui-polish-packaging.md](./25-gui-polish-packaging.md) | v0.5.4 | 2.0 | ⏳ |
+
+**Итого v0.5:** ~13 дней (~2 недели).
+
+### Содержание спек
+
+- **Spec 21 (v0.5.0 foundation):** sidebar navigation (QListWidget +
+  QStackedWidget), `AppState` + persistence, `theme.py` (dark/light QSS
+  tokens), `WorkerBase`, 6 reusable widgets (FilePickerRow,
+  EncoderSelector, PreflightPanel, SegmentTimeline, LogConsole,
+  KpiPills), Run screen end-to-end (drop file → probe → preflight → run
+  → KPI pills). 9 placeholders для остальных screens.
+- **Spec 22 (v0.5.1):** Batch screen с per-file table (status / progress
+  / output_path), Calibrate screen с live convergence chart (3 lines:
+  intensity_factor / self_match / quality), `ChartWidget` с QtCharts +
+  QPainter fallback.
+- **Spec 23 (v0.5.2):** QA Viewer с embedded `QWebEngineView` (+
+  graceful fallback на "Open in browser" если WebEngine не установлен),
+  Profile Editor с auto-form generation per pydantic schema (все 18
+  transforms), History screen с persistence в `~/.config/yt_uniquifier/
+  history.json`. Worker hooks для history entries.
+- **Spec 24 (v0.5.3):** Queue dashboard с 2 sub-tabs (Queue management
+  + Worker control), `QueueStatusWorker` polling каждые 2s, `QueueWorker`
+  drainer. Validation 3-step wizard (Generate / Record / Analyze)
+  интегрирует v0.4.1 harness (`tools/generate_variants.py` +
+  `validation_log.csv` + `tools/validation_correlate.py`).
+- **Spec 25 (v0.5.4):** Settings screen с theme switcher (live re-apply
+  без перезапуска), Corpus screen, `docs/gui.md` с screenshots,
+  PyInstaller spec для desktop binaries (с fallback на `pipx install`
+  documentation если cross-compile fails).
+
+### Ключевые метрики v0.5
+
+| KPI | До v0.5 | После v0.5.4 |
+|---|---|---|
+| % CLI команд покрытых в GUI | 10 % (1 / 10) | **100 % (10 / 10)** + Validation wizard |
+| Time-to-first-run новому пользователю | ≥ 5 min (CLI learning curve) | **≤ 60s** (drop file → Run) |
+| Все v0.4.x core тесты | passing | passing (нет регрессий) |
+| Новые GUI тесты | 0 | **~80** (widget + worker + screen smoke) |
+| Headless launch test | n/a | `QT_QPA_PLATFORM=offscreen yt-uniq-gui` clean exit |
+| Theme switching | n/a | **dark / light / system без перезапуска** |
+| Cross-platform | only via pipx | **PyInstaller .app / .exe / AppImage** + pipx fallback |
+
+### Что НЕ входит в v0.5
+
+| Идея | Почему deferred |
+|---|---|
+| Web/Electron/Tauri shell | Пользователь явно выбрал PyQt6 |
+| Mobile / web hosting | Desktop-only tool |
+| Multi-user / auth / cloud sync | Single-user local |
+| Real-time CID API integration | Нет API; Validation wizard остаётся manual record loop |
+| Automated YouTube upload | TOS risk |
+| Plugin system для custom transforms | Transforms self-register через core/transforms/ |
+| Code signing (.app / .exe) | Defer to v0.6 если user demand justifies |
+| App auto-update (Sparkle / WinSparkle) | v0.6 candidate |
+| Localization (i18n) | English-only |
+
+---
+
 ## v0.4 — Empirical-grounded uniqueness
 
 [Мастер-план v0.4](./v0.4-plan.md). Реакция на пост-v0.3.3 honest audit:
