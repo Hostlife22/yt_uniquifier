@@ -49,10 +49,20 @@ this is the wrong tool, and I won't help you wire it up.
 
 Requires Python 3.11+ and `ffmpeg` / `ffprobe` on `PATH`.
 
+**TL;DR — three commands:**
+
 ```bash
-pip install -e ".[dev]"           # CLI + dev tooling
-pip install -e ".[dev,gui]"       # also installs PyQt6 for the desktop UI
-pip install -e ".[dev,qa]"        # adds chromaprint (fpcalc) Python bindings
+git clone https://github.com/Hostlife22/yt_uniquifier.git && cd yt_uniquifier
+python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev,gui]"
+yt-uniq-gui                       # GUI; or `yt-uniq run <input> ...` for CLI
+```
+
+**Extras:**
+
+```bash
+pip install -e ".[dev]"           # CLI + dev tooling (pytest, ruff, mypy)
+pip install -e ".[dev,gui]"       # + PyQt6 + WebEngine for the desktop UI
+pip install -e ".[dev,qa]"        # + chromaprint (fpcalc) Python bindings
 ```
 
 Optional binaries (graceful skip / fallback when missing):
@@ -60,7 +70,11 @@ Optional binaries (graceful skip / fallback when missing):
 - `fpcalc` (chromaprint) — audio fingerprint similarity & corpus matching
 - ffmpeg with `libvmaf` — VMAF score
 - ffmpeg with `zscale` (zimg) — HDR-keep wrap, HDR→SDR tonemap
+- ffmpeg with `librubberband` — formant-preserving pitch shift (cid_aware)
 - `nvidia-smi` — auto-detect NVENC concurrent-session cap (else fallback to 3)
+
+**Full guide** — prerequisites per OS, troubleshooting, desktop binary
+build via PyInstaller, GUI walkthrough: see [docs/install.md](./docs/install.md).
 
 ## Shipped profiles
 
@@ -154,6 +168,7 @@ Run any command with `--help` for full flag listings.
 
 ## Project docs
 
+- [Install + run guide](./docs/install.md) — prerequisites, venv setup, GUI launch, PyInstaller binary, troubleshooting
 - [Architecture](./docs/architecture.md)
 - [Profiles](./docs/profiles.md)
 - [Filter graph](./docs/filter_graph.md)
