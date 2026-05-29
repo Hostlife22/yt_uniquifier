@@ -326,14 +326,22 @@ def concat_segments(
     output: Path,
     metadata_args: list[str],
     *,
+    work_dir: Path,
     map_chapters_from: Path | None = None,
 ) -> None:
-    """Concatenate stream-copy segments and mux in the separately-processed audio."""
+    """Concatenate stream-copy segments and mux in the separately-processed audio.
+
+    The transient concat-demuxer list is written to ``work_dir`` (per-job
+    unique) — NOT ``output.parent``. Multiple concurrent ``yt-uniq batch``
+    jobs writing into a shared output directory would otherwise race on
+    the same ``output.parent / 'concat.txt'`` path and silently swap each
+    other's content.
+    """
     if not video_segments:
         raise PipelineError("no video segments to concat")
 
-    concat_list = output.parent / "concat.txt"
-    concat_list.parent.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    concat_list = work_dir / "concat.txt"
     # ffmpeg concat demuxer wraps paths in single quotes; literal `'` inside
     # a path must be escaped as `'\''` (close, escaped-quote, reopen).
     # Without this, a work_dir like `~/Downloads/it's a test/` fails with a

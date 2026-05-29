@@ -175,6 +175,7 @@ def run_full(
         main_audio,
         options.output,
         build_metadata_args(plan, title_template=options.title_template),
+        work_dir=options.work_dir,
     )
     # v0.4.3 — optional bitstream sanitization (second-pass libx264).
     if options.sanitize_bitstream:
