@@ -6,11 +6,16 @@ doesn't carry binary blobs and CI runs without pre-staged files.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+# v0.5.0 — GUI tests need a Qt platform; offscreen works headless on CI.
+# Set before any PyQt6 import happens (collection time, not just test time).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def _have_ffmpeg() -> bool:
