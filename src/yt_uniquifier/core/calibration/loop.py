@@ -172,13 +172,25 @@ def _better(
     current: CalibrationStep | None, candidate: CalibrationStep,
     target: CalibrationTarget,
 ) -> CalibrationStep:
-    """Keep the step closest to (self_match <= target, quality >= min)."""
+    """Keep the step closest to (self_match <= target, quality >= min).
+
+    quality=None means VMAF/SSIM/pHash all failed for this step — most
+    often because the output was corrupt or zero-length. Treating that
+    as "passed the quality gate" let the loop converge on a broken
+    candidate and report converged=True with final_quality=None.
+    """
     if current is None:
         return candidate
-    c_ok = candidate.self_match <= target.max_self_match and \
-        (candidate.quality is None or candidate.quality >= target.min_quality)
-    cur_ok = current.self_match <= target.max_self_match and \
-        (current.quality is None or current.quality >= target.min_quality)
+    c_ok = (
+        candidate.self_match <= target.max_self_match
+        and candidate.quality is not None
+        and candidate.quality >= target.min_quality
+    )
+    cur_ok = (
+        current.self_match <= target.max_self_match
+        and current.quality is not None
+        and current.quality >= target.min_quality
+    )
     if c_ok and not cur_ok:
         return candidate
     if cur_ok and not c_ok:
