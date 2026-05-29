@@ -110,7 +110,7 @@ class QaViewerScreen(ScreenBase):
         layout.addWidget(self.compute_input)
 
         self.compute_output = FilePickerRow(
-            "Output video:", "input",
+            "Output video:", "output",
             "Video (*.mp4 *.mov *.mkv);;All (*)",
             self.state,
         )
