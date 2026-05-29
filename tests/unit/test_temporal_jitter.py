@@ -22,6 +22,22 @@ from yt_uniquifier.core.transforms.video_temporal_jitter import (
 )
 
 
+def test_fallback_rng_uses_rng_seed_deterministically() -> None:
+    """Regression: when rng is not supplied, the builder must use
+    params.rng_seed as a deterministic fallback, not a time-seeded
+    Random() — otherwise a resumed run produces different blackout
+    indices than the partial encode already on disk.
+    """
+    spec = get("video.temporal_jitter")
+    params = TemporalJitterParams(rng_seed=12345)
+    a = call_build(spec, params, LabelAllocator(), "0:v:0", rng=None)
+    b = call_build(spec, params, LabelAllocator(), "0:v:0", rng=None)
+    assert a.filter_str == b.filter_str, (
+        "Two calls with the same rng_seed must produce identical "
+        "filter_str; got divergent strings"
+    )
+
+
 def test_default_emits_blackout_and_drop() -> None:
     spec = get("video.temporal_jitter")
     chain = call_build(

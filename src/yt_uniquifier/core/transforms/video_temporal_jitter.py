@@ -48,13 +48,24 @@ class TemporalJitterParams(BaseModel):
     # If true, blackout frames become mid-gray (128,128,128) — perceived
     # as a "soft flash". If false, pure black (0,128,128) — sharper.
     blackout_blur: bool = True
+    # Deterministic seed for the fallback RNG when the pipeline does NOT
+    # supply rng. A time-seeded Random() would make resumed runs re-roll
+    # the blackout/drop indices, breaking the temporal pattern already
+    # encoded into completed segments.
+    rng_seed: int | None = None
 
 
 def _build_temporal_jitter(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
     assert isinstance(params, TemporalJitterParams)
-    use_rng = rng if isinstance(rng, _random.Random) else _random.Random()
+    # Prefer the pipeline-supplied rng (derived from plan_hash + segment
+    # idx + run_seed). Fall back to a *deterministic* seed so resumed
+    # runs reproduce the same indices.
+    if isinstance(rng, _random.Random):
+        use_rng = rng
+    else:
+        use_rng = _random.Random(params.rng_seed)
 
     parts: list[str] = []
     blackout_set: set[int] = set()
