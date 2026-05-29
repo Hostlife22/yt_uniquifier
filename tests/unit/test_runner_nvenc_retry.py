@@ -33,6 +33,7 @@ class _FakePopen:
         self.stdout = _FakeStream(stdout_lines)
         self.stderr = MagicMock()
         self.stderr.read.return_value = stderr_text
+        self._stderr_text = stderr_text
         self._rc = rc
         self._done = False
 
@@ -48,6 +49,12 @@ class _FakePopen:
 
     def kill(self) -> None:
         self._done = True
+
+    def communicate(
+        self, timeout: float | None = None,  # noqa: ARG002
+    ) -> tuple[str, str]:
+        self._done = True
+        return "", self._stderr_text
 
 
 def _cmd(tmp_path: Path) -> BuiltCommand:

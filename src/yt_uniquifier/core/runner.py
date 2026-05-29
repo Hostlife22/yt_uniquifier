@@ -114,17 +114,22 @@ def run(
                 on_event(RunEvent(kind="progress", payload=dict(block)))
                 block.clear()
     finally:
-        # Drain stderr without blocking forever. After cancel/_terminate the
-        # process may still be writing; `proc.stderr.read()` is an unbounded
-        # blocking read that hangs the calling thread if ffmpeg exceeded the
-        # OS pipe buffer (~64 KB on Linux). `communicate(timeout=...)` gives
-        # the OS a chance to flush, then kills the process if it overstays.
+        # Drain stderr without blocking forever. After the stdout loop exits
+        # ffmpeg may still be flushing its stderr summary; a raw
+        # `proc.stderr.read()` is unbounded and hangs if ffmpeg exceeded the
+        # OS pipe buffer (~64 KB on Linux) before stdout EOF. Use
+        # `communicate(timeout=…)` on both branches — it drains both pipes
+        # concurrently and waits for the child to exit. The outer
+        # TimeoutExpired handler kills the process if it overstays.
         stderr_data = ""
         try:
             if cancelled_mid_loop:
                 _, stderr_data = proc.communicate(timeout=10)
             elif proc.stderr is not None:
-                stderr_data = proc.stderr.read()
+                # Long timeout: a single segment encode can legitimately
+                # take up to an hour on slow hardware. The TimeoutExpired
+                # handler below force-kills if it overruns.
+                _, stderr_data = proc.communicate(timeout=3600)
         except subprocess.TimeoutExpired:
             proc.kill()
             try:

@@ -35,10 +35,12 @@ class _FakePopen:
         self.stdout = _FakeStream(stdout_lines)
         self.stderr = MagicMock()
         self.stderr.read.return_value = stderr_text
+        self._stderr_text = stderr_text
         self._rc = rc
         self._done = False
         self.killed = False
         self.signalled = False
+        self.communicate_calls = 0
 
     def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002
         self._done = True
@@ -54,6 +56,13 @@ class _FakePopen:
     def kill(self) -> None:
         self.killed = True
         self._done = True
+
+    def communicate(
+        self, timeout: float | None = None,  # noqa: ARG002
+    ) -> tuple[str, str]:
+        self.communicate_calls += 1
+        self._done = True
+        return "", self._stderr_text
 
 
 def _patch_popen(monkeypatch: pytest.MonkeyPatch, fake: _FakePopen) -> None:
@@ -128,3 +137,27 @@ def test_subprocess_compatibility() -> None:
     """Smoke check that the real subprocess.Popen signature is unchanged."""
     # Trivial sanity — this ensures we import subprocess correctly.
     assert hasattr(subprocess, "Popen")
+
+
+def test_non_cancel_path_drains_stderr_via_communicate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: on the non-cancel path the runner must drain stderr
+    via communicate() rather than an unbounded proc.stderr.read().
+
+    A raw stderr.read() blocks until the child closes stderr; if ffmpeg
+    already filled the OS pipe buffer (~64 KB) before stdout EOF, the
+    child is blocked on its own write to stderr and never closes it →
+    the parent hangs forever. communicate() drains both pipes
+    concurrently and respects a timeout.
+    """
+    huge_stderr = "x" * 100_000  # > typical 64 KB pipe buffer
+    fake = _FakePopen(["progress=end\n"], rc=0, stderr_text=huge_stderr)
+    _patch_popen(monkeypatch, fake)
+
+    run(_cmd(tmp_path), output=tmp_path / "out.mp4")
+
+    assert fake.communicate_calls >= 1, (
+        "non-cancel path must drain stderr via communicate(), "
+        "not via proc.stderr.read()"
+    )
