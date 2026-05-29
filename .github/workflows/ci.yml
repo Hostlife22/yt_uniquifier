@@ -36,10 +36,14 @@ jobs:
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,gui]"
 
       - name: Ruff check
         run: ruff check .
 
       - name: Pytest
+        env:
+          # Headless Qt — required for ubuntu-latest (no X display);
+          # harmless on macOS runners.
+          QT_QPA_PLATFORM: offscreen
         run: pytest -q
