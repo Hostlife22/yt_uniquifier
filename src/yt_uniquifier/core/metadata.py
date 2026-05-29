@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from yt_uniquifier import __version__
 from yt_uniquifier.core.models import Plan, Profile, SourceMeta
 
 
@@ -31,9 +30,12 @@ def build_metadata_args(
 ) -> list[str]:
     """Return ffmpeg args that strip source metadata and add a clean set."""
     when = (creation_time or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+    # Do NOT write a custom encoder=… tag — ffmpeg's muxer writes its own
+    # encoder=Lavf<version>, indistinguishable from any other ffmpeg output.
+    # A tool-specific string would fingerprint the file as tool-generated;
+    # mirror the policy in pipeline.py:FilterGraph._metadata_args.
     args: list[str] = [
         "-map_metadata", "-1",
-        "-metadata", f"encoder=yt-uniquifier/{__version__}",
         "-metadata", f"creation_time={when}",
     ]
     if title_template:

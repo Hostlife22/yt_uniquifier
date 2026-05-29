@@ -53,7 +53,8 @@ def test_metadata_args_minimum(tmp_path: Path) -> None:
     args = build_metadata_args(plan, creation_time=datetime(2026, 5, 17, 21, 0, 0, tzinfo=UTC))
     # Must strip original metadata first.
     assert args[:2] == ["-map_metadata", "-1"]
-    assert "encoder=yt-uniquifier/0.1.0a0" in args
+    # No tool-specific encoder=… signature (fingerprint hygiene).
+    assert not any("yt-uniquifier" in s for s in args)
     assert any("creation_time=2026-05-17T21:00:00" in s for s in args)
     # Language tags propagated for each audio stream.
     assert "-metadata:s:a:0" in args

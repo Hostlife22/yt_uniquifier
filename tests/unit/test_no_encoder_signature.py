@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.unit.test_pipeline_graph import _plan, _src
+from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import TransformConfig
 from yt_uniquifier.core.pipeline import FilterGraph, build_video_segment_command
 
@@ -42,4 +43,14 @@ def test_segment_mode_no_yt_uniquifier_signature(tmp_path: Path) -> None:
     seg_in.touch()
     built = build_video_segment_command(plan, seg_in, tmp_path / "seg_out.mkv")
     joined = " ".join(built.args)
+    assert "yt-uniquifier" not in joined
+
+
+def test_concat_metadata_args_no_yt_uniquifier_signature(tmp_path: Path) -> None:
+    """build_metadata_args runs on the final concat output (orchestrator
+    path). It must mirror the pipeline policy and not leak a tool tag."""
+    src = _src(tmp_path)
+    plan = _plan(src, [TransformConfig(id="video.crop_resize")])
+    args = build_metadata_args(plan)
+    joined = " ".join(args)
     assert "yt-uniquifier" not in joined
