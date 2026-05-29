@@ -109,6 +109,83 @@ def _hamming_per_frame(a: list[int], b: list[int]) -> float:
     return total / n
 
 
+@dataclass(frozen=True)
+class AudioFPVariance:
+    """Per-window Hamming distance variance — KPI for divergent audio.
+
+    `hamming_per_window[i]` = mean Hamming distance for the chromaprint
+    subfingerprints inside window i (paired input vs output frames).
+    `variance_between_windows` = stdev of those means.
+
+    With v0.3.3-style uniform audio: variance ≈ 0 (all windows have the
+    same params, so per-window deltas are similar). With v0.4.2 windowed
+    audio: variance ≥ 4 bits expected on real fixtures.
+    """
+
+    available: bool
+    hamming_per_window: list[float] | None
+    variance_between_windows: float | None
+    note: str | None = None
+
+
+def compare_hamming_per_window(
+    input_path: Path, output_path: Path, n_windows: int = 5,
+) -> AudioFPVariance:
+    """Split paired chromaprint streams into n_windows equal chunks.
+
+    For each chunk, mean Hamming distance over its frames. Returns the
+    stdev across chunks. With windowed audio that varies across the
+    timeline, stdev grows; with uniform audio it stays near 0.
+    """
+    if not fpcalc_available():
+        return AudioFPVariance(
+            available=False, hamming_per_window=None,
+            variance_between_windows=None,
+            note="fpcalc not in PATH (install chromaprint to enable)",
+        )
+    a = _run_fpcalc(input_path)
+    b = _run_fpcalc(output_path)
+    if a is None or b is None:
+        return AudioFPVariance(
+            available=False, hamming_per_window=None,
+            variance_between_windows=None,
+            note="fpcalc invocation failed for one of the inputs",
+        )
+    try:
+        ai = _decode_chromaprint(str(a["fingerprint"]))
+        bi = _decode_chromaprint(str(b["fingerprint"]))
+    except (KeyError, ValueError):
+        return AudioFPVariance(
+            available=False, hamming_per_window=None,
+            variance_between_windows=None,
+            note="malformed fpcalc output",
+        )
+    n = min(len(ai), len(bi))
+    if n < n_windows or n_windows < 2:
+        return AudioFPVariance(
+            available=True, hamming_per_window=[0.0],
+            variance_between_windows=0.0,
+        )
+    window_size = n // n_windows
+    means: list[float] = []
+    for w in range(n_windows):
+        start = w * window_size
+        end = (w + 1) * window_size if w < n_windows - 1 else n
+        chunk_a = ai[start:end]
+        chunk_b = bi[start:end]
+        means.append(_hamming_per_frame(chunk_a, chunk_b))
+    # Population stdev — simple measure of spread.
+    mean_of_means = sum(means) / len(means)
+    variance = (
+        sum((m - mean_of_means) ** 2 for m in means) / len(means)
+    ) ** 0.5
+    return AudioFPVariance(
+        available=True,
+        hamming_per_window=means,
+        variance_between_windows=variance,
+    )
+
+
 def compare_hamming(input_path: Path, output_path: Path) -> AudioFPHamming:
     """Bit-level Hamming distance over paired chromaprint subfingerprints.
 

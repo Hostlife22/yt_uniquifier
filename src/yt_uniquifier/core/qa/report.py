@@ -94,6 +94,8 @@ def build_report(
     af_sim: float | None = None
     af_hamming: float | None = None
     af_confidence: float | None = None
+    af_per_window: list[float] | None = None
+    af_variance: float | None = None
     if run_audio_fp:
         p("audio_fp", 0.0)
         af = audio_fp.compare(input_path, output_path)
@@ -105,8 +107,13 @@ def build_report(
         if afh.available:
             af_hamming = afh.hamming_per_frame
             af_confidence = afh.match_confidence
-        # If afh.available is False, af.compare() above already produced an
-        # equivalent note about fpcalc missing/failing — no second log.
+        # v0.4.2 — per-window variance KPI.
+        afv = audio_fp.compare_hamming_per_window(input_path, output_path)
+        if afv.available:
+            af_per_window = afv.hamming_per_window
+            af_variance = afv.variance_between_windows
+        # If afh/afv.available is False, af.compare() above already produced
+        # an equivalent note about fpcalc missing/failing — no second log.
         p("audio_fp", 1.0)
 
     vmaf_mean: float | None = None
@@ -186,6 +193,8 @@ def build_report(
         audio_fp_similarity=af_sim,
         audio_fp_hamming_per_frame=af_hamming,
         audio_fp_match_confidence=af_confidence,
+        audio_fp_hamming_per_window=af_per_window,
+        audio_fp_hamming_variance=af_variance,
         vmaf_mean=vmaf_mean,
         ssim_mean=ssim_mean,
         duration_match=duration_match,

@@ -19,6 +19,7 @@ from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan, Segment
 from yt_uniquifier.core.pipeline import (
     build_main_audio_command,
+    build_main_audio_command_windowed,
     build_video_segment_command,
 )
 from yt_uniquifier.core.qa.hashes import md5_file
@@ -293,11 +294,21 @@ def process_main_audio(
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
 ) -> tuple[Path | None, LoudnormMeasurement | None]:
-    """Process the full source's main audio in one pass. Returns (path, measurement)."""
+    """Process the full source's main audio. Returns (path, measurement).
+
+    For `seed_strategy='divergent'` (v0.4.2+), audio is windowed into
+    ~60 s pieces each with their own per-window seed. Otherwise audio
+    runs in a single pass on the full source (legacy behavior).
+    """
     out = work_dir / "main_audio.m4a"
-    cmd, measurement = build_main_audio_command(
-        plan, out, loudnorm_measurement=loudnorm_measurement
-    )
+    if plan.profile.seed_strategy == "divergent":
+        cmd, measurement = build_main_audio_command_windowed(
+            plan, out, loudnorm_measurement=loudnorm_measurement
+        )
+    else:
+        cmd, measurement = build_main_audio_command(
+            plan, out, loudnorm_measurement=loudnorm_measurement
+        )
     if not cmd.args:
         return None, measurement
     run_ffmpeg(

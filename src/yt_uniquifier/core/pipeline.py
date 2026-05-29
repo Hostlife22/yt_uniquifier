@@ -533,6 +533,147 @@ def build_main_audio_command(
     )
 
 
+def build_main_audio_command_windowed(
+    plan: Plan,
+    audio_output: Path,
+    *,
+    loudnorm_measurement: LoudnormMeasurement | None = None,
+) -> tuple[BuiltCommand, LoudnormMeasurement | None]:
+    """Per-window audio processing for `seed_strategy='divergent'`.
+
+    Splits audio into ~60 s windows. Each window's stochastic audio
+    transforms (rubberband pitch jitter, Haas delay jitter, compand
+    threshold jitter, EQ band jitter, noise overlay db jitter) draws
+    from its own seeded RNG derived as
+    `derive_segment_seed(plan_hash, AUDIO_WINDOW_NS_OFFSET + idx, run_seed)`.
+
+    Adjacent windows crossfade via `acrossfade=d=0.1`. Loudnorm runs
+    once globally on the concatenated stream — single measurement, no
+    per-window levels.
+
+    For audio shorter than 2 × WINDOW_SEC, transparently falls back to
+    `build_main_audio_command` (single pass).
+
+    Returns same shape as build_main_audio_command for caller symmetry.
+    """
+    from yt_uniquifier.core.audio_windows import (
+        AUDIO_WINDOW_NS_OFFSET,
+        CROSSFADE_SEC,
+        plan_windows,
+    )
+    from yt_uniquifier.core.seed_resolver import derive_segment_seed
+
+    windows = plan_windows(plan.source.duration_sec)
+    if len(windows) <= 1:
+        # Short audio — windowing buys nothing; degrade to legacy path.
+        return build_main_audio_command(
+            plan, audio_output, loudnorm_measurement=loudnorm_measurement,
+        )
+
+    audio_transforms_all = [
+        tc for tc in plan.profile.transforms
+        if tc.enabled and get(tc.id).kind == "audio"
+    ]
+    audio_transforms = [tc for tc in audio_transforms_all if tc.id != LOUDNORM_ID]
+    needs_loudnorm = any(tc.id == LOUDNORM_ID for tc in audio_transforms_all)
+
+    if not audio_transforms_all or not plan.source.audio:
+        return (
+            BuiltCommand(args=[], filter_complex="", output_video_label=""),
+            loudnorm_measurement,
+        )
+
+    # Loudnorm measurement happens once on the full source — same as legacy path.
+    measurement = loudnorm_measurement
+    if needs_loudnorm and measurement is None:
+        ln_params = _loudnorm_params_from(audio_transforms_all)
+        measurement = measure(plan.source.path, ln_params)
+
+    alloc = LabelAllocator()
+    window_chains: list[str] = []
+    window_out_labels: list[str] = []
+
+    for w in windows:
+        seg_seed = derive_segment_seed(
+            plan.plan_hash, AUDIO_WINDOW_NS_OFFSET + w.idx, plan.run_seed,
+        )
+        win_rng = random.Random(seg_seed)
+        cut_in = max(0.0, w.start_sec - w.crossfade_in_sec)
+        cut_out = min(plan.source.duration_sec, w.end_sec + w.crossfade_out_sec)
+
+        # Start the per-window chain: atrim the slice, reset PTS to 0.
+        trim_out = alloc.next("a")
+        chain_parts = [
+            f"[0:a:0]atrim=start={cut_in:.4f}:end={cut_out:.4f},"
+            f"asetpts=PTS-STARTPTS[{trim_out}]"
+        ]
+        a_label = trim_out
+        # Apply each non-loudnorm transform with the per-window rng.
+        for tc in audio_transforms:
+            spec = get(tc.id)
+            params = spec.schema.model_validate({**spec.defaults, **tc.params})
+            chain = call_build(spec, params, alloc, a_label, rng=win_rng)
+            chain_parts.append(
+                f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"
+            )
+            a_label = chain.out_label
+        window_chains.append(";".join(chain_parts))
+        window_out_labels.append(a_label)
+
+    # Crossfade adjacent windows pairwise. Each step takes previous accumulator
+    # + next window's tail, produces a new combined label.
+    acrossfade_chains: list[str] = []
+    accumulator = window_out_labels[0]
+    for next_label in window_out_labels[1:]:
+        out_label = alloc.next("a")
+        acrossfade_chains.append(
+            f"[{accumulator}][{next_label}]"
+            f"acrossfade=d={CROSSFADE_SEC}:c1=tri:c2=tri[{out_label}]"
+        )
+        accumulator = out_label
+
+    # Global loudnorm on the concatenated stream.
+    if needs_loudnorm:
+        ln_defaults = get(LOUDNORM_ID).defaults
+        ln_from_profile = _loudnorm_params_from(audio_transforms_all).model_dump()
+        ln_params = LoudnormParams.model_validate({**ln_defaults, **ln_from_profile})
+        assert measurement is not None
+        ln_chain = build_apply(
+            ln_params, measurement, alloc, accumulator,
+            rng=random.Random(plan.run_seed),
+        )
+        final_label = ln_chain.out_label
+        loudnorm_str = f"[{ln_chain.in_label}]{ln_chain.filter_str}[{ln_chain.out_label}]"
+        all_chains = window_chains + acrossfade_chains + [loudnorm_str]
+    else:
+        final_label = accumulator
+        all_chains = window_chains + acrossfade_chains
+
+    filter_complex = ";".join(all_chains)
+    args: list[str] = [
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-y",
+        "-i", str(plan.source.path),
+        "-vn",
+        "-filter_complex", filter_complex,
+        "-map", f"[{final_label}]",
+        "-c:a", "aac", "-b:a", "256k",
+        "-map_metadata", "-1",
+        str(audio_output),
+    ]
+    return (
+        BuiltCommand(
+            args=args,
+            filter_complex=filter_complex,
+            output_video_label="",
+            output_audio_label=final_label,
+            loudnorm_measurement=measurement,
+        ),
+        measurement,
+    )
+
+
 def _segment_pix_fmt(plan: Plan) -> str:
     if not plan.source.video:
         return "yuv420p"

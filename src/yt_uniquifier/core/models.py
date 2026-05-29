@@ -224,6 +224,11 @@ class QAReport(BaseModel):
     # subfingerprints. ≥30 bits/frame ≈ high-confidence non-match.
     audio_fp_hamming_per_frame: float | None = None
     audio_fp_match_confidence: float | None = None
+    # v0.4.2 — per-window Hamming variance KPI for `seed_strategy='divergent'`.
+    # ≥ 4 bits between adjacent windows on real fixtures = audio varies
+    # meaningfully across the timeline.
+    audio_fp_hamming_per_window: list[float] | None = None
+    audio_fp_hamming_variance: float | None = None
     vmaf_mean: float | None = None
     ssim_mean: float | None = None
     duration_match: bool
