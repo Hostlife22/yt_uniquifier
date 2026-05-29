@@ -108,8 +108,16 @@ def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
     path = _keyframe_cache_path(source)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": 1, "written_at": time.time(), "keyframes": kfs}
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    # PID suffix prevents tmp-name collisions across concurrent batch jobs
+    # processing the same source. fsync before os.replace matches the
+    # checkpoint.py atomic-write pattern — without it a crash between
+    # rename and page-write can leave a zero-byte cache file that forces
+    # a 30-60s full re-scan on the next run.
+    tmp = path.with_suffix(f".json.{os.getpid()}.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload))
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, path)
 
 
