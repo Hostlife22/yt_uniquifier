@@ -18,10 +18,12 @@ Storage layout:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -168,18 +170,56 @@ class Corpus:
             "schema_version": SCHEMA_VERSION,
             "entries": [_entry_to_dict(e) for e in entries],
         }
-        tmp = self.index_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        # pid-suffixed tmp prevents collisions between concurrent
+        # processes (the corpus index is a *global* cache, unlike the
+        # per-job state.json — same justification as encoder.py).
+        tmp = self.index_path.with_suffix(f".json.{os.getpid()}.tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, self.index_path)
 
     def _upsert(self, entry: CorpusEntry) -> None:
-        entries = self._load_all()
-        new = [e for e in entries if e.id != entry.id]
-        new.append(entry)
-        self._save_all(new)
+        # Inter-process serialisation: load-mutate-save is not atomic
+        # across processes; two concurrent `yt-uniq batch` workers
+        # calling add() would each read the same snapshot, append, and
+        # one would silently overwrite the other. Hold an exclusive
+        # flock on a sibling lock file for the duration.
+        with _corpus_flock(self.index_path):
+            entries = self._load_all()
+            new = [e for e in entries if e.id != entry.id]
+            new.append(entry)
+            self._save_all(new)
 
 
 # ---- helpers --------------------------------------------------------------
+
+@contextlib.contextmanager
+def _corpus_flock(index_path: Path) -> Iterator[None]:
+    """Inter-process exclusive lock on a sibling lock file.
+
+    POSIX-only (fcntl). On Windows the lock is a no-op — yt-uniq batch
+    workloads on Windows are not a documented use case and a real
+    Windows port would need msvcrt.locking instead.
+    """
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = index_path.with_suffix(".json.lock")
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - windows
+        yield
+        return
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
 
 def _hash_path(path: Path) -> str:
     return hashlib.sha256(str(path.absolute()).encode("utf-8")).hexdigest()[:16]
