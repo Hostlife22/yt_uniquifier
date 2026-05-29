@@ -213,6 +213,16 @@ class RunScreen(ScreenBase):
             enforce_preflight=True,
         )
 
+        # If a previous worker is still being torn down, disconnect its
+        # signals before dropping the reference. Otherwise the C++ side
+        # may continue to deliver into now-dangling Python slots when
+        # the screen is rebuilt.
+        if self.run_worker is not None:
+            try:
+                self.run_worker.disconnect(self)  # type: ignore[arg-type]
+            except (TypeError, RuntimeError):
+                pass
+
         self.run_worker = RunWorker(
             plan, options, run_qa=True, fast_qa=False, state=self.state,
         )
