@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest *)",
+      "Bash(pytest)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(mypy)",
+      "Bash(pip install -e *)",
+      "Bash(pip install -e .)",
+      "Bash(python -m *)",
+      "Bash(python -V)",
+      "Bash(yt-uniq *)",
+      "Bash(yt-uniq-gui)",
+      "Bash(make *)",
+      "Bash(ffprobe *)",
+      "Bash(ffmpeg -version)",
+      "Bash(ffmpeg -encoders)",
+      "Bash(ffmpeg -decoders)",
+      "Bash(ffmpeg -filters)",
+      "Bash(fpcalc -version)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(ls *)",
+      "Bash(cat *.yaml)",
+      "Bash(cat *.toml)"
+    ],
+    "deny": [
+      "Bash(pip install --user *)",
+      "Bash(ffmpeg -i *)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)"
+    ]
+  }
+}
