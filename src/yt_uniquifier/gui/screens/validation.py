@@ -223,15 +223,23 @@ class ValidationScreen(ScreenBase):
         self.gen_worker.progress.connect(
             lambda _f, m: self.gen_log.log(m, "info"),
         )
-        self.gen_worker.finished_ok.connect(
-            lambda _m: self.gen_log.log("All variants generated.", "info"),
-        )
-        self.gen_worker.failed.connect(
-            lambda msg: self.gen_log.log(f"FAILED: {msg}", "error"),
-        )
+        self.gen_worker.finished_ok.connect(self._on_gen_finished)
+        self.gen_worker.failed.connect(self._on_gen_failed)
         self.gen_btn.setEnabled(False)
         self.gen_log.log(f"generating {self.gen_n.value()} variants…", "info")
         self.gen_worker.start()
+
+    def _on_gen_finished(self, _msg: object = "") -> None:
+        """Clear gen_worker so the next Generate click is allowed."""
+        self.gen_log.log("All variants generated.", "info")
+        self.gen_worker = None
+        self._refresh_gen_btn()
+
+    def _on_gen_failed(self, msg: str) -> None:
+        """Clear gen_worker on failure so the user can retry."""
+        self.gen_log.log(f"FAILED: {msg}", "error")
+        self.gen_worker = None
+        self._refresh_gen_btn()
 
     def _on_variant_done(self, rec: dict[str, object]) -> None:
         r = self.record_table.rowCount()

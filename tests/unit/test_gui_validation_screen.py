@@ -42,6 +42,43 @@ def test_validation_step_navigation(app: QApplication, tmp_path: Path,
     assert screen.stack.currentIndex() == 0
 
 
+def test_gen_btn_reenabled_after_finished(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: after a generation run completes, gen_worker must be
+    cleared so the Generate button is enabled for the next click. The
+    previous implementation kept gen_worker set forever, permanently
+    disabling the button after the first run."""
+    monkeypatch.setattr("yt_uniquifier.gui.state.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("yt_uniquifier.gui.state.STATE_PATH", tmp_path / "s.json")
+    monkeypatch.setattr("yt_uniquifier.gui.state.HISTORY_PATH", tmp_path / "h.json")
+    state = AppState()
+    screen = ValidationScreen(state)
+
+    # Simulate the preconditions that would make _refresh_gen_btn enable
+    # the button once gen_worker is None.
+    screen.input_path = tmp_path / "src.mp4"
+    screen.gen_out_dir = tmp_path / "out"
+    # Stand in for an in-flight worker — any non-None placeholder is enough
+    # because _refresh_gen_btn only checks identity against None.
+    screen.gen_worker = object()  # type: ignore[assignment]
+    screen._refresh_gen_btn()
+    assert not screen.gen_btn.isEnabled()
+
+    # The finished slot must clear gen_worker AND refresh button state.
+    screen._on_gen_finished()
+    assert screen.gen_worker is None
+    assert screen.gen_btn.isEnabled()
+
+    # Same contract on failure.
+    screen.gen_worker = object()  # type: ignore[assignment]
+    screen._refresh_gen_btn()
+    assert not screen.gen_btn.isEnabled()
+    screen._on_gen_failed("boom")
+    assert screen.gen_worker is None
+    assert screen.gen_btn.isEnabled()
+
+
 def test_validation_save_csv_appends_row(app: QApplication, tmp_path: Path,
                                           monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("yt_uniquifier.gui.state.CONFIG_DIR", tmp_path)
