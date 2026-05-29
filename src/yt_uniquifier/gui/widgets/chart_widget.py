@@ -40,6 +40,7 @@ class ChartWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._series: list[Series] = []
+        self._lines: dict[str, object] = {}  # name → QLineSeries (qtcharts only)
         self.setMinimumHeight(200)
         self._chart: object | None = None
         if HAS_QTCHARTS:
@@ -47,19 +48,45 @@ class ChartWidget(QWidget):
 
     def set_series(self, series: list[Series]) -> None:
         self._series = list(series)
+        self._lines.clear()
         self._refresh()
 
     def add_point(self, name: str, x: float, y: float) -> None:
-        for s in self._series:
-            if s.name == name:
-                s.points.append((x, y))
-                self._refresh()
-                return
-        self._series.append(Series(name=name, color="#3b6ea8", points=[(x, y)]))
-        self._refresh()
+        """Append a single point.
+
+        Calibration emits up to 3 add_point calls per step. The earlier
+        implementation called _refresh on every call which did
+        chart.removeAllSeries() + a full rebuild — O(N²) total work
+        across an iteration. Append to the retained QLineSeries
+        directly so each add_point is O(1).
+        """
+        existing = next((s for s in self._series if s.name == name), None)
+        if existing is None:
+            existing = Series(name=name, color="#3b6ea8", points=[])
+            self._series.append(existing)
+        existing.points.append((x, y))
+
+        if HAS_QTCHARTS and self._chart is not None:
+            line = self._lines.get(name)
+            if line is None:
+                line = QLineSeries()
+                line.setName(name)
+                pen = QPen(QColor(existing.color))
+                pen.setWidth(2)
+                line.setPen(pen)
+                chart: QChart = self._chart  # type: ignore[assignment]
+                chart.addSeries(line)
+                self._lines[name] = line
+                # Re-create default axes on first point of a new series
+                # so the line is rendered with proper scales.
+                chart.createDefaultAxes()
+            line.append(QPointF(x, y))  # type: ignore[union-attr]
+        else:
+            self.update()  # paintEvent fallback
 
     def clear(self) -> None:
         self._series = []
+        self._lines.clear()
         self._refresh()
 
     # ---- backends ----
