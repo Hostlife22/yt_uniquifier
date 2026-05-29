@@ -44,6 +44,11 @@ class RunOptions:
     # >1 enables parallel segment encoding on CPU (libx264/libx265 only).
     # GPU encoders silently fall back to sequential (single VRAM context).
     workers: int = 1
+    # v0.4.3 — second-pass libx264 re-encode of the final output to strip
+    # NVENC/QSV/AMF/VideoToolbox bitstream signatures. Adds ~30-60 min
+    # wall time + ~3 VMAF points drop on long sources. No-op for
+    # libx264-source runs. Refused on HDR/HEVC paths.
+    sanitize_bitstream: bool = False
 
 
 @dataclass(frozen=True)
@@ -171,6 +176,26 @@ def run_full(
         options.output,
         build_metadata_args(plan, title_template=options.title_template),
     )
+    # v0.4.3 — optional bitstream sanitization (second-pass libx264).
+    if options.sanitize_bitstream:
+        from yt_uniquifier.core.sanitizer import (
+            needs_sanitization,
+            reject_for_hdr_or_hevc,
+            sanitize_bitstream,
+        )
+        reject_for_hdr_or_hevc(plan.profile.keep_hdr, plan.encoder)
+        if needs_sanitization(plan.encoder):
+            emit(RunEvent(kind="log", payload={
+                "phase": "sanitize",
+                "message": f"re-encoding {plan.encoder.vendor} output via libx264",
+            }))
+            sanitize_bitstream(options.output, options.output)
+        else:
+            emit(RunEvent(kind="log", payload={
+                "phase": "sanitize",
+                "message": "encoder is already libx264 — skipping (no-op)",
+            }))
+
     emit(RunEvent(kind="done", payload={"output": str(options.output)}))
 
     if not options.keep_segments:

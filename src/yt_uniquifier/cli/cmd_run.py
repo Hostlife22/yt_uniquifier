@@ -58,6 +58,13 @@ def run_cmd(
              "stay sequential).",
     ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
+    sanitize_bitstream: bool = typer.Option(
+        False, "--sanitize-bitstream",
+        help="After main pipeline, re-encode output via libx264 to strip "
+             "NVENC / QSV / AMF / VideoToolbox bitstream signatures. Adds "
+             "~30-60 min wall time + ~3 VMAF points drop on long sources. "
+             "No-op for libx264 source. Refused on HDR/HEVC paths.",
+    ),
 ) -> None:
     """Run uniquification on an input."""
     try:
@@ -78,6 +85,7 @@ def run_cmd(
             enforce_preflight=not no_preflight,
             force_new_variant=new_variant,
             workers=workers,
+            sanitize_bitstream=sanitize_bitstream,
         )
 
         if no_progress:
