@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
 )
 
 from yt_uniquifier.gui.screens.base import PlaceholderScreen, ScreenBase
+from yt_uniquifier.gui.screens.batch import BatchScreen
+from yt_uniquifier.gui.screens.calibrate import CalibrateScreen
 from yt_uniquifier.gui.screens.run import RunScreen
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.theme import ThemeName, qss_for
@@ -45,6 +47,10 @@ def _build_screen(label: str, lands_in: str, state: AppState) -> QWidget:
     """Instantiate the real screen if available, else PlaceholderScreen."""
     if label == "Run":
         return RunScreen(state)
+    if label == "Batch":
+        return BatchScreen(state)
+    if label == "Calibrate":
+        return CalibrateScreen(state)
     return PlaceholderScreen(label, lands_in)
 
 
