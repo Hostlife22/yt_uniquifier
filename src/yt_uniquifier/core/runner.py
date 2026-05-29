@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import signal
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,14 +32,24 @@ class RunResult:
 
 
 class CancelToken:
+    """Thread-safe cooperative cancellation flag.
+
+    Uses ``threading.Event`` rather than a bare ``bool`` so the write
+    from the GUI thread (cancel()) and the read from the worker thread
+    (is_cancelled()) are correctly synchronised under PyPy and the
+    free-threaded CPython 3.13+ build. CPython's GIL hides the issue
+    for plain attribute reads/writes but that is an implementation
+    detail, not a language guarantee.
+    """
+
     def __init__(self) -> None:
-        self._cancelled = False
+        self._event = threading.Event()
 
     def cancel(self) -> None:
-        self._cancelled = True
+        self._event.set()
 
     def is_cancelled(self) -> bool:
-        return self._cancelled
+        return self._event.is_set()
 
 
 _NVENC_OOM_PATTERNS = (
