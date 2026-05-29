@@ -20,14 +20,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from yt_uniquifier.gui.screens.base import PlaceholderScreen, ScreenBase
+from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.screens.batch import BatchScreen
 from yt_uniquifier.gui.screens.calibrate import CalibrateScreen
+from yt_uniquifier.gui.screens.corpus import CorpusScreen
 from yt_uniquifier.gui.screens.history import HistoryScreen
 from yt_uniquifier.gui.screens.profile_editor import ProfileEditorScreen
 from yt_uniquifier.gui.screens.qa_viewer import QaViewerScreen
 from yt_uniquifier.gui.screens.queue import QueueScreen
 from yt_uniquifier.gui.screens.run import RunScreen
+from yt_uniquifier.gui.screens.settings import SettingsScreen
 from yt_uniquifier.gui.screens.validation import ValidationScreen
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.theme import ThemeName, qss_for
@@ -66,6 +68,11 @@ def _build_screen(label: str, lands_in: str, state: AppState) -> QWidget:
         return QueueScreen(state)
     if label == "Validation":
         return ValidationScreen(state)
+    if label == "Corpus":
+        return CorpusScreen(state)
+    if label == "Settings":
+        return SettingsScreen(state)
+    from yt_uniquifier.gui.screens.base import PlaceholderScreen
     return PlaceholderScreen(label, lands_in)
 
 

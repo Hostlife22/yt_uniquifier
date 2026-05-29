@@ -163,7 +163,8 @@ Run any command with `--help` for full flag listings.
 - [Calibrate workflow](./docs/calibrate.md) — `yt-uniq calibrate` deep dive
 - [Seed strategy](./docs/seed_strategy.md) — `per_run` / `per_file` / `fixed` / `divergent`
 - [Real-CID validation harness](./docs/validation_harness.md) — manual upload-observe-record loop to validate predictor accuracy
-- [Implementation specs](./specs/README.md) — phase-by-phase v0.1 → v0.4
+- [GUI guide](./docs/gui.md) — `yt-uniq-gui` screens, shortcuts, packaging
+- [Implementation specs](./specs/README.md) — phase-by-phase v0.1 → v0.5
 - [Changelog](./CHANGELOG.md) — release notes per tag
 
 ## Status
