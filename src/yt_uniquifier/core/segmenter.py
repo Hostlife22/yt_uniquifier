@@ -272,25 +272,43 @@ def process_video_segments_parallel(
                 on_segment_done(seg.idx, src, out)
         return results
 
-    # Parallel path: ThreadPoolExecutor + per-call OMP_NUM_THREADS=1.
-    # We use threads (not processes) because each segment spawns its own ffmpeg
-    # subprocess via run_ffmpeg, which already releases the GIL.
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    # Parallel path: ThreadPoolExecutor.
+    # We use threads (not processes) because each segment spawns its own
+    # ffmpeg subprocess via run_ffmpeg, which already releases the GIL.
+    # OMP_NUM_THREADS=1 is wanted to prevent libavfilter from
+    # oversubscribing the CPU; we used to mutate os.environ globally
+    # which leaked to every unrelated subprocess the host launched. The
+    # ffmpeg subprocess inherits env from the Python process by default,
+    # so setting it only on each subprocess invocation (via runner.py
+    # picking up the env) would be the cleanest fix — but that change
+    # crosses module boundaries. Apply it process-locally only when the
+    # caller has not already supplied a value, and only for the
+    # duration of this parallel block. (Best-effort: nested parallel
+    # batches with conflicting values are not supported.)
+    prior_omp = os.environ.get("OMP_NUM_THREADS")
+    if prior_omp is None:
+        os.environ["OMP_NUM_THREADS"] = "1"
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
-        futures = {
-            pool.submit(
-                process_video_segment, seg, plan, work_dir,
-                on_event=on_event, cancel_token=cancel_token,
-            ): seg
-            for seg in pending
-        }
-        for fut in concurrent.futures.as_completed(futures):
-            seg = futures[fut]
-            src, out = fut.result()
-            results.append((seg.idx, src, out))
-            if on_segment_done:
-                on_segment_done(seg.idx, src, out)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
+            futures = {
+                pool.submit(
+                    process_video_segment, seg, plan, work_dir,
+                    on_event=on_event, cancel_token=cancel_token,
+                ): seg
+                for seg in pending
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                seg = futures[fut]
+                src, out = fut.result()
+                results.append((seg.idx, src, out))
+                if on_segment_done:
+                    on_segment_done(seg.idx, src, out)
+    finally:
+        # Restore the pre-existing env so the value we set doesn't leak
+        # to later unrelated subprocess invocations in the same process.
+        if prior_omp is None:
+            os.environ.pop("OMP_NUM_THREADS", None)
     return results
 
 
