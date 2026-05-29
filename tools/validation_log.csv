@@ -1,0 +1,2 @@
+variant_id,source_basename,profile,output_path,run_seed,plan_hash,cid_predict_self,audio_fp_hamming_per_frame,phash_worst_chunk,vmaf_mean,upload_date,youtube_video_id,match_status,matched_against,claim_type,notes
+variant_001,EXAMPLE.mp4,cid_aware,/tmp/example/variant_001.mp4,2783492018,a8f3b2c1d4e5f607,0.18,17.2,0.74,87.1,2026-06-01,EXAMPLE_VIDEO_ID,no_match,,,this is a header+example row; delete after first real run

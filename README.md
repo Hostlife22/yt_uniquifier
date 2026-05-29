@@ -162,7 +162,8 @@ Run any command with `--help` for full flag listings.
 - [QA report fields](./docs/qa_report.md) — what `output.qa.json` / `.qa.html` contain and how to read them
 - [Calibrate workflow](./docs/calibrate.md) — `yt-uniq calibrate` deep dive
 - [Seed strategy](./docs/seed_strategy.md) — `per_run` / `per_file` / `fixed` / `divergent`
-- [Implementation specs](./specs/README.md) — phase-by-phase v0.1 → v0.3.3
+- [Real-CID validation harness](./docs/validation_harness.md) — manual upload-observe-record loop to validate predictor accuracy
+- [Implementation specs](./specs/README.md) — phase-by-phase v0.1 → v0.4
 - [Changelog](./CHANGELOG.md) — release notes per tag
 
 ## Status
