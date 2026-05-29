@@ -223,6 +223,16 @@ def _save_cache(version_key: str, candidates: list[EncoderCandidate]) -> None:
         "written_at": time.time(),
         "candidates": [c.model_dump() for c in candidates],
     }
-    tmp = CACHE_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    # PID-suffixed tmp + fsync. Concurrent `yt-uniq batch` processes share
+    # this cache path; without per-process tmp names, two probes racing on
+    # `encoders.json.tmp` can land in a torn write whose stale read makes the
+    # other process silently miss encoders. fsync forces the bytes to disk
+    # before the rename so a crash mid-flush leaves either the old cache or
+    # the new one, never a zero-byte file.
+    tmp = CACHE_PATH.with_name(f"encoders.{os.getpid()}.tmp")
+    serialised = json.dumps(payload, indent=2)
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(serialised)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, CACHE_PATH)

@@ -334,7 +334,13 @@ def concat_segments(
 
     concat_list = output.parent / "concat.txt"
     concat_list.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"file '{p.absolute()}'" for p in video_segments]
+    # ffmpeg concat demuxer wraps paths in single quotes; literal `'` inside
+    # a path must be escaped as `'\''` (close, escaped-quote, reopen).
+    # Without this, a work_dir like `~/Downloads/it's a test/` fails with a
+    # cryptic parse error.
+    _Q = "'"
+    _ESC_Q = "'\\''"
+    lines = [f"file '{str(p.absolute()).replace(_Q, _ESC_Q)}'" for p in video_segments]
     concat_list.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     cmd: list[str] = [

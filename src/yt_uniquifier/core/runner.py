@@ -95,10 +95,12 @@ def run(
     assert proc.stdout is not None
 
     block: dict[str, str] = {}
+    cancelled_mid_loop = False
     try:
         for line in proc.stdout:
             if cancel_token and cancel_token.is_cancelled():
                 _terminate(proc)
+                cancelled_mid_loop = True
                 break
 
             line = line.strip()
@@ -112,9 +114,23 @@ def run(
                 on_event(RunEvent(kind="progress", payload=dict(block)))
                 block.clear()
     finally:
-        # Drain stderr without blocking too long.
+        # Drain stderr without blocking forever. After cancel/_terminate the
+        # process may still be writing; `proc.stderr.read()` is an unbounded
+        # blocking read that hangs the calling thread if ffmpeg exceeded the
+        # OS pipe buffer (~64 KB on Linux). `communicate(timeout=...)` gives
+        # the OS a chance to flush, then kills the process if it overstays.
+        stderr_data = ""
         try:
-            stderr_data = proc.stderr.read() if proc.stderr else ""
+            if cancelled_mid_loop:
+                _, stderr_data = proc.communicate(timeout=10)
+            elif proc.stderr is not None:
+                stderr_data = proc.stderr.read()
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                _, stderr_data = proc.communicate(timeout=5)
+            except Exception:  # noqa: BLE001
+                stderr_data = ""
         except Exception:  # noqa: BLE001
             stderr_data = ""
         if stderr_data:

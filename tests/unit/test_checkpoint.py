@@ -77,8 +77,10 @@ def test_different_plan_hash_invalidates(tmp_path: Path) -> None:
     s2 = CheckpointStore(work, _plan(tmp_path, plan_hash="hash_two_xxxxxxx"))
     segs = s2.init_or_resume(_segments())
     assert all(s.status == "pending" for s in segs)
-    # Stale file should be set aside.
-    assert (work / "state.json.stale").exists()
+    # Stale file should be set aside under a timestamped name so retries
+    # in the same work_dir don't clobber prior stale snapshots.
+    stale_files = list(work.glob("state.json.stale-*"))
+    assert stale_files, "expected one stale snapshot file in work_dir"
 
 
 def test_mark_invalid_index_raises(tmp_path: Path) -> None:

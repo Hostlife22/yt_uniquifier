@@ -20,10 +20,18 @@ class CropResizeParams(BaseModel):
 
 
 def _build_crop_resize(
-    params: BaseModel, alloc: LabelAllocator, in_lbl: str
+    params: BaseModel,
+    alloc: LabelAllocator,
+    in_lbl: str,
+    *,
+    rng: random.Random | None = None,
 ) -> FilterChain:
     assert isinstance(params, CropResizeParams)
-    rng = random.Random(params.rng_seed)
+    # Prefer the plan-level rng (seeded from run_seed / per-segment derived
+    # seed) so resumed runs reproduce the same crop. Falling back to a
+    # fresh Random(None) would re-roll non-deterministically and violate
+    # CLAUDE.md invariant #10 (deterministic per-segment seeds).
+    rng = rng or random.Random(params.rng_seed)
     s = params.max_strength
     left, right, top, bottom = (rng.uniform(0, s) for _ in range(4))
     cw = max(1 - left - right, 0.5)

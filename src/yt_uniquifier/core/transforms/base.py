@@ -9,6 +9,8 @@ which transform comes before or after it.
 
 from __future__ import annotations
 
+import functools
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from random import Random
@@ -87,6 +89,26 @@ def reset_for_tests() -> None:
     _REGISTRY.clear()
 
 
+@functools.cache
+def _builder_accepts_rng(build_fn: BuildFn) -> bool:
+    """Cache `rng`-acceptance per build callable.
+
+    Inspecting the signature once at first use avoids a `try/except
+    TypeError` fallback that would otherwise silently swallow genuine
+    TypeErrors raised inside the builder body (e.g. wrong operand types in
+    a filter string expression). LRU-cache is unbounded but the number of
+    distinct builder callables is fixed at process startup.
+    """
+    try:
+        sig = inspect.signature(build_fn)
+    except (TypeError, ValueError):
+        return False
+    params = sig.parameters
+    if "rng" in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 def call_build(
     spec: TransformSpec,
     params: BaseModel,
@@ -98,9 +120,10 @@ def call_build(
     """Invoke a builder, transparently passing rng if it accepts it.
 
     Lets old builders stay positional-only without burdening every transform
-    with `**_` boilerplate.
+    with `**_` boilerplate. Signature is inspected once and cached, so a
+    real TypeError raised inside the builder propagates instead of being
+    masked by a try/except fallback.
     """
-    try:
+    if _builder_accepts_rng(spec.build):
         return spec.build(params, alloc, in_label, rng=rng)
-    except TypeError:
-        return spec.build(params, alloc, in_label)
+    return spec.build(params, alloc, in_label)

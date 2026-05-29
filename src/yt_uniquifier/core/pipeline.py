@@ -731,7 +731,15 @@ def compute_plan_hash(
                 [source.video[0].width, source.video[0].height] if source.video else []
             ),
         },
-        "profile": profile.model_dump(),
+        # mode="json" forces pydantic to coerce Path / Enum / datetime fields
+        # to their JSON-native form (str / member-name / ISO). Without this,
+        # a profile containing e.g. `BlendBParams.b_video_path: Path` would
+        # leave a raw `Path` in the dict and json.dumps would fall back to
+        # `default=str` — and `str(Path(...))` is platform-dependent
+        # (backslashes on Windows). That gives a different plan_hash for the
+        # same logical profile across OSes, breaking resume in cross-platform
+        # batch runs.
+        "profile": profile.model_dump(mode="json"),
         "encoder": encoder.name,
         "tool_version": __version__,
     }

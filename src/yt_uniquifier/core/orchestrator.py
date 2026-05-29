@@ -7,6 +7,7 @@ progress events (RunEvent + custom phase markers).
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,9 +102,8 @@ def run_full(
     if options.force_new_variant:
         state_path = options.work_dir / "state.json"
         if state_path.exists():
-            import time as _time
             state_path.rename(state_path.with_suffix(
-                f".json.stale-variant-{int(_time.time())}"
+                f".json.stale-variant-{int(time.time())}"
             ))
 
     store = CheckpointStore(options.work_dir, plan)
