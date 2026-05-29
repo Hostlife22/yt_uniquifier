@@ -20,13 +20,16 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 |     v        v                       v          v       |
 | encoder              checkpoint           runner        |
 |                                                         |
-|  seed_resolver → divergent per-segment seeds            |
-|  calibration   → bisect intensity vs cid_predict        |
-|  qa            → phash + audio_fp + vmaf + ssim         |
-|                + cid_predict + corpus + chunked QA      |
+|  seed_resolver  → divergent per-segment seeds           |
+|  audio_windows  → per-window audio seeds (divergent)    |
+|  calibration    → bisect intensity vs cid_predict       |
+|  qa             → phash + audio_fp + vmaf + ssim        |
+|                 + cid_predict + corpus + chunked QA     |
 |  queue / worker → shared-FS distributed batch           |
+|  sanitizer      → optional libx264 bitstream rewrap     |
+|  errors         → typed exception hierarchy             |
 |                                                         |
-|                       concat → metadata → qa            |
+|                concat → (sanitize?) → metadata → qa     |
 +---------------------------------------------------------+
                              |
                              v
@@ -40,17 +43,21 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/models.py` | All pydantic dataclasses: SourceMeta, Plan, Profile, Segment, QAReport |
 | `core/probe.py` | `probe(path) -> SourceMeta` via single ffprobe call |
 | `core/encoder.py` | `detect_encoders()` with real test-run + cache; `pick_encoder()`; per-candidate `max_parallel` cap |
-| `core/transforms/` | **18 transforms** registered at import; see [filter_graph.md](./filter_graph.md) |
+| `core/transforms/` | **19 transforms** registered at import (10 video, 9 audio — `video_geom.py` registers `crop_resize`, `rotate`, `mirror`); see [filter_graph.md](./filter_graph.md) |
 | `core/transforms/hdr_wrap.py` | zscale linear-light roundtrip for color transforms over HDR |
 | `core/pipeline.py` | `FilterGraph.build()` + `build_video_segment_command` + `build_main_audio_command` + `compute_plan_hash` |
 | `core/runner.py` | subprocess wrapper with `-progress pipe:1`, RunEvent stream, CancelToken |
 | `core/segmenter.py` | keyframe-aware split + per-segment process (parallel where safe) + concat demuxer |
-| `core/checkpoint.py` | atomic `state.json` for resume |
+| `core/checkpoint.py` | atomic `state.json` for resume (thread-safe `RLock` + fsync + `os.replace`) |
 | `core/seed_resolver.py` | `resolve_run_seed(profile, source)` + `derive_segment_seed(plan_hash, idx, run_seed)` for the `divergent` strategy |
+| `core/audio_windows.py` | `~60 s` audio windowing for `divergent` strategy — per-window seed via `derive_segment_seed(plan_hash, window_idx + 1_000_000, run_seed)` with `0.1 s` crossfade; loudnorm stays global |
 | `core/metadata.py` | `-metadata` args + title templates |
 | `core/preflight.py` | YouTube target matrix + HDR validation |
+| `core/sanitizer.py` | Opt-in second-pass libx264 re-encode (`yt-uniq run --sanitize-bitstream`) to normalize file-level encoder signature; no-op on libx264 source, refuses HEVC/HDR-keep |
 | `core/orchestrator.py` | `run_full(plan, options, on_event, cancel_token) -> RunSummary` |
-| `core/profile_loader.py` | YAML → `Profile` with pydantic validation |
+| `core/profile_loader.py` | YAML → `Profile` with pydantic validation (`extra=forbid`) |
+| `core/errors.py` | Typed exception hierarchy: `YtUniquifierError`, `ProbeError`, `EncoderError`, `FfmpegNotFoundError`, `PipelineError`, `CheckpointError`, `PreflightFailure` |
+| `core/utils/ffmpeg_paths.py` | `ffmpeg_bin()` / `ffprobe_bin()` resolver — single source of truth for binary lookup |
 | `core/qa/` | hashes, phash, audio_fp (similarity + Hamming distance), vmaf, ssim, cid_predict, corpus, quality (fallback chain), report + HTML |
 | `core/calibration/` | `intensity.scale_profile` (multiplicative scaling around identity) + `loop.calibrate` (bisect against `cid_predict`) |
 | `core/queue/leasing.py` | Atomic POSIX-rename file queue (`pending/`, `in_progress/`, `done/`, `failed/`) with heartbeat + reaper |
@@ -75,7 +82,9 @@ input.mp4
   │       filter_complex      → seg_NNNN.mkv
   │       state.json mark done
   ├─ process_main_audio() ← runs on full source; two-pass loudnorm cached in state.json
+  │   (divergent strategy: audio_windows.plan_windows → per-window seed + 0.1 s crossfade)
   ├─ concat_segments()    → concat demuxer + stream-copy mux of main audio
+  ├─ sanitize_bitstream() → optional libx264 rewrap (opt-in via --sanitize-bitstream)
   └─ build_report()       → output.qa.json + output.qa.html
 output.mp4
 ```
