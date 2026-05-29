@@ -62,10 +62,10 @@ def _build_temporal_jitter(
     # Prefer the pipeline-supplied rng (derived from plan_hash + segment
     # idx + run_seed). Fall back to a *deterministic* seed so resumed
     # runs reproduce the same indices.
-    if isinstance(rng, _random.Random):
-        use_rng = rng
-    else:
-        use_rng = _random.Random(params.rng_seed)
+    use_rng = (
+        rng if isinstance(rng, _random.Random)
+        else _random.Random(params.rng_seed)
+    )
 
     parts: list[str] = []
     blackout_set: set[int] = set()

@@ -40,7 +40,6 @@ from yt_uniquifier.core.pipeline import compute_plan_hash
 from yt_uniquifier.core.transforms import all_ids, get
 from yt_uniquifier.core.transforms.base import LabelAllocator, call_build
 
-
 # ---- helpers ----------------------------------------------------------------
 
 

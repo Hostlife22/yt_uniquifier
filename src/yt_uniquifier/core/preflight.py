@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading as _threading
 from typing import Literal
 
 from pydantic import BaseModel
@@ -253,8 +254,6 @@ def _check_hdr(
         ))
     return findings
 
-
-import threading as _threading
 
 _FFMPEG_FILTERS_CACHE: dict[str, set[str]] = {}
 _FFMPEG_FILTERS_CACHE_LOCK = _threading.Lock()

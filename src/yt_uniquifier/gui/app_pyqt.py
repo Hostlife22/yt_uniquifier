@@ -6,6 +6,7 @@ v0.5.0 — replaces the single-window v0.4 shell. Adds 10 sidebar entries
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from typing import cast
 
@@ -138,10 +139,8 @@ class MainWindow(QMainWindow):
         # Persist any in-memory AppState (recent files, etc.) — Settings
         # was the only call site before, so closing without visiting it
         # discarded changes.
-        try:
+        with contextlib.suppress(Exception):
             self.state.save()
-        except Exception:  # noqa: BLE001
-            pass
 
         # Walk every screen, locate any QThread-derived attribute that is
         # still running, request cooperative cancel, then wait briefly.
@@ -154,7 +153,7 @@ class MainWindow(QMainWindow):
                     continue
                 try:
                     obj = getattr(screen, attr_name)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - defensive walker
                     continue
                 if isinstance(obj, QThread) and obj.isRunning():
                     cancel = getattr(obj, "request_cancel", None)

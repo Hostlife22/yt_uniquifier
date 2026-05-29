@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import webbrowser
 from pathlib import Path
@@ -218,10 +219,8 @@ class RunScreen(ScreenBase):
         # may continue to deliver into now-dangling Python slots when
         # the screen is rebuilt.
         if self.run_worker is not None:
-            try:
+            with contextlib.suppress(TypeError, RuntimeError):
                 self.run_worker.disconnect(self)  # type: ignore[arg-type]
-            except (TypeError, RuntimeError):
-                pass
 
         self.run_worker = RunWorker(
             plan, options, run_qa=True, fast_qa=False, state=self.state,
