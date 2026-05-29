@@ -1,10 +1,13 @@
 # yt-uniquifier
 
 > Production-grade re-encoder with controlled, calibrated micro-transforms for
-> owned or licensed video content. **Current release: v0.3.3** —
+> owned or licensed video content. **Current release: v0.5.4** —
+> PyQt6 desktop UI with 10 functional screens on top of the v0.4 CLI:
 > CID-aware profiles past Smitelli's documented thresholds, academic-paper-
 > verified temporal jitter, audio-FP Hamming KPI, divergent per-segment seeds,
 > HDR→SDR tonemap, parallel CPU/GPU encoding, distributed batch on shared FS.
+
+![yt-uniquifier Run screen](./docs/screenshots/run-screen.png)
 
 ## What it does
 
