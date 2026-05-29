@@ -160,6 +160,89 @@ loudnorm target jitter ±LUFS, `audio.compand` (dynamic range jitter),
 
 ---
 
+## v0.4 — Empirical-grounded uniqueness
+
+[Мастер-план v0.4](./v0.4-plan.md). Реакция на пост-v0.3.3 honest audit:
+закрывает 6 верифицируемых пробелов (placebo transforms, deterministic
+periodicity, encoder signature) и впервые открывает **самый большой
+remaining hole** — отсутствие эмпирической валидации против реального
+Content ID.
+
+### Граф зависимостей
+
+```
+v0.3.3 (current)
+    │
+    ▼
+17-quick-wins (v0.4.0)
+    │
+    ▼
+18-real-cid-validation-harness (v0.4.1) — производит ≥5 samples
+    │
+    ▼
+19-per-segment-audio-divergence (v0.4.2) — opt: ship только если v0.4.1
+    │                                          показал что audio uniformity
+    │                                          реально предсказывает match
+    ▼
+20-bitstream-sanitization (v0.4.3) — opt-in, не зависит строго от 19
+```
+
+### Порядок реализации
+
+| # | Файл | Релиз | Дни | Статус |
+|---|------|-------|-----|--------|
+| 17 | [17-quick-wins-and-truly-random-jitter.md](./17-quick-wins-and-truly-random-jitter.md) | v0.4.0 | 1.0 | ⏳ |
+| 18 | [18-real-cid-validation-harness.md](./18-real-cid-validation-harness.md) | v0.4.1 | 0.5 | ⏳ |
+| 19 | [19-per-segment-audio-divergence.md](./19-per-segment-audio-divergence.md) | v0.4.2 | 1.0 | ⏳ |
+| 20 | [20-bitstream-sanitization.md](./20-bitstream-sanitization.md) | v0.4.3 | 0.5 | ⏳ |
+
+**Итого v0.4:** ~3 дня.
+
+### Содержание спек
+
+- **Spec 17 (v0.4.0):** 5 быстрых фиксов — убрать `-metadata
+  encoder=yt-uniquifier`, выключить placebo `audio.resample 47999↔48000`,
+  поднять weak defaults (crop max_strength, color_eq brightness/saturation,
+  noise strength, audio.eq jitter), переписать `temporal_jitter` на
+  Poisson-sampled frame list (период 60 s вместо 30-кадровой регулярности),
+  новый `video.subpixel_sharpen` через `unsharp=lx=5:la=0.05`.
+- **Spec 18 (v0.4.1):** `tools/generate_variants.py` + `validation_log.csv`
+  schema + `tools/validation_correlate.py` (Spearman, без scipy) +
+  `docs/validation_harness.md`. Бридж между предиктором и реальностью
+  — нужен ручной upload loop.
+- **Spec 19 (v0.4.2):** window-split audio chain под `seed_strategy:
+  divergent`. Каждое 60 s окно получает свой seed через
+  `derive_segment_seed(plan_hash, idx, run_seed)`, между окнами
+  `acrossfade=d=0.1`. Loudnorm остаётся global. Новый KPI
+  `audio_fp_hamming_variance` ≥ 4 bits.
+- **Spec 20 (v0.4.3):** opt-in `--sanitize-bitstream` flag — второй pass
+  через libx264 CRF 20 чтобы стереть NVENC/QSV/AMF/VideoToolbox
+  bitstream signatures. Audio stream-copy. HDR/HEVC paths защищены через
+  explicit reject.
+
+### Ключевые метрики v0.4
+
+| KPI | До v0.4 | После v0.4.0 | После v0.4.2 | Источник |
+|---|---|---|---|---|
+| pHash similarity (mean) | < 0.75 | **< 0.70** | < 0.70 | Stronger crop/noise + subpixel + Poisson temporal |
+| pHash worst chunk | < 0.80 | **< 0.75** | < 0.75 | То же |
+| VMAF mean | ≥ 85 | **≥ 83** | ≥ 83 | Slight relax — accept stronger transforms cost |
+| Audio FP Hamming/frame | ≥ 15 bits | ≥ 15 bits | **≥ 18 bits** | Per-window seed divergence widens distribution |
+| Per-window audio Hamming variance | n/a | n/a | **≥ 4 bits** | Новый KPI — Spec 19 |
+| File metadata = generic ffmpeg | no | **yes** | yes | Spec 17 — strip encoder=yt-uniquifier |
+| Real-CID no-match rate (own content, N≥5) | not measured | not measured | **measured** | Spec 18 — ручной upload loop |
+
+### Что НЕ входит в v0.4
+
+| Идея | Почему deferred |
+|---|---|
+| Neural FP attack mode (differentiable Chromaprint surrogate) | 1-2 месяца research, нужен GPU + dataset. v0.5+ |
+| Калибровка на community CID model | Нет открытой CID-class модели (Meta VSC2022 closest, но не CID-equivalent) |
+| Автоматизированный YouTube upload | TOS risk; YouTube Studio Copyright tab visibility только в UI |
+| Verify Smitelli 2010 thresholds | Закрывается косвенно через Spec 18 sample data |
+
+---
+
 ## v0.3.2 + v0.3.3 — Доказуемая CID-устойчивость
 
 [Мастер-план](./v0.3.2-3-plan.md). Реакция на пост-v0.3.1 ресерч: cross-check
