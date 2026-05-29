@@ -223,6 +223,7 @@ class RunScreen(ScreenBase):
         )
         self.run_worker.finished_ok.connect(self._on_done)
         self.run_worker.failed.connect(self._on_failed)
+        self.run_worker.cancelled.connect(self._on_cancelled)
 
         # Initialise timeline with rough segment estimate.
         n_segments = max(1, int(plan.source.duration_sec / options.target_segment_sec))
@@ -261,6 +262,14 @@ class RunScreen(ScreenBase):
     def _on_failed(self, message: str) -> None:
         self.status_label.setText("Failed.")
         self.log.log(f"!!! {message}", "error")
+        self.run_worker = None
+        self.cancel_btn.setEnabled(False)
+        self._refresh_run_button()
+
+    def _on_cancelled(self) -> None:
+        """Distinct from _on_failed: user cancellation is not an error."""
+        self.status_label.setText("Cancelled.")
+        self.log.log("--- Cancelled by user ---", "info")
         self.run_worker = None
         self.cancel_btn.setEnabled(False)
         self._refresh_run_button()

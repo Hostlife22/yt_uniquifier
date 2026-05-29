@@ -25,6 +25,7 @@ class RunWorker(WorkerBase):
     # Override base.finished_ok with a more specific signature.
     finished_ok = pyqtSignal(str, str)             # output_path, qa_html_path
     segment_progress = pyqtSignal(int, str)        # segment_idx, status
+    cancelled = pyqtSignal()                       # user-initiated cancel
 
     def __init__(
         self,
@@ -53,8 +54,16 @@ class RunWorker(WorkerBase):
                 cancel_token=self.cancel_token,
             )
         except Exception as exc:
-            self._push_history("failed")
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            # Distinguish user cancel from genuine failure: the orchestrator
+            # raises PipelineError("cancelled by user") when cancel_token
+            # fires. Lumping that into "failed" misreports the history and
+            # shows the user a misleading error banner.
+            if self.cancel_token.is_cancelled():
+                self._push_history("cancelled")
+                self.cancelled.emit()
+            else:
+                self._push_history("failed")
+                self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
 
         qa_html: Path | None = None
