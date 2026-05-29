@@ -137,16 +137,27 @@ def run_full(
         def _on_segment_done(idx: int, src: Path, out: Path) -> None:
             store.mark(idx, "done", src_path=src, out_path=out)
 
-        process_video_segments_parallel(
-            pending, plan, options.work_dir,
-            workers=options.workers,
-            on_event=lambda e: emit(RunEvent(
-                kind=e.kind,
-                payload={**e.payload, "phase": "segment"},
-            )),
-            cancel_token=cancel_token,
-            on_segment_done=_on_segment_done,
-        )
+        try:
+            process_video_segments_parallel(
+                pending, plan, options.work_dir,
+                workers=options.workers,
+                on_event=lambda e: emit(RunEvent(
+                    kind=e.kind,
+                    payload={**e.payload, "phase": "segment"},
+                )),
+                cancel_token=cancel_token,
+                on_segment_done=_on_segment_done,
+            )
+        except Exception:
+            # A worker crashed; reset segments that never reached "done"
+            # back to "failed" so resume sees a clean state. Without this
+            # they remain "in_progress" forever, confusing the GUI's
+            # progress display and any future resume logic that might
+            # treat in_progress as recoverable.
+            for seg in store.all_segments():
+                if seg.status == "in_progress":
+                    store.mark(seg.idx, "failed")
+            raise
 
     # Main audio (cached via state.json).
     main_audio = store.get_main_audio()
