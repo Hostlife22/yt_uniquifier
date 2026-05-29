@@ -111,12 +111,21 @@ class AppState(QObject):
 
     # ---- recents ----
     def push_recent(self, path: str) -> None:
-        """Add to front, dedup, cap at RECENTS_CAP."""
+        """Add to front, dedup, cap at RECENTS_CAP. Persist immediately.
+
+        Recents was previously only flushed when the user visited
+        Settings and clicked Save — closing without that step lost
+        the list. Persist on every push so the next session sees the
+        same recents even after a crash.
+        """
         if path in self._recents:
             self._recents.remove(path)
         self._recents.insert(0, path)
         self._recents = self._recents[:RECENTS_CAP]
         self.recents_changed.emit(list(self._recents))
+        import contextlib
+        with contextlib.suppress(OSError):
+            self.save()
 
     # ---- history ----
     def push_history(self, entry: HistoryEntry) -> None:
