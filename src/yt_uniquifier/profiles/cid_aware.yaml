@@ -12,16 +12,30 @@ description: |
   v0.3.2: pitch bumped 1.04 → 1.06 (Smitelli 2010 documented ±5% as the CID
   match boundary — 1.04 was inside the match zone). Adds audio.haas_stereo
   for mono-compatible cross-channel phase shift.
+
+  v0.4.0: weak defaults bumped (crop 0.04→0.06, color brightness 0.015→0.025,
+  saturation 1.04→1.06, noise 5→8, audio.eq jitter_db 0.2→1.5). placebo
+  audio.resample disabled. New video.subpixel_sharpen for neural-FP work.
 transforms:
   - id: video.crop_resize
     enabled: true
-    params: {max_strength: 0.04}
+    # v0.4.0: 0.04→0.06, +50 % pHash shift, still <1 % of frame visually.
+    params: {max_strength: 0.06}
   - id: video.color_eq
     enabled: true
-    params: {brightness: 0.015, contrast: 1.022, gamma: 0.99, saturation: 1.04}
+    # v0.4.0: brightness 0.015→0.025, saturation 1.04→1.06 — pHash robust to
+    # ±5 %; previous values sat at the bottom of useful range.
+    params: {brightness: 0.025, contrast: 1.022, gamma: 0.99, saturation: 1.06}
   - id: video.noise
     enabled: true
-    params: {strength: 5}
+    # v0.4.0: strength 5→8 — below 6 sits beneath published pHash eval floor.
+    params: {strength: 8}
+  - id: video.subpixel_sharpen
+    enabled: true
+    # v0.4.0: sub-visible luma sharpen to perturb neural FP embeddings.
+    # Singh et al. arXiv:2511.05399 (2025): neural FP robust to classical
+    # transforms but sensitive to HF texture changes.
+    params: {luma_amount: 0.05, radius: 5}
   - id: video.temporal_jitter
     enabled: true
     # Fojcik 2025: random frame perturbation drops μAP 60%+ on neural copy
@@ -34,7 +48,9 @@ transforms:
     params: {pitch: 1.06, randomize_within: 0.005, method: rubberband}
   - id: audio.eq
     enabled: true
-    params: {randomize_bands: true}
+    # v0.4.0: jitter_db 0.2→1.5 — chromaprint robust to <2 dB EQ; previous
+    # value sat at quarter of useful range.
+    params: {randomize_bands: true, jitter_db: 1.5}
   - id: audio.haas_stereo
     enabled: true
     # 15 ms is inside the Haas fusion threshold — perceived as one source
@@ -42,7 +58,9 @@ transforms:
     # relationship that audio fingerprinting relies on.
     params: {delay_ms: 15.0, randomize_within_ms: 4.0}
   - id: audio.resample
-    enabled: true
+    # v0.4.0: 48000→47999→48000 is 0.002 % — below chromaprint quantization.
+    # Disabled as placebo; pitch + Haas + envelope jitter do the real work.
+    enabled: false
     params: {intermediate_sr: 47999}
   - id: audio.compand
     enabled: true

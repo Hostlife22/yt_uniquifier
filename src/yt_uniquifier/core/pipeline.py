@@ -383,10 +383,11 @@ class FilterGraph:
         return out
 
     def _metadata_args(self) -> list[str]:
-        return [
-            "-map_metadata", "-1",
-            "-metadata", f"encoder=yt-uniquifier/{__version__}",
-        ]
+        # v0.4.0: do NOT write a custom `encoder=…` tag — ffmpeg's muxer
+        # writes its own `encoder=Lavf<version>` which is indistinguishable
+        # from any other ffmpeg-built output. A custom string would
+        # fingerprint the file as tool-generated.
+        return ["-map_metadata", "-1"]
 
 
 def build_video_segment_command(

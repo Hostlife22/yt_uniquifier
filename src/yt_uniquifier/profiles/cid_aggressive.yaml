@@ -6,13 +6,22 @@ description: |
 transforms:
   - id: video.crop_resize
     enabled: true
-    params: {max_strength: 0.07}
+    # v0.4.0: 0.07→0.09 — slightly stronger than cid_aware (0.06).
+    params: {max_strength: 0.09}
   - id: video.color_eq
     enabled: true
-    params: {brightness: 0.02, contrast: 1.03, gamma: 0.99, saturation: 1.05}
+    # v0.4.0: aggressive bumps — VMAF may dip to ~80 but pHash worst chunk
+    # should clear 0.75.
+    params: {brightness: 0.035, contrast: 1.04, gamma: 0.99, saturation: 1.07}
   - id: video.noise
     enabled: true
-    params: {strength: 7}
+    # v0.4.0: 7→10.
+    params: {strength: 10}
+  - id: video.subpixel_sharpen
+    enabled: true
+    # v0.4.0: stronger than cid_aware (0.05) — still below visual threshold
+    # per ITU-R BT.500 contrast sensitivity on natural content.
+    params: {luma_amount: 0.10, radius: 5}
   - id: video.temporal_jitter
     enabled: true
     # Stronger jitter on aggressive — closer to Fojcik's reference 1/10 rate.
@@ -27,16 +36,20 @@ transforms:
     params: {pitch: 1.08, tempo: 0.99, randomize_within: 0.01, method: rubberband}
   - id: audio.eq
     enabled: true
+    # v0.4.0: jitter_db 0.2→2.0 — at the edge of chromaprint's robustness floor.
     params:
       bands: [[110.0, -0.9], [3800.0, 0.6]]
       randomize_bands: true
+      jitter_db: 2.0
   - id: audio.haas_stereo
     enabled: true
     # Wider delay on aggressive — audible as stereo widening but still
     # within psychoacoustic fusion (single-source perception).
     params: {delay_ms: 25.0, randomize_within_ms: 8.0}
   - id: audio.resample
-    enabled: true
+    # v0.4.0: tiny intermediate-SR shift is below chromaprint quantization.
+    # Disabled; for audible spectrum shift use audio.pitch_tempo.
+    enabled: false
     params: {intermediate_sr: 47997}
   - id: audio.compand
     enabled: true

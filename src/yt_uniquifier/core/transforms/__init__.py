@@ -15,6 +15,7 @@ from yt_uniquifier.core.transforms import (
     video_geom,
     video_noise,
     video_speed,
+    video_subpixel_sharpen,
     video_temporal_jitter,
     video_tonemap,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "video_geom",
     "video_noise",
     "video_speed",
+    "video_subpixel_sharpen",
     "video_temporal_jitter",
     "video_tonemap",
 ]

@@ -1,4 +1,4 @@
-"""Temporal frame perturbation — blackout + drop on a periodic-with-random-phase grid.
+"""Temporal frame perturbation — blackout + drop on rng-sampled frame indices.
 
 Per Fojcik & Syga, "Counteracting Temporal Attacks in Video Copy Detection"
 (arXiv:2501.11171, 2025), random blackouts on the order of 1/10 frames
@@ -6,19 +6,15 @@ reduced neural video-copy-detector mean Average Precision (μAP) by 60 %+
 on Meta's VSC2022 benchmark. Per-frame *drop* has a similar effect on
 detectors that sample at a fixed stride.
 
-We pick a deterministic-with-random-phase scheme over ffmpeg's
-expression-level `random()`:
+v0.3.3 implemented this as periodic-with-random-phase
+(`mod(N, period) == offset`). v0.4.0 switches to **Poisson-sampled frame
+indices over a 60-second window**: we draw N random frame indices (where
+N = window_frames × probability) at build time and embed them as
+`eq(mod(N, W), i0) + eq(mod(N, W), i1) + …`. No detectable periodicity.
 
-  - blackout: every K-th frame becomes mid-gray (or pure black with
-    `blackout_blur=false`), where K = round(1 / blackout_prob). The phase
-    offset (which frame within each K-window gets blacked out) is drawn
-    once at build time from the per-run `rng`. Same run → same phase;
-    different runs → different phase.
-  - drop: every M-th frame is dropped via `select`, M = round(1 / drop_prob),
-    phase also drawn from rng.
-
-This avoids ffmpeg-version-dependent `random()` semantics inside expressions
-and produces reproducible filter graphs that the unit tests can lock onto.
+The expression repeats every 60 s of video — much longer than the v0.3.3
+30-frame period (48× larger window), so even stride-based subsampling
+can't reliably miss the perturbations.
 
 Source: Fojcik & Syga, arXiv:2501.11171 (2025).
 """
@@ -36,10 +32,15 @@ from yt_uniquifier.core.transforms.base import (
     register,
 )
 
+# 60 s × 24 fps = 1440 frames. Long enough to defeat stride-based detection
+# while keeping the embedded expression tractable (~50 terms at default
+# probabilities).
+WINDOW_FRAMES = 60 * 24
+
 
 class TemporalJitterParams(BaseModel):
     # Probability per frame of being blacked out. Defaults are conservative —
-    # at 24 fps, 0.033 ≈ blackout every 30 frames ≈ once every 1.25 seconds.
+    # 0.033 ≈ blackout 48 of 1440 frames per minute.
     # Fojcik's reference attack used 1/10; that's visible, so we stay lower.
     blackout_prob: float = Field(default=0.033, ge=0.0, le=0.2)
     # Probability per frame of being dropped (one fewer output frame).
@@ -56,26 +57,32 @@ def _build_temporal_jitter(
     use_rng = rng if isinstance(rng, _random.Random) else _random.Random()
 
     parts: list[str] = []
+    blackout_set: set[int] = set()
 
     if params.blackout_prob > 0:
-        period = max(2, int(round(1.0 / params.blackout_prob)))
-        offset = use_rng.randint(0, period - 1)
+        n = max(1, int(round(WINDOW_FRAMES * params.blackout_prob)))
+        blackout_idx = sorted(use_rng.sample(range(WINDOW_FRAMES), n))
+        blackout_set = set(blackout_idx)
+        cond_terms = "+".join(
+            f"eq(mod(N\\,{WINDOW_FRAMES})\\,{i})" for i in blackout_idx
+        )
         y_const = 128 if params.blackout_blur else 0
-        # geq supports the `N` frame-number constant (lutyuv does not).
-        # Commas inside the if/eq/mod expression must be escaped with `\,`
-        # so they're not read as filter-separator commas at the filter_complex layer.
-        cond = f"eq(mod(N\\,{period})\\,{offset})"
         parts.append(
             "geq="
-            f"lum='if({cond}\\,{y_const}\\,p(X\\,Y))':"
-            f"cb='if({cond}\\,128\\,p(X\\,Y))':"
-            f"cr='if({cond}\\,128\\,p(X\\,Y))'"
+            f"lum='if({cond_terms}\\,{y_const}\\,p(X\\,Y))':"
+            f"cb='if({cond_terms}\\,128\\,p(X\\,Y))':"
+            f"cr='if({cond_terms}\\,128\\,p(X\\,Y))'"
         )
 
     if params.drop_prob > 0:
-        period = max(2, int(round(1.0 / params.drop_prob)))
-        offset = use_rng.randint(0, period - 1)
-        parts.append(f"select='not(eq(mod(n\\,{period})\\,{offset}))'")
+        n = max(1, int(round(WINDOW_FRAMES * params.drop_prob)))
+        # Don't drop frames that were blacked out (double-flagging is wasteful).
+        candidate_pool = sorted(set(range(WINDOW_FRAMES)) - blackout_set)
+        drop_idx = sorted(use_rng.sample(candidate_pool, min(n, len(candidate_pool))))
+        cond_terms = "+".join(
+            f"eq(mod(n\\,{WINDOW_FRAMES})\\,{i})" for i in drop_idx
+        )
+        parts.append(f"select='not({cond_terms})'")
 
     out = alloc.next("v")
     if not parts:
