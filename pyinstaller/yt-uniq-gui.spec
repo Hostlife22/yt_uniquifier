@@ -17,8 +17,6 @@
 import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-block_cipher = None
-
 # Bundle YAML profiles + QA HTML template.
 datas = []
 datas += collect_data_files("yt_uniquifier", subdir="profiles", include_py_files=False)
@@ -26,9 +24,17 @@ datas += collect_data_files(
     "yt_uniquifier", subdir="core/qa/templates", include_py_files=False,
 )
 
+# Transforms self-register on import via core/transforms/__init__.py. The
+# init imports every submodule by name so PyInstaller should follow them,
+# but be explicit so an empty registry — which would crash any encode
+# with "unknown transform" — can never happen.
 hiddenimports = []
 hiddenimports += collect_submodules("PyQt6")
+hiddenimports += collect_submodules("yt_uniquifier.core.transforms")
+hiddenimports += collect_submodules("yt_uniquifier.gui")
 
+# Note: PyInstaller >= 6 removed the `block_cipher` / `cipher=` parameters.
+# Pass nothing rather than `None` so the spec is forward-compatible.
 a = Analysis(
     ["../src/yt_uniquifier/gui/app_pyqt.py"],
     pathex=["../src"],
@@ -37,9 +43,8 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     excludes=["tests"],
-    cipher=block_cipher,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz, a.scripts, [],
