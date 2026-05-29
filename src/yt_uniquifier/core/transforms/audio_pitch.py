@@ -104,6 +104,6 @@ register(
         kind="audio",
         schema=PitchTempoParams,
         build=_build_pitch_tempo,
-        defaults={"pitch": 1.005, "tempo": 1.0, "sample_rate": 48000},
+        defaults={"pitch": 1.012, "tempo": 1.0, "sample_rate": 48000},
     )
 )
