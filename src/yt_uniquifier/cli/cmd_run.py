@@ -6,8 +6,8 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
+from yt_uniquifier.cli.progress_view import make_run_progress
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.models import Plan, Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
@@ -91,14 +91,7 @@ def run_cmd(
         if no_progress:
             run_full(plan, options, on_event=lambda _e: None, cancel_token=cancel)
         else:
-            with Progress(
-                TextColumn("[bold blue]{task.description}"),
-                BarColumn(),
-                TextColumn("{task.percentage:>3.0f}%"),
-                TimeRemainingColumn(),
-                console=console,
-                transient=False,
-            ) as progress:
+            with make_run_progress(console) as progress:
                 task_id = progress.add_task("encoding", total=total_us)
                 # Track progress across segments by summing per-segment out_time.
                 seg_offsets: dict[int, int] = {}
