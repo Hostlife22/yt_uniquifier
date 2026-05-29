@@ -119,7 +119,7 @@ def build_report(
     vmaf_mean: float | None = None
     if run_vmaf:
         p("vmaf", 0.0)
-        v = vmaf.compute(output_path, input_path)
+        v = vmaf.compute(input_path, output_path)
         if v.score is not None:
             vmaf_mean = v.score
         elif v.note:
@@ -129,7 +129,7 @@ def build_report(
     ssim_mean: float | None = None
     if run_ssim:
         p("ssim", 0.0)
-        s = ssim.compute(output_path, input_path)
+        s = ssim.compute(input_path, output_path)
         if s.score is not None:
             ssim_mean = s.score
         elif s.note:

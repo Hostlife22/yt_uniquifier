@@ -135,6 +135,47 @@ def test_build_report_records_notes_when_unavailable(
     assert any("libvmaf" in n for n in report.notes)
 
 
+def test_build_report_passes_input_then_output_to_vmaf_and_ssim(
+    monkeypatch: pytest.MonkeyPatch, tiny_clip: Path, tmp_path: Path
+) -> None:
+    """Regression: build_report must call vmaf.compute/ssim.compute with
+    (input_path, output_path) — the reference first, distorted second.
+
+    Swapping these silently inverts the perceptual metric (VMAF is not
+    commutative; SSIM's scale2ref binds [1:v]=ref to the second -i input).
+    """
+    fake_input = tiny_clip
+    fake_output = tmp_path / "out.mp4"
+    fake_output.write_bytes(fake_input.read_bytes())
+
+    vmaf_calls: list[tuple[Path, Path]] = []
+    ssim_calls: list[tuple[Path, Path]] = []
+
+    def _vmaf_spy(inp: Path, out: Path, **_k: object) -> _FakeVmaf:
+        vmaf_calls.append((inp, out))
+        return _FakeVmaf()
+
+    def _ssim_spy(inp: Path, out: Path, **_k: object) -> _FakeSsim:
+        ssim_calls.append((inp, out))
+        return _FakeSsim()
+
+    monkeypatch.setattr(report_mod.hashes, "md5_file", lambda _p: "abc")
+    monkeypatch.setattr(report_mod.phash, "compare", lambda *_a, **_k: _FakePHash())
+    monkeypatch.setattr(report_mod.audio_fp, "compare",
+                        lambda *_a, **_k: _FakeAudioFp())
+    monkeypatch.setattr(report_mod.vmaf, "compute", _vmaf_spy)
+    monkeypatch.setattr(report_mod.ssim, "compute", _ssim_spy)
+
+    report_mod.build_report(fake_input, fake_output, predict_cid=False)
+
+    assert vmaf_calls == [(fake_input, fake_output)], (
+        f"vmaf.compute called with wrong arg order: {vmaf_calls}"
+    )
+    assert ssim_calls == [(fake_input, fake_output)], (
+        f"ssim.compute called with wrong arg order: {ssim_calls}"
+    )
+
+
 def test_write_json_roundtrip(tmp_path: Path) -> None:
     r = _report()
     p = tmp_path / "out.qa.json"
