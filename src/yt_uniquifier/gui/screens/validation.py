@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import csv
-import subprocess
-import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -30,6 +28,7 @@ from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 from yt_uniquifier.gui.widgets.file_picker import FilePickerRow
 from yt_uniquifier.gui.widgets.log_console import LogConsole
+from yt_uniquifier.gui.workers.correlate_worker import CorrelateWorker
 from yt_uniquifier.gui.workers.generate_variants_worker import GenerateVariantsWorker
 
 PROFILES_DIR = Path(__file__).parents[2] / "profiles"
@@ -43,6 +42,7 @@ class ValidationScreen(ScreenBase):
         super().__init__(state)
         self.manifest: dict[str, object] | None = None
         self.gen_worker: GenerateVariantsWorker | None = None
+        self.corr_worker: CorrelateWorker | None = None
         self.input_path: Path | None = None
         self.gen_out_dir: Path | None = None
         self._build_ui()
@@ -320,17 +320,25 @@ class ValidationScreen(ScreenBase):
                 "Use Step 2 to save at least one row first.",
             )
             return
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(CORRELATE_TOOL), str(DEFAULT_CSV)],
-                capture_output=True, text=True, check=True, timeout=60,
-            )
-        except subprocess.CalledProcessError as exc:
-            self.corr_output.setPlainText(
-                f"correlate FAILED:\n{exc.stderr.strip()[-1000:]}",
-            )
-            return
-        except subprocess.TimeoutExpired:
-            self.corr_output.setPlainText("correlate timed out (>60s)")
-            return
-        self.corr_output.setPlainText(proc.stdout)
+        if self.corr_worker is not None:
+            return  # already running
+
+        # Run the correlation script off the GUI thread — a blocking
+        # subprocess.run(..., timeout=60) here previously froze the
+        # window for up to a minute.
+        self.run_corr_btn.setEnabled(False)
+        self.corr_output.setPlainText("running…")
+        self.corr_worker = CorrelateWorker(CORRELATE_TOOL, DEFAULT_CSV)
+        self.corr_worker.correlated.connect(self._on_corr_done)
+        self.corr_worker.failed.connect(self._on_corr_failed)
+        self.corr_worker.start()
+
+    def _on_corr_done(self, stdout: str) -> None:
+        self.corr_output.setPlainText(stdout)
+        self.corr_worker = None
+        self.run_corr_btn.setEnabled(True)
+
+    def _on_corr_failed(self, message: str) -> None:
+        self.corr_output.setPlainText(message)
+        self.corr_worker = None
+        self.run_corr_btn.setEnabled(True)
