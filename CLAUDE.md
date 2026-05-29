@@ -8,14 +8,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Common commands
 
-```bash
-pip install -e ".[dev]"          # dev install (CLI only)
-pip install -e ".[dev,gui]"      # + PyQt6 GUI
-pip install -e ".[dev,qa]"       # + chromaprint bindings (audio fingerprint)
+`Makefile` is the canonical entry point — it wraps `pip`/`pytest`/`ruff` and creates `.venv/` on demand. Run `make help` for the full list.
 
-ruff check .                      # lint (line-length 100, target py311)
-mypy src/yt_uniquifier             # strict typing (mypy strict = true)
-pytest -q                          # run full suite
+```bash
+make dev                          # .venv + pip install -e ".[dev,gui]"
+make dev-min                      # .venv + pip install -e ".[dev]"  (no PyQt6)
+make lint                         # ruff check . (line-length 100, target py311)
+make typecheck                    # mypy --strict on src/
+make test                         # full pytest suite (~2 min, real ffmpeg)
+make test-unit                    # unit only (~10s, no ffmpeg)
+make test-gui                     # GUI tests via QT_QPA_PLATFORM=offscreen
+make test-integration             # real ffmpeg required
+make check                        # ruff + mypy + full pytest (CI gate)
+make build                        # PyInstaller → dist/yt-uniq-gui.app (macOS)
+make build-wheel                  # pip wheel → dist/
+make reset-cache                  # wipe encoder + keyframe caches
+make probe-encoders               # show ffmpeg encoders detected on this box
+```
+
+Raw equivalents (when `make` isn't appropriate, e.g. CI with a custom venv):
+
+```bash
 pytest tests/unit/test_pipeline_graph.py -q   # single file
 pytest -k "label_allocator" -q                # single test by keyword
 pytest -m smoke -q                            # only smoke tests
@@ -65,6 +78,10 @@ Key invariants:
 - **Encoder detection is real, cached.** `core/encoder.py::detect_encoders` runs each candidate against a `lavfi` null source and caches results. Tests must use the `isolated_cache` fixture (redirects `CACHE_PATH` to `tmp_path`) so they don't pollute or depend on the user's cache.
 - **Even-dimensions guard at the tail of the video chain.** `scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p` — `libx264` rejects odd dims after micro-crop.
 - **`video.blend_b` is the only multi-input transform.** It returns `extra_inputs` and uses the `__B__` token rewritten to `[1:v]` after `-i B.mp4` is appended.
+- **`FilterChain.filter_str` must NOT include its own `[in_label]` prefix.** The pipeline always wraps each fragment as `f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"`. A builder that emits `[{in_lbl}]<expr>` produces a double-prefix and an invalid `-filter_complex` argument. Multi-input transforms (only `blend_b` today) get their secondary input via the `__B__` placeholder, not by prefixing.
+- **`CheckpointStore` is thread-safe.** All public mutators and `_flush` acquire `_lock: threading.RLock`. The atomic write is `open()` → `flush()` → `fsync()` → `os.replace()` — both fsync and the lock are load-bearing for `workers > 1` parallel-segment runs (`ThreadPoolExecutor` workers fire `on_segment_done` concurrently). Shared caches that may be touched by concurrent `yt-uniq batch` processes (`encoder.py::_save_cache`) use `encoders.{os.getpid()}.tmp` to avoid cross-process tmp-name collisions.
+- **Plan hash is platform-portable.** `compute_plan_hash` uses `profile.model_dump(mode="json")` so `Path` / `Enum` / `datetime` fields serialise to their JSON form. A raw `model_dump()` would leak `str(Path)` which is platform-dependent (backslashes on Windows) and break resume across OSes.
+- **Per-segment seed is derived from `(plan_hash, idx, run_seed)`** in `core/seed_resolver.py::derive_segment_seed`. Builders that consume randomness must accept the `rng: random.Random | None = None` kwarg and prefer it over constructing their own `Random(...)` — otherwise resumed runs re-roll non-deterministically. The `call_build` helper inspects builder signatures (cached via `functools.cache`) to decide whether to pass `rng`.
 
 ## Models and contracts
 
@@ -85,13 +102,23 @@ When adding a transform: snapshot test the `filter_complex` fragment. Do not ass
 
 `.github/workflows/ci.yml` runs `ruff check .` + `pytest -q` on `{ubuntu-latest, macos-latest} × {3.11, 3.12}`. ffmpeg is installed via apt/brew. Keep the suite green on both OSes — macOS adds VideoToolbox to encoder detection.
 
+## GUI layer (v0.5)
+
+`gui/` is a PyQt6 desktop shell, not a thin wrapper. It has 10 screens (`gui/screens/`: `run`, `batch`, `queue`, `calibrate`, `validation`, `qa_viewer`, `profile_editor`, `history`, `corpus`, `settings`) and 10 background workers (`gui/workers/`: `run_worker`, `batch_worker`, `queue_worker`, `queue_status_worker`, `calibrate_worker`, `corpus_worker`, `qa_worker`, `probe_worker`, `generate_variants_worker`).
+
+The rule: **workers wrap `core/` callables and stream `RunEvent`s back via Qt signals**. They never duplicate orchestration logic. A worker class typically inherits from `gui/workers/base.py` and bridges `on_event` callbacks → Qt `pyqtSignal`. If you find yourself reimplementing a pipeline step inside a worker, you're in the wrong layer — promote it to `core/`.
+
+See `docs/gui.md` for the screen-by-screen tour and `pyinstaller/` for the desktop packaging spec.
+
 ## Specs
 
-`specs/` is the phased implementation plan — currently `00-bootstrap` through `16-temporal-jitter-and-divergence`, plus version roadmaps (`v0.2-plan.md`, `v0.3-plan.md`, `v0.3.2-3-plan.md`). They are the spec of record for module signatures and acceptance criteria — consult the matching phase before significant changes to a module. Phases 06+ extend the v0.1 baseline with HDR pipeline, audio CID-resistance, fingerprint-aware QA, calibration loop, parallel/distributed batch, and per-segment seed divergence; treat them as additive, not retroactive.
+`specs/` is the phased implementation plan — currently `00-bootstrap` through `25-gui-polish-packaging`, plus version roadmaps (`v0.2-plan.md`, `v0.3-plan.md`, `v0.3.2-3-plan.md`, `v0.4-plan.md`, `v0.5-plan.md`) and a `README.md` index. They are the spec of record for module signatures and acceptance criteria — consult the matching phase before significant changes to a module. Phases 06–20 cover HDR pipeline, audio CID-resistance, fingerprint-aware QA, calibration loop, parallel/distributed batch, per-segment seed divergence, and bitstream sanitization. Phases 21–25 cover the PyQt6 GUI (foundation, batch+calibrate, QA/profile/history, queue/validation, polish+packaging). Treat all phases as additive, not retroactive.
 
 ## Docs
 
 - `docs/architecture.md` — layer diagram and data flow (authoritative)
+- `docs/install.md` — install + first-run guide (CLI + GUI + binary)
+- `docs/gui.md` — PyQt6 screen reference and packaging notes
 - `docs/profiles.md` — YAML profile schema and transform reference
 - `docs/filter_graph.md` — how transforms compose into `-filter_complex`
 - `docs/youtube_targets.md` — preflight target matrix
@@ -99,3 +126,4 @@ When adding a transform: snapshot test the `filter_complex` fragment. Do not ass
 - `docs/qa_report.md` — schema and KPIs for `<out>.qa.json` / `.qa.html`
 - `docs/calibrate.md` — calibration loop (auto-tunes profile params against fingerprint deltas)
 - `docs/distributed.md` — multi-host batch coordination
+- `docs/validation_harness.md` — real-CID validation harness for offline regression testing
