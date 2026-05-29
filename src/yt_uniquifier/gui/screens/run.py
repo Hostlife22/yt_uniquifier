@@ -213,7 +213,9 @@ class RunScreen(ScreenBase):
             enforce_preflight=True,
         )
 
-        self.run_worker = RunWorker(plan, options, run_qa=True, fast_qa=False)
+        self.run_worker = RunWorker(
+            plan, options, run_qa=True, fast_qa=False, state=self.state,
+        )
         self.run_worker.progress.connect(self._on_progress)
         self.run_worker.log.connect(lambda m: self.log.log(m, "log"))
         self.run_worker.segment_progress.connect(

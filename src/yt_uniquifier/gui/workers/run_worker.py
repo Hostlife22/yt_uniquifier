@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
@@ -10,6 +11,7 @@ from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.orchestrator import RunOptions, RunSummary, run_full
 from yt_uniquifier.core.qa.report import build_report, render_html, write_json
 from yt_uniquifier.core.runner import RunEvent
+from yt_uniquifier.gui.state import AppState, HistoryEntry
 from yt_uniquifier.gui.workers.base import WorkerBase
 
 
@@ -31,12 +33,14 @@ class RunWorker(WorkerBase):
         *,
         run_qa: bool = True,
         fast_qa: bool = False,
+        state: AppState | None = None,
     ) -> None:
         super().__init__()
         self.plan = plan
         self.options = options
         self.run_qa = run_qa
         self.fast_qa = fast_qa
+        self.state = state
         self._total_us = max(int(plan.source.duration_sec * 1_000_000), 1)
         self._seg_us: dict[int, int] = {}
 
@@ -49,6 +53,7 @@ class RunWorker(WorkerBase):
                 cancel_token=self.cancel_token,
             )
         except Exception as exc:
+            self._push_history("failed")
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
 
@@ -60,9 +65,27 @@ class RunWorker(WorkerBase):
                 self.log.emit(f"QA failed: {exc}")
                 qa_html = None
 
+        self._push_history("done", qa_html)
         self.finished_ok.emit(
             str(self.options.output), str(qa_html) if qa_html else "",
         )
+
+    def _push_history(self, status: str, qa_html: Path | None = None) -> None:
+        """v0.5.2 — record history entry on done / failed (best-effort)."""
+        if self.state is None:
+            return
+        import contextlib
+        with contextlib.suppress(Exception):
+            self.state.push_history(HistoryEntry(
+                timestamp=datetime.now().isoformat(timespec="seconds"),
+                source_path=str(self.plan.source.path),
+                profile_name=self.plan.profile.name,
+                encoder_name=self.plan.encoder.name,
+                output_path=str(self.options.output),
+                qa_html_path=str(qa_html) if qa_html else None,
+                plan_hash=self.plan.plan_hash,
+                status=status,
+            ))
 
     def _on_event(self, ev: RunEvent) -> None:
         if ev.kind == "log":
