@@ -24,7 +24,12 @@ def resolve_run_seed(profile: Profile, source: SourceMeta) -> int:
     if profile.seed_strategy == "fixed":
         return (profile.seed or 0) % _UINT32_MAX
     if profile.seed_strategy == "per_file":
-        digest = hashlib.sha256(str(source.path).encode("utf-8")).digest()
+        # as_posix() normalises path separators so the same logical file
+        # produces the same seed across Windows (backslashes) and POSIX
+        # (forward slashes). Without this a file backed up from macOS and
+        # re-processed on Windows would get a different per_file seed and
+        # defeat the reproducibility guarantee.
+        digest = hashlib.sha256(source.path.as_posix().encode("utf-8")).digest()
         return int.from_bytes(digest[:4], "big", signed=False)
     # per_run, divergent
     return random.randrange(_UINT32_MAX)
