@@ -254,36 +254,47 @@ def _check_hdr(
     return findings
 
 
+import threading as _threading
+
 _FFMPEG_FILTERS_CACHE: dict[str, set[str]] = {}
+_FFMPEG_FILTERS_CACHE_LOCK = _threading.Lock()
 
 
 def _ffmpeg_has_filter(name: str) -> bool:
-    """Cached check whether ffmpeg has a given filter (e.g. zscale)."""
+    """Cached check whether ffmpeg has a given filter (e.g. zscale).
+
+    Lock-guarded — under parallel batch / GUI workers two callers could
+    otherwise both miss the cache and launch redundant
+    ``ffmpeg -filters`` subprocesses; on free-threaded CPython 3.13+
+    the dict assignment race is real, not just wasted work.
+    """
     import subprocess
 
     from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
     key = "filters"
-    if key not in _FFMPEG_FILTERS_CACHE:
-        try:
-            proc = subprocess.run(
-                [ffmpeg_bin(), "-hide_banner", "-filters"],
-                capture_output=True, text=True, timeout=10, check=True,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            _FFMPEG_FILTERS_CACHE[key] = set()
-            return False
-        # Substring match on the filters listing is enough for our needs
-        # (filter names are space-delimited words; false positives unlikely).
-        names: set[str] = set()
-        for line in proc.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 2:
-                names.add(parts[1])
-        if name in proc.stdout:
-            names.add(name)
-        _FFMPEG_FILTERS_CACHE[key] = names
-    return name in _FFMPEG_FILTERS_CACHE[key]
+    with _FFMPEG_FILTERS_CACHE_LOCK:
+        if key not in _FFMPEG_FILTERS_CACHE:
+            try:
+                proc = subprocess.run(
+                    [ffmpeg_bin(), "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=10, check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                _FFMPEG_FILTERS_CACHE[key] = set()
+                return False
+            # Substring match on the filters listing is enough for our
+            # needs (filter names are space-delimited words; false
+            # positives unlikely).
+            names: set[str] = set()
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    names.add(parts[1])
+            if name in proc.stdout:
+                names.add(name)
+            _FFMPEG_FILTERS_CACHE[key] = names
+        return name in _FFMPEG_FILTERS_CACHE[key]
 
 
 def _check_subtitles(source: SourceMeta) -> list[PreflightFinding]:
