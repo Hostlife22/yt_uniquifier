@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from typing import cast
 
+from PyQt6.QtCore import QThread
+from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -125,6 +127,43 @@ class MainWindow(QMainWindow):
 
     def _on_theme_changed(self, theme: str) -> None:
         self.setStyleSheet(qss_for(cast(ThemeName, theme)))
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # type: ignore[override]
+        """Cancel and join every running worker before the window closes.
+
+        Without this, QueueStatusWorker's infinite poll loop keeps the
+        process alive after the window is gone, and an active encode
+        can keep writing to its output file mid-corruption.
+        """
+        # Persist any in-memory AppState (recent files, etc.) — Settings
+        # was the only call site before, so closing without visiting it
+        # discarded changes.
+        try:
+            self.state.save()
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Walk every screen, locate any QThread-derived attribute that is
+        # still running, request cooperative cancel, then wait briefly.
+        for i in range(self.stack.count()):
+            screen = self.stack.widget(i)
+            if screen is None:
+                continue
+            for attr_name in dir(screen):
+                if attr_name.startswith("__"):
+                    continue
+                try:
+                    obj = getattr(screen, attr_name)
+                except Exception:  # noqa: BLE001
+                    continue
+                if isinstance(obj, QThread) and obj.isRunning():
+                    cancel = getattr(obj, "request_cancel", None)
+                    if callable(cancel):
+                        cancel()
+                    obj.quit()
+                    obj.wait(3000)  # cap per worker; total <= 3s × N
+        if event is not None:
+            event.accept()
 
 
 def main() -> None:
