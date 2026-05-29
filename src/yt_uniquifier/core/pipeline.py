@@ -83,6 +83,99 @@ def _group_runs(
     return runs
 
 
+def _wrap_color_run_at(
+    run: list[TransformConfig],
+    alloc: LabelAllocator,
+    plan: Plan,
+    in_label: str,
+    rng: random.Random | None,
+) -> tuple[str, str, list[Path]]:
+    """Compose one zscale-linear-wrapped block over ``run`` color transforms.
+
+    Returns ``(new_v_label, chain_str, extra_inputs)``. Each transform's
+    builder is called against a scratch allocator so we collect only its
+    ``filter_str``; the wrapped block exposes a single allocated output
+    label from the real allocator.
+    """
+    scratch = LabelAllocator()
+    inner: list[str] = []
+    extras: list[Path] = []
+    for tc in run:
+        spec = get(tc.id)
+        params = spec.schema.model_validate({**spec.defaults, **tc.params})
+        scratch_chain = call_build(spec, params, scratch, "scratch_in", rng=rng)
+        inner.append(scratch_chain.filter_str)
+        extras.extend(Path(p) for p in scratch_chain.extra_inputs)
+
+    color = plan.source.video[0].color
+    wrapped = wrap_linear(inner, color)
+    out_label = alloc.next("v")
+    chain_str = f"[{in_label}]{wrapped}[{out_label}]"
+    return out_label, chain_str, extras
+
+
+def _build_video_chain(
+    plan: Plan,
+    alloc: LabelAllocator,
+    in_label: str,
+    rng: random.Random,
+) -> tuple[str, list[str], list[Path]]:
+    """Compose the video transform chain shared by full-file and per-segment modes.
+
+    Encapsulates: HDR linear-wrap grouping for color transforms, the
+    ``video.rotate`` fillcolor swap (SDR ``black`` → PQ ``0x101010``),
+    and ``__B__`` placeholder propagation via ``extra_inputs``. Both
+    ``FilterGraph.build`` and ``build_video_segment_command`` rely on
+    this so a segmented HDR encode produces the same color path as
+    the single-file encode.
+
+    Returns ``(final_v_label, chain_strings, extra_inputs)``.
+    """
+    video_transforms = [
+        tc for tc in plan.profile.transforms
+        if tc.enabled and get(tc.id).kind == "video"
+    ]
+
+    tonemap = is_tonemap_active(plan.profile.transforms)
+    hdr_wrap_enabled = (
+        plan.profile.keep_hdr
+        and not tonemap
+        and bool(plan.source.video)
+        and needs_linear_wrap(plan.source.video[0].color)
+    )
+
+    v_label = in_label
+    v_chains: list[str] = []
+    extra_inputs: list[Path] = []
+    for run_is_color, run in _group_runs(video_transforms, is_color_transform):
+        if hdr_wrap_enabled and run_is_color and len(run) >= 1:
+            v_label, chain_str, run_extras = _wrap_color_run_at(
+                run, alloc, plan, v_label, rng,
+            )
+            v_chains.append(chain_str)
+            extra_inputs.extend(run_extras)
+        else:
+            for tc in run:
+                spec = get(tc.id)
+                params = spec.schema.model_validate({**spec.defaults, **tc.params})
+                chain = call_build(spec, params, alloc, v_label, rng=rng)
+                filter_str = chain.filter_str
+                # Swap rotate's SDR black fill for an HDR-safe near-black
+                # so PQ encoders don't clip the legal video range.
+                if hdr_wrap_enabled and tc.id == "video.rotate":
+                    sdr = getattr(params, "fillcolor_sdr", "black")
+                    hdr = getattr(params, "fillcolor_pq", "0x101010")
+                    filter_str = filter_str.replace(
+                        f"fillcolor={sdr}", f"fillcolor={hdr}", 1,
+                    )
+                v_chains.append(
+                    f"[{chain.in_label}]{filter_str}[{chain.out_label}]"
+                )
+                v_label = chain.out_label
+                extra_inputs.extend(Path(p) for p in chain.extra_inputs)
+    return v_label, v_chains, extra_inputs
+
+
 @dataclass(frozen=True)
 class BuiltCommand:
     """Concrete ffmpeg invocation for a Plan (one segment or the whole file)."""
@@ -113,50 +206,16 @@ class FilterGraph:
         self._loudnorm_measurement = loudnorm_measurement
 
     def build(self) -> BuiltCommand:
-        video_transforms = self._enabled(kind="video")
         audio_transforms = self._enabled(kind="audio")
         rng = random.Random(self.plan.run_seed)
 
         # ---- video chain ----
-        v_in = "0:v:0"
-        v_chains: list[str] = []
-        v_label = v_in
-        extra_inputs: list[Path] = []
-
-        # Tonemap supersedes the HDR-keep wrap: the very first transform
-        # collapses HDR into BT.709 SDR, so the rest of the chain operates
-        # in plain pixel-space and doesn't need zscale roundtrips.
-        tonemap = is_tonemap_active(self.plan.profile.transforms)
-        hdr_wrap_enabled = (
-            self.plan.profile.keep_hdr
-            and not tonemap
-            and bool(self.plan.source.video)
-            and needs_linear_wrap(self.plan.source.video[0].color)
+        # Delegated to the module-level helper so the per-segment path
+        # (build_video_segment_command) and full-file path produce
+        # identical HDR / color handling.
+        v_label, v_chains, extra_inputs = _build_video_chain(
+            self.plan, self.alloc, "0:v:0", rng,
         )
-        for run_is_color, run in _group_runs(video_transforms, is_color_transform):
-            if hdr_wrap_enabled and run_is_color and len(run) >= 1:
-                v_label, chain_str, run_extras = self._wrap_color_run(run, v_label, rng)
-                v_chains.append(chain_str)
-                extra_inputs.extend(run_extras)
-            else:
-                for tc in run:
-                    spec = get(tc.id)
-                    params = spec.schema.model_validate({**spec.defaults, **tc.params})
-                    chain = call_build(spec, params, self.alloc, v_label, rng=rng)
-                    filter_str = chain.filter_str
-                    # Swap rotate's SDR black fill for an HDR-safe near-black so
-                    # PQ encoders don't clip the legal video range.
-                    if hdr_wrap_enabled and tc.id == "video.rotate":
-                        sdr = getattr(params, "fillcolor_sdr", "black")
-                        hdr = getattr(params, "fillcolor_pq", "0x101010")
-                        filter_str = filter_str.replace(
-                            f"fillcolor={sdr}", f"fillcolor={hdr}", 1
-                        )
-                    v_chains.append(
-                        f"[{chain.in_label}]{filter_str}[{chain.out_label}]"
-                    )
-                    v_label = chain.out_label
-                    extra_inputs.extend(Path(p) for p in chain.extra_inputs)
 
         # Tail: round dims to even (required by libx264/H.264 profiles) and set pix_fmt.
         pix_fmt = self._target_pix_fmt()
@@ -248,34 +307,6 @@ class FilterGraph:
         )
 
     # ---- helpers ----
-
-    def _wrap_color_run(
-        self, run: list[TransformConfig], in_label: str,
-        rng: random.Random | None = None,
-    ) -> tuple[str, str, list[Path]]:
-        """Compose a single zscale-linear-wrapped block over `run` color transforms.
-
-        Returns (new_v_label, chain_str, extra_inputs).
-
-        Each transform's builder is called against a scratch allocator so we
-        only collect its `filter_str`; labels are dropped. The wrapped block
-        gets a single allocated output label from the real allocator.
-        """
-        scratch = LabelAllocator()
-        inner: list[str] = []
-        extras: list[Path] = []
-        for tc in run:
-            spec = get(tc.id)
-            params = spec.schema.model_validate({**spec.defaults, **tc.params})
-            scratch_chain = call_build(spec, params, scratch, "scratch_in", rng=rng)
-            inner.append(scratch_chain.filter_str)
-            extras.extend(Path(p) for p in scratch_chain.extra_inputs)
-
-        color = self.plan.source.video[0].color
-        wrapped = wrap_linear(inner, color)
-        out_label = self.alloc.next("v")
-        chain_str = f"[{in_label}]{wrapped}[{out_label}]"
-        return out_label, chain_str, extras
 
     def _enabled(self, kind: str) -> list[TransformConfig]:
         result: list[TransformConfig] = []
@@ -403,21 +434,13 @@ def build_video_segment_command(
     """
     alloc = LabelAllocator()
     rng = random.Random(plan.run_seed)
-    video_transforms = [
-        tc for tc in plan.profile.transforms
-        if tc.enabled and get(tc.id).kind == "video"
-    ]
-
-    v_label = "0:v:0"
-    v_chains: list[str] = []
-    extra_inputs: list[Path] = []
-    for tc in video_transforms:
-        spec = get(tc.id)
-        params = spec.schema.model_validate({**spec.defaults, **tc.params})
-        chain = call_build(spec, params, alloc, v_label, rng=rng)
-        v_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
-        v_label = chain.out_label
-        extra_inputs.extend(Path(p) for p in chain.extra_inputs)
+    # Same shared helper as FilterGraph.build → identical HDR linear-wrap
+    # and rotate-fillcolor behaviour. Previously this path hand-rolled a
+    # plain for-loop with no HDR awareness, so segmented HDR encodes with
+    # color transforms silently produced wrong colors.
+    v_label, v_chains, extra_inputs = _build_video_chain(
+        plan, alloc, "0:v:0", rng,
+    )
 
     pix_fmt = _segment_pix_fmt(plan)
     v_out = alloc.next("v")
