@@ -54,12 +54,12 @@ dev-min: venv  ## Install [dev] only (no PyQt6/WebEngine — CLI work).
 
 # ---- quality gates ---------------------------------------------------
 .PHONY: lint
-lint:  ## Run ruff (style + import sort + bugbear).
-	$(RUFF) check src/ tests/ tools/
+lint:  ## Run ruff (style + import sort + bugbear). Scope matches CI.
+	$(RUFF) check .
 
 .PHONY: lint-fix
 lint-fix:  ## Auto-fix ruff issues where possible.
-	$(RUFF) check src/ tests/ tools/ --fix
+	$(RUFF) check . --fix
 
 .PHONY: typecheck
 typecheck:  ## Run mypy --strict on src/.
