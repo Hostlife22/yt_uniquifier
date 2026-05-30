@@ -116,10 +116,22 @@ class CorpusScreen(ScreenBase):
             has_audio = "yes" if e.audio_fingerprint else "no"
             self.table.setItem(r, 4, QTableWidgetItem(has_audio))
         self.status_label.setText(f"{len(entries)} entries")
-        self.list_worker = None
+        self._drop_list_worker()
 
     def _on_list_failed(self, message: str) -> None:
         self.status_label.setText(f"refresh failed: {message}")
+        self._drop_list_worker()
+
+    def _drop_list_worker(self) -> None:
+        """Join the worker thread before dropping the Python reference.
+
+        Without quit()+wait() the QThread may still be alive in C++ when
+        Python's last ref disappears, segfaulting the process.
+        """
+        if self.list_worker is None:
+            return
+        self.list_worker.quit()
+        self.list_worker.wait(1000)
         self.list_worker = None
 
     def _on_add(self) -> None:
