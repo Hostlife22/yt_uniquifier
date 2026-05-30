@@ -117,24 +117,39 @@ class Corpus:
         *,
         threshold: float = 0.5,
         samples: int = 60,
+        target_phashes: list[int] | None = None,
+        target_audio: list[int] | None = None,
     ) -> list[CorpusMatch]:
-        """Return entries whose combined similarity to target is >= threshold."""
+        """Return entries whose combined similarity to target is >= threshold.
+
+        ``target_phashes`` / ``target_audio`` may be supplied by callers
+        that have already fingerprinted the target (e.g.
+        ``cid_predict.predict``) — without that, the QA report path
+        fingerprints the same output file twice (once for cid_predict,
+        once for this search). Each ffmpeg/fpcalc sample pass is
+        seconds; saving a second pass is a useful win on every report.
+        """
         entries = self._load_all()
         if not entries:
             return []
 
-        # Fingerprint the target once.
-        target_frames = phash.sample_frames(target, n=samples)
-        target_phashes = [int(str(imagehash.phash(f)), 16) for f in target_frames]
+        if target_phashes is None:
+            target_frames = phash.sample_frames(target, n=samples)
+            target_phashes = [
+                int(str(imagehash.phash(f)), 16) for f in target_frames
+            ]
 
-        target_audio: list[int] = []
-        if audio_fp.fpcalc_available():
-            raw = audio_fp._run_fpcalc(target)
-            if raw and "fingerprint" in raw:
-                try:
-                    target_audio = _decode_chromaprint(str(raw["fingerprint"]))
-                except ValueError:
-                    target_audio = []
+        if target_audio is None:
+            target_audio = []
+            if audio_fp.fpcalc_available():
+                raw = audio_fp._run_fpcalc(target)
+                if raw and "fingerprint" in raw:
+                    try:
+                        target_audio = _decode_chromaprint(
+                            str(raw["fingerprint"])
+                        )
+                    except ValueError:
+                        target_audio = []
 
         matches: list[CorpusMatch] = []
         for e in entries:
