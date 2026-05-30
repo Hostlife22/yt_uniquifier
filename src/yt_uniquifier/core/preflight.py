@@ -208,7 +208,12 @@ def _check_pitch_rubberband(plan: Plan) -> list[PreflightFinding]:
     )
     if not needs_rb:
         return []
-    if _ffmpeg_has_filter("rubberband"):
+    # Dry-run rather than text-parse: the matrix sweep on 2026-05-31
+    # caught a case where `_ffmpeg_has_filter("rubberband")` returned
+    # True but ffmpeg failed to open the filter at runtime (18 min into
+    # an encode). The dry-run can only false-negative on transient
+    # subprocess errors, never false-positive.
+    if _ffmpeg_filter_works("rubberband=pitch=1.0", "audio"):
         return []
     return [PreflightFinding(
         code="audio.pitch.rubberband.missing", severity="fail",
@@ -301,7 +306,10 @@ def _check_hdr(
         return findings
 
     # keep_hdr=True path: need zscale (zimg) + 10-bit-capable encoder.
-    if not _ffmpeg_has_filter("zscale"):
+    # Dry-run probe rather than text-parse for the same reason as
+    # rubberband (see _check_pitch_rubberband). zscale=t=bt709 is a
+    # benign no-op color transfer that any working zimg build accepts.
+    if not _ffmpeg_filter_works("zscale=t=bt709:m=bt709:p=bt709", "video"):
         findings.append(PreflightFinding(
             code="hdr.zscale.missing", severity="fail",
             message=(
@@ -337,6 +345,86 @@ def _check_hdr(
 # the next call instead of returning stale availability data.
 _FFMPEG_FILTERS_CACHE: dict[str, set[str]] = {}
 _FFMPEG_FILTERS_CACHE_LOCK = _threading.Lock()
+
+# Separate cache for the dry-run prober — keys are
+# (version_key, kind, probe_spec) so the same ffmpeg can probe many
+# different filter specs without trashing one another.
+_FFMPEG_FILTER_WORKS_CACHE: dict[tuple[str, str, str], bool] = {}
+_FFMPEG_FILTER_WORKS_CACHE_LOCK = _threading.Lock()
+
+
+def _ffmpeg_filter_works(
+    probe_spec: str, kind: Literal["audio", "video"]
+) -> bool:
+    """Verify a filter is usable by actually opening it on a 0.001s lavfi source.
+
+    Defense-in-depth replacement for `_ffmpeg_has_filter`. The text-parse
+    of ``ffmpeg -filters`` has an intermittent false-positive failure
+    mode (observed during the 2026-05-31 real-video matrix run: cache
+    reported ``rubberband`` present, runtime ffmpeg threw "No such
+    filter" 18 minutes into the encode). Spending ~200ms on a real
+    filter-graph open at preflight time removes the false-positive
+    class entirely — if ffmpeg can open ``-af rubberband=pitch=1.0``
+    against a 1ms sine source, it can open the same filter against the
+    user's content; if it cannot, we fail at second zero instead of
+    minute 18.
+
+    ``probe_spec`` is the full ffmpeg filter spec, e.g.
+    ``"rubberband=pitch=1.0"`` or ``"zscale=t=bt709:m=bt709"``. We pass
+    a benign default value so the probe doesn't need filter-specific
+    knowledge of valid parameters.
+
+    Cached on (version_key, kind, probe_spec) so repeated callers in
+    the same process don't re-spawn ffmpeg; cache invalidates on any
+    ``ffmpeg -version`` change (homebrew bump, container rebuild).
+    """
+    import subprocess
+
+    from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
+    bin_path = ffmpeg_bin()
+    version_key = _ffmpeg_version_key(bin_path)
+    cache_key = (version_key, kind, probe_spec)
+    with _FFMPEG_FILTER_WORKS_CACHE_LOCK:
+        if cache_key in _FFMPEG_FILTER_WORKS_CACHE:
+            return _FFMPEG_FILTER_WORKS_CACHE[cache_key]
+
+        if kind == "audio":
+            input_args = [
+                "-f", "lavfi", "-i",
+                "sine=frequency=440:sample_rate=48000",
+            ]
+            filter_args = ["-af", probe_spec]
+        else:
+            input_args = [
+                "-f", "lavfi", "-i",
+                "testsrc2=size=64x64:rate=1",
+            ]
+            filter_args = ["-vf", probe_spec]
+
+        try:
+            proc = subprocess.run(
+                [bin_path, "-hide_banner", "-loglevel", "error",
+                 *input_args, *filter_args,
+                 "-t", "0.001", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            works = proc.returncode == 0
+            if not works:
+                _log.debug(
+                    "ffmpeg filter dry-run %r (%s) failed exit=%s: %s",
+                    probe_spec, kind, proc.returncode,
+                    (proc.stderr or "").strip()[-200:],
+                )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            _log.warning(
+                "ffmpeg filter dry-run %r (%s) errored: %s",
+                probe_spec, kind, exc,
+            )
+            works = False
+
+        _FFMPEG_FILTER_WORKS_CACHE[cache_key] = works
+        return works
 
 
 def _ffmpeg_version_key(ffmpeg_path: str) -> str:

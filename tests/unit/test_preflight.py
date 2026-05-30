@@ -74,6 +74,45 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     assert not has_fail(f)
 
 
+def test_ffmpeg_filter_works_positive() -> None:
+    """volume=1.0 is a no-op audio filter present in every ffmpeg build.
+
+    Acts as a sanity check for the dry-run prober itself: if this
+    returns False, ffmpeg on PATH is broken and the rest of the
+    preflight filter checks would all false-fail.
+    """
+    import pytest
+
+    from yt_uniquifier.core.preflight import _ffmpeg_filter_works
+    try:
+        from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+        ffmpeg_bin()
+    except Exception:
+        pytest.skip("ffmpeg not on PATH")
+    assert _ffmpeg_filter_works("volume=1.0", "audio") is True
+
+
+def test_ffmpeg_filter_works_negative() -> None:
+    """A nonexistent filter must return False.
+
+    Regression for 2026-05-31 real-video matrix Bug #2 — text-parse
+    of `ffmpeg -filters` had an intermittent false-positive on
+    rubberband; this dry-run path replaces it. A filter name that
+    cannot exist in any ffmpeg build verifies the negative case.
+    """
+    import pytest
+
+    from yt_uniquifier.core.preflight import _ffmpeg_filter_works
+    try:
+        from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+        ffmpeg_bin()
+    except Exception:
+        pytest.skip("ffmpeg not on PATH")
+    assert _ffmpeg_filter_works(
+        "__no_such_filter_exists__=foo=1", "audio"
+    ) is False
+
+
 def test_tonemap_sdr_input_fails(tmp_path: Path) -> None:
     """SDR source + video.tonemap_sdr in profile must FAIL preflight.
 

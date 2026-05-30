@@ -59,7 +59,8 @@ def _reset_filter_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_hdr_keep_libx264_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: True)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: True)
     src = _hdr_source(tmp_path)
     plan = _plan(src, "libx264", keep_hdr=True)
     f = preflight(src, plan, plan.encoder)
@@ -68,7 +69,8 @@ def test_hdr_keep_libx264_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 
 def test_hdr_keep_libx265_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: True)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: True)
     src = _hdr_source(tmp_path)
     plan = _plan(src, "libx265", keep_hdr=True)
     f = preflight(src, plan, plan.encoder)
@@ -77,7 +79,8 @@ def test_hdr_keep_libx265_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 
 def test_hdr_keep_missing_zscale_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: False)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: False)
     src = _hdr_source(tmp_path)
     plan = _plan(src, "libx265", keep_hdr=True)
     f = preflight(src, plan, plan.encoder)
@@ -89,7 +92,8 @@ def test_hdr_without_keep_no_zscale_check(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Without keep_hdr we don't need zscale at all — no fail on its absence."""
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: False)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: False)
     src = _hdr_source(tmp_path)
     plan = _plan(src, "libx265", keep_hdr=False)
     f = preflight(src, plan, plan.encoder)
@@ -99,7 +103,8 @@ def test_hdr_without_keep_no_zscale_check(
 def test_hdr_keep_with_blend_b_warns(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: True)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: True)
     src = _hdr_source(tmp_path)
     profile = Profile(name="t", keep_hdr=True, target_codec="hevc",
                        transforms=[
@@ -119,7 +124,8 @@ def test_hdr_keep_with_blend_b_warns(
 def test_sdr_source_skips_all_hdr_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: False)
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
+                        lambda _spec, _kind: False)
     src = _hdr_source(tmp_path)
     # mutate to SDR
     src = src.model_copy(update={

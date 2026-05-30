@@ -82,8 +82,10 @@ def test_preflight_fails_when_rubberband_filter_missing(
     plan = Plan(source=src, profile=profile, encoder=enc,
                 plan_hash=compute_plan_hash(src, profile, enc))
     # ffmpeg without rubberband.
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter",
-                        lambda n: n != "rubberband")
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda spec, kind: "rubberband" not in spec,
+    )
     findings = preflight(src, plan, plan.encoder)
     codes = {f.code for f in findings}
     assert "audio.pitch.rubberband.missing" in codes
@@ -102,7 +104,10 @@ def test_preflight_passes_when_rubberband_available(
     enc = EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True)
     plan = Plan(source=src, profile=profile, encoder=enc,
                 plan_hash=compute_plan_hash(src, profile, enc))
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: True)
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda _spec, _kind: True,
+    )
     findings = preflight(src, plan, plan.encoder)
     codes = {f.code for f in findings}
     assert "audio.pitch.rubberband.missing" not in codes
@@ -120,8 +125,10 @@ def test_preflight_no_check_when_no_rubberband_in_profile(
     enc = EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True)
     plan = Plan(source=src, profile=profile, encoder=enc,
                 plan_hash=compute_plan_hash(src, profile, enc))
-    monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter",
-                        lambda n: n != "rubberband")
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda spec, kind: "rubberband" not in spec,
+    )
     findings = preflight(src, plan, plan.encoder)
     codes = {f.code for f in findings}
     assert "audio.pitch.rubberband.missing" not in codes
