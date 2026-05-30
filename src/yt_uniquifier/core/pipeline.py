@@ -661,9 +661,17 @@ def build_main_audio_command_windowed(
         ln_from_profile = _loudnorm_params_from(audio_transforms_all).model_dump()
         ln_params = LoudnormParams.model_validate({**ln_defaults, **ln_from_profile})
         assert measurement is not None
+        # Derive a dedicated seed for the loudnorm jitter so each run/file
+        # under the `divergent` strategy gets a unique target jitter value.
+        # Using `plan.run_seed` raw made the per-call jitter constant
+        # across runs that shared the same seed but were otherwise
+        # supposed to diverge.
+        ln_seed = derive_segment_seed(
+            plan.plan_hash, AUDIO_WINDOW_NS_OFFSET - 1, plan.run_seed,
+        )
         ln_chain = build_apply(
             ln_params, measurement, alloc, accumulator,
-            rng=random.Random(plan.run_seed),
+            rng=random.Random(ln_seed),
         )
         final_label = ln_chain.out_label
         loudnorm_str = f"[{ln_chain.in_label}]{ln_chain.filter_str}[{ln_chain.out_label}]"
