@@ -51,8 +51,45 @@ def preflight(
     # mis-placed video.tonemap_sdr in the profile would otherwise get
     # no warning because _check_hdr only fires on HDR sources.
     findings.extend(_check_tonemap_order(plan))
+    findings.extend(_check_tonemap_sdr_input(plan, source))
     findings.extend(_check_blend_b_input(plan))
     return findings
+
+
+def _check_tonemap_sdr_input(
+    plan: Plan, source: SourceMeta
+) -> list[PreflightFinding]:
+    """Reject SDR source when profile applies video.tonemap_sdr.
+
+    Tonemap is a PQ/HLG → BT.709 conversion. Applied to an SDR source it
+    crashes mid-encode (ffmpeg zscale/tonemap path expects HDR transfer)
+    with a cryptic "Could not open encoder before EOF" message. This
+    check turns that into a clear preflight FAIL so users learn at the
+    start of the run instead of after first segment.
+    """
+    if not source.video:
+        return []
+    tonemap_present = any(
+        tc.enabled and tc.id == "video.tonemap_sdr"
+        for tc in plan.profile.transforms
+    )
+    if not tonemap_present:
+        return []
+    v = source.video[0]
+    if v.color.is_hdr:
+        return []
+    return [PreflightFinding(
+        code="tonemap.sdr_input", severity="fail",
+        message=(
+            f"Profile applies video.tonemap_sdr but source is SDR "
+            f"(transfer={v.color.transfer!r}). Tonemap is only valid "
+            f"for HDR (PQ / HLG) sources."
+        ),
+        suggestion=(
+            "Use a non-HDR-to-SDR profile (soft, medium, aggressive, "
+            "cid_aware, cid_aggressive) for SDR inputs."
+        ),
+    )]
 
 
 def _check_blend_b_input(plan: Plan) -> list[PreflightFinding]:

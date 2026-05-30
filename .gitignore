@@ -22,6 +22,9 @@ htmlcov/
 *.qa.json
 *.qa.html
 
+# visual snapshot scratch (test writes _actual_<screen>.png on every run)
+tests/visual/__snapshots__/_actual_*.png
+
 .DS_Store
 .idea/
 .vscode/

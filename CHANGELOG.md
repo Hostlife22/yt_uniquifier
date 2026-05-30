@@ -18,6 +18,20 @@ all changes additive or behaviour-preserving.
 
 ### Fixed
 
+- **`core/preflight.py`** — SDR source against an HDR-to-SDR profile
+  (e.g. `cid_aware_hdr_to_sdr` applied to plain BT.709 content) used to
+  crash mid-encode with a cryptic `Could not open encoder before EOF`
+  ffmpeg error. New `_check_tonemap_sdr_input` check emits a clear
+  preflight FAIL (`tonemap.sdr_input`) at the start of the run. Found
+  by `tools/real_video_matrix.py` sweep against 14 synthetic inputs —
+  affected 7/99 cells. See `docs/bug-triage-2026-05-31.md` for full
+  triage.
+- **`tests/visual/test_gui_screenshots.py`** — History screen excluded
+  from byte-equal snapshot comparison; the screen reads a persistent
+  run-log store whose rows accumulate between baseline capture and
+  replay, so it flakes on any developer machine that has actually used
+  the CLI/GUI. Same treatment as Validation. Existence + non-empty
+  check still runs.
 - **`core/encoder.py`** — race condition in shared encoder cache writes;
   atomic write now uses a `os.getpid()`-suffixed temp name to avoid
   cross-process collisions during parallel `yt-uniq batch`.

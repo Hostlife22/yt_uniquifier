@@ -74,6 +74,35 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     assert not has_fail(f)
 
 
+def test_tonemap_sdr_input_fails(tmp_path: Path) -> None:
+    """SDR source + video.tonemap_sdr in profile must FAIL preflight.
+
+    Regression: real-video matrix run 2026-05-31 hit "Could not open encoder
+    before EOF" on 7 SDR inputs against the cid_aware_hdr_to_sdr profile
+    because preflight only checked tonemap-order, not tonemap-vs-source.
+    """
+    src = _source(tmp_path)  # SDR by default
+    plan = _plan(src, [
+        TransformConfig(id="video.tonemap_sdr"),
+        TransformConfig(id="audio.loudnorm"),
+    ])
+    f = preflight(src, plan, plan.encoder)
+    assert has_fail(f)
+    assert "tonemap.sdr_input" in _codes(f)
+
+
+def test_tonemap_sdr_with_hdr_input_passes(tmp_path: Path) -> None:
+    """HDR source + video.tonemap_sdr is the supported path; must not fail."""
+    src = _source(tmp_path, hdr=True)
+    plan = _plan(src, [
+        TransformConfig(id="video.tonemap_sdr"),
+        TransformConfig(id="audio.loudnorm"),
+    ])
+    f = preflight(src, plan, plan.encoder)
+    assert "tonemap.sdr_input" not in _codes(f)
+    assert "hdr.tonemap.ok" in _codes(f)
+
+
 def test_hdr_with_color_transforms_fails(tmp_path: Path) -> None:
     src = _source(tmp_path, hdr=True)
     plan = _plan(src, [
