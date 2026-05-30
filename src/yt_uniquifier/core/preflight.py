@@ -43,6 +43,10 @@ def preflight(
     findings.extend(_check_loudnorm(plan))
     findings.extend(_check_bitrate(source))
     findings.extend(_check_pitch_rubberband(plan))
+    # Tonemap-order check runs unconditionally — an SDR source with a
+    # mis-placed video.tonemap_sdr in the profile would otherwise get
+    # no warning because _check_hdr only fires on HDR sources.
+    findings.extend(_check_tonemap_order(plan))
     return findings
 
 
@@ -200,7 +204,8 @@ def _check_hdr(
                 f"HDR source ({v.color.transfer}) will be tonemapped to BT.709 SDR."
             ),
         ))
-        findings.extend(_check_tonemap_order(plan))
+        # Tonemap-order check is now hoisted to preflight() so it fires
+        # for SDR sources too — no need to duplicate it here.
         return findings
 
     if not plan.profile.keep_hdr:
