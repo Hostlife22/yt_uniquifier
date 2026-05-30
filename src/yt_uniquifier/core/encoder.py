@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import subprocess
 import time
 from collections.abc import Sequence
@@ -246,13 +247,18 @@ def _save_cache(version_key: str, candidates: list[EncoderCandidate]) -> None:
         # break json.dumps. Consistent with checkpoint.py + compute_plan_hash.
         "candidates": [c.model_dump(mode="json") for c in candidates],
     }
-    # PID-suffixed tmp + fsync. Concurrent `yt-uniq batch` processes share
-    # this cache path; without per-process tmp names, two probes racing on
-    # `encoders.json.tmp` can land in a torn write whose stale read makes
-    # the other process silently miss encoders. fsync forces the bytes
-    # to disk before the rename so a crash mid-flush leaves either the
-    # old cache or the new one, never a zero-byte file.
-    tmp = cache_path.with_name(f"encoders.{os.getpid()}.tmp")
+    # PID + random-suffixed tmp + fsync. Concurrent `yt-uniq batch` processes
+    # share this cache path; without per-process tmp names, two probes racing
+    # on `encoders.json.tmp` can land in a torn write whose stale read makes
+    # the other process silently miss encoders. The random suffix additionally
+    # avoids any same-process collision when `_save_cache` is called twice
+    # back-to-back (e.g. test_force_bypasses_cache on Linux py3.12 was racing
+    # on the static PID-only name). fsync forces the bytes to disk before the
+    # rename so a crash mid-flush leaves either the old cache or the new one,
+    # never a zero-byte file.
+    tmp = cache_path.with_name(
+        f"encoders.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    )
     serialised = json.dumps(payload, indent=2)
     with tmp.open("w", encoding="utf-8") as fh:
         fh.write(serialised)
