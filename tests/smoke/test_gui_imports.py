@@ -10,6 +10,8 @@ import importlib.util
 
 import pytest
 
+pytestmark = pytest.mark.smoke
+
 _HAVE_PYQT6 = importlib.util.find_spec("PyQt6") is not None
 
 

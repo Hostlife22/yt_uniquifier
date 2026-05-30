@@ -1,7 +1,10 @@
+import pytest
 from typer.testing import CliRunner
 
 from yt_uniquifier import __version__
 from yt_uniquifier.cli.app import app
+
+pytestmark = pytest.mark.smoke
 
 
 def test_version_command() -> None:
