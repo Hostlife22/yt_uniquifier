@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from time import sleep
 
 from PyQt6.QtCore import pyqtSignal
 
@@ -40,8 +39,9 @@ class QueueStatusWorker(WorkerBase):
                 self.stats.emit(dict(s))
             except Exception as exc:
                 self.log.emit(f"stats error: {exc}")
-            # Slice the sleep so cancel is responsive.
-            slept = 0.0
-            while slept < self.poll_sec and not self.cancel_token.is_cancelled():
-                sleep(0.1)
-                slept += 0.1
+            # cancel_token.wait blocks on the underlying threading.Event,
+            # so cancel wakes the thread immediately — no 100 ms wakeup
+            # latency, no 10 Hz spin. Returns True if cancelled within
+            # the timeout, in which case we exit promptly.
+            if self.cancel_token.wait(self.poll_sec):
+                return

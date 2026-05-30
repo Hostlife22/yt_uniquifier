@@ -51,6 +51,16 @@ class CancelToken:
     def is_cancelled(self) -> bool:
         return self._event.is_set()
 
+    def wait(self, timeout: float) -> bool:
+        """Block up to ``timeout`` seconds; return True if cancelled.
+
+        Lets pollers replace their own sleep-loops (``sleep(0.1)`` in a
+        ``while not cancelled`` body) with a single ``cancel_token.wait``
+        call. Backed by ``threading.Event.wait`` so the thread wakes
+        immediately on cancel — no 100 ms of latency, no CPU spin.
+        """
+        return self._event.wait(timeout)
+
 
 _NVENC_OOM_PATTERNS = (
     "openencodesessionex failed",
@@ -69,6 +79,10 @@ def _is_nvenc_oom(log_lines: list[str]) -> bool:
     return any(p in tail for p in _NVENC_OOM_PATTERNS)
 
 
+_NVENC_OOM_MAX_RETRIES = 1
+_NVENC_OOM_BACKOFF_SEC = 2.0
+
+
 def run(
     cmd: BuiltCommand,
     *,
@@ -78,13 +92,18 @@ def run(
     log_path: Path | None = None,
     progress_via_stdout: bool = True,
     extra_env: dict[str, str] | None = None,
-    _retried: bool = False,
 ) -> RunResult:
     """Execute the BuiltCommand and stream progress events.
 
     The command is expected to be a complete ffmpeg invocation including the
     output path. We append `-progress pipe:1 -nostats` so progress lines arrive
     on stdout while stderr carries human logs.
+
+    Retries up to ``_NVENC_OOM_MAX_RETRIES`` times on NVENC GPU session
+    exhaustion via an iterative loop. The previous recursive
+    implementation grew the Python call stack and tangled the cancel
+    flow; the loop is equivalent semantically (one retry on OOM) and
+    simpler to reason about.
     """
     on_event = on_event or (lambda _e: None)
 
@@ -108,7 +127,6 @@ def run(
         insert_at = len(full_cmd) - 1
         full_cmd[insert_at:insert_at] = ["-progress", "pipe:1", "-nostats"]
 
-    start = time.monotonic()
     # extra_env: per-call env overrides (e.g. OMP_NUM_THREADS=1 from the
     # parallel batch path) — keeps the parent process's env untouched so
     # concurrent batch invocations can't stomp on each other's values.
@@ -116,6 +134,56 @@ def run(
     proc_env = None
     if extra_env:
         proc_env = {**_os.environ, **extra_env}
+
+    start = time.monotonic()
+    for attempt in range(_NVENC_OOM_MAX_RETRIES + 1):
+        rc, log_lines = _run_once(
+            full_cmd, on_event=on_event, cancel_token=cancel_token,
+            proc_env=proc_env,
+        )
+
+        if log_path is not None:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+
+        if cancel_token and cancel_token.is_cancelled():
+            on_event(RunEvent(kind="error", payload={"reason": "cancelled"}))
+            raise PipelineError("cancelled by user")
+
+        if rc == 0:
+            duration = time.monotonic() - start
+            on_event(RunEvent(kind="done", payload={"duration_sec": duration}))
+            return RunResult(returncode=rc, duration_sec=duration, output_path=output)
+
+        if attempt < _NVENC_OOM_MAX_RETRIES and _is_nvenc_oom(log_lines):
+            on_event(RunEvent(kind="log", payload={
+                "phase": "retry", "reason": "nvenc oom",
+                "attempt": attempt + 1,
+            }))
+            time.sleep(_NVENC_OOM_BACKOFF_SEC)
+            continue
+
+        tail = "\n".join(log_lines[-30:])
+        on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": tail}))
+        raise PipelineError(f"ffmpeg exited with {rc}; last log:\n{tail}")
+
+    # Loop either returns on success or raises on failure; this is unreachable.
+    raise PipelineError("runner.run exhausted retries without a verdict")
+
+
+def _run_once(
+    full_cmd: list[str],
+    *,
+    on_event: Callable[[RunEvent], None],
+    cancel_token: CancelToken | None,
+    proc_env: dict[str, str] | None,
+) -> tuple[int, list[str]]:
+    """One Popen + drain pass. Returns (rc, log_lines).
+
+    Factored out of ``run()`` so the outer retry loop doesn't need to
+    inline the entire Popen body. Keeping it as a private helper means
+    the test suite's existing ``runner.run`` patching surface is intact.
+    """
     proc = subprocess.Popen(
         full_cmd,
         stdout=subprocess.PIPE,
@@ -187,36 +255,7 @@ def run(
     rc = getattr(proc, "returncode", None)
     if rc is None:
         rc = proc.wait()
-    duration = time.monotonic() - start
-
-    if log_path is not None:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
-
-    if cancel_token and cancel_token.is_cancelled():
-        on_event(RunEvent(kind="error", payload={"reason": "cancelled"}))
-        raise PipelineError("cancelled by user")
-
-    if rc != 0:
-        # NVENC session exhaustion: another encode session has the GPU.
-        # Wait a moment and retry exactly once before propagating.
-        if not _retried and _is_nvenc_oom(log_lines):
-            on_event(RunEvent(kind="log", payload={
-                "phase": "retry", "reason": "nvenc oom",
-            }))
-            time.sleep(2.0)
-            return run(
-                cmd, output=output, on_event=on_event,
-                cancel_token=cancel_token, log_path=log_path,
-                progress_via_stdout=progress_via_stdout,
-                extra_env=extra_env, _retried=True,
-            )
-        tail = "\n".join(log_lines[-30:])
-        on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": tail}))
-        raise PipelineError(f"ffmpeg exited with {rc}; last log:\n{tail}")
-
-    on_event(RunEvent(kind="done", payload={"duration_sec": duration}))
-    return RunResult(returncode=rc, duration_sec=duration, output_path=output)
+    return rc, log_lines
 
 
 def _terminate(proc: subprocess.Popen[str], wait_sec: float = 5.0) -> None:

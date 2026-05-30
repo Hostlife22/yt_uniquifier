@@ -222,9 +222,26 @@ class CalibrateScreen(ScreenBase):
         self.run_btn.setEnabled(self.input_path is not None)
 
     def _drop_worker(self) -> None:
-        """Join the worker QThread before dropping the Python ref."""
+        """Join the worker QThread before dropping the Python ref.
+
+        Disconnect signal slots before quit/wait so a late ``step`` emit
+        fired between ``quit()`` and ``wait()`` cannot reach the chart
+        or log after the screen has visibly "stopped" the run.
+        """
+        import contextlib
+
         if self.worker is None:
             return
+        # PyQt raises TypeError on disconnect() if a signal has no slots
+        # connected — desired end state either way, so suppress.
+        for sig in (
+            self.worker.step,
+            self.worker.completed,
+            self.worker.finished_ok,
+            self.worker.failed,
+        ):
+            with contextlib.suppress(TypeError):
+                sig.disconnect()
         self.worker.quit()
         self.worker.wait(1000)
         self.worker = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from yt_uniquifier.core.qa.report import build_report, render_html, write_json
 from yt_uniquifier.core.runner import RunEvent
 from yt_uniquifier.gui.state import AppState, HistoryEntry
 from yt_uniquifier.gui.workers.base import WorkerBase
+
+# Throttle the LogConsole emit rate per phase so a multi-hour encode
+# doesn't push tens of thousands of `[segment] {…}` lines into the
+# QPlainTextEdit (each one triggers a relayout). Errors bypass the
+# throttle. 0.5 s matches the 2 Hz progress cadence the UI already
+# settles on, so the user does not perceive lost visibility.
+_LOG_THROTTLE_SEC = 0.5
 
 
 class RunWorker(WorkerBase):
@@ -57,6 +65,11 @@ class RunWorker(WorkerBase):
         # under PyPy and free-threaded CPython 3.13+; even under standard
         # CPython it produces transient progress overshoot.
         self._seg_us_lock = threading.Lock()
+        # Throttle log emits per (phase) — last emit timestamp keyed by
+        # phase name. Errors and 'log' events from never-before-seen
+        # phases pass through immediately; subsequent log events in the
+        # same phase wait for _LOG_THROTTLE_SEC.
+        self._last_log_emit: dict[str, float] = {}
         if self.state is not None:
             self._history_request.connect(self._on_history_request)
 
@@ -129,10 +142,17 @@ class RunWorker(WorkerBase):
 
     def _on_event(self, ev: RunEvent) -> None:
         if ev.kind == "log":
-            phase = ev.payload.get("phase", "")
-            self.log.emit(f"[{phase}] {ev.payload}")
+            phase = str(ev.payload.get("phase", ""))
+            now = time.monotonic()
+            last = self._last_log_emit.get(phase, 0.0)
+            if now - last >= _LOG_THROTTLE_SEC:
+                self._last_log_emit[phase] = now
+                self.log.emit(f"[{phase}] {ev.payload}")
             return
         if ev.kind == "error":
+            # Errors always pass through — never lose a failure signal
+            # to throttling. They are also infrequent so flooding is
+            # not a real concern.
             self.log.emit(f"[error] {ev.payload}")
             return
         if ev.kind != "progress":

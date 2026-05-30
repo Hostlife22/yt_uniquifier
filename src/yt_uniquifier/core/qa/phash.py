@@ -12,7 +12,10 @@ RAM stays bounded even on large source resolutions.
 from __future__ import annotations
 
 import io
+import os
 import subprocess
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +24,31 @@ from PIL import Image
 
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
+
+# Per-process LRU cache for sampled frame sets. Both `report.build_report`
+# and `cid_predict.predict` extract frames from the same (input, output)
+# pair within one QA pass; without caching, each frame extraction is a
+# ~3-5 s ffmpeg subprocess that gets paid twice per file. Keyed on
+# (resolved_path, mtime_ns, size, n) so the cache auto-invalidates if
+# the file is rewritten in place (size or mtime change). Lock guards the
+# OrderedDict against parallel QA threads from the GUI.
+_FRAME_CACHE_MAX = 8
+_FRAME_CACHE: OrderedDict[tuple[str, int, int, int], list[Image.Image]] = OrderedDict()
+_FRAME_CACHE_LOCK = threading.Lock()
+
+
+def _frame_cache_key(path: Path, n: int) -> tuple[str, int, int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (str(path.resolve()), st.st_mtime_ns, st.st_size, n)
+
+
+def clear_frame_cache() -> None:
+    """Drop all cached frame sets — exposed so tests can reset the cache."""
+    with _FRAME_CACHE_LOCK:
+        _FRAME_CACHE.clear()
 
 
 @dataclass(frozen=True)
@@ -52,7 +80,20 @@ def _probe_duration(path: Path) -> float:
 
 
 def sample_frames(path: Path, n: int = 120) -> list[Image.Image]:
-    """Pull n frames evenly across the file as PIL images (256px wide)."""
+    """Pull n frames evenly across the file as PIL images (256px wide).
+
+    Caches the resulting frame list keyed on (resolved path, mtime_ns,
+    size, n) so callers that ask for the same sample twice within a QA
+    pass don't pay the ffmpeg subprocess cost twice.
+    """
+    cache_key = _frame_cache_key(path, n)
+    if cache_key is not None:
+        with _FRAME_CACHE_LOCK:
+            hit = _FRAME_CACHE.get(cache_key)
+            if hit is not None:
+                _FRAME_CACHE.move_to_end(cache_key)
+                return hit
+
     duration = _probe_duration(path)
     if duration <= 0:
         return []
@@ -77,7 +118,14 @@ def sample_frames(path: Path, n: int = 120) -> list[Image.Image]:
             f"frame extraction failed for {path}: {exc.stderr.decode(errors='replace')[-300:]}"
         ) from exc
 
-    return _split_png_stream(proc.stdout)
+    frames = _split_png_stream(proc.stdout)
+    if cache_key is not None and frames:
+        with _FRAME_CACHE_LOCK:
+            _FRAME_CACHE[cache_key] = frames
+            _FRAME_CACHE.move_to_end(cache_key)
+            while len(_FRAME_CACHE) > _FRAME_CACHE_MAX:
+                _FRAME_CACHE.popitem(last=False)
+    return frames
 
 
 def _split_png_stream(blob: bytes) -> list[Image.Image]:

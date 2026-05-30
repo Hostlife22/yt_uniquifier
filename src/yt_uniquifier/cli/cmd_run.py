@@ -111,6 +111,14 @@ def run_cmd(
         console.print(f"[green]Done:[/green] {output}")
         if not no_qa:
             _run_qa(plan, output, fast=fast_qa)
+    except KeyboardInterrupt:
+        # POSIX convention: 128 + SIGINT(2) = 130. Ctrl+C must leave
+        # state.json intact so the user can re-run and resume from the
+        # last completed segment — checkpoint flushes happen on every
+        # segment mark so no extra cleanup is needed here.
+        cancel.cancel()
+        console.print("[yellow]cancelled (Ctrl+C); state preserved for resume[/yellow]")
+        raise typer.Exit(code=130) from None
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc

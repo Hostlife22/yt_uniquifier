@@ -229,8 +229,16 @@ def compare_hamming(input_path: Path, output_path: Path) -> AudioFPHamming:
             note="malformed fpcalc output",
         )
     if not ai or not bi:
+        # Empty subfingerprint set = "no data", not "perfect match". The
+        # previous return of match_confidence=1.0 with available=True fed
+        # a spurious "audio fully preserved" signal into the calibration
+        # loop, which then scaled intensity in the wrong direction.
+        # Mirror the empty-fingerprint handling in `compare()`.
         return AudioFPHamming(
-            available=True, hamming_per_frame=0.0, match_confidence=1.0, note=None,
+            available=False,
+            hamming_per_frame=None,
+            match_confidence=None,
+            note="fpcalc returned an empty fingerprint (silent / unsupported audio)",
         )
     mean = _hamming_per_frame(ai, bi)
     return AudioFPHamming(

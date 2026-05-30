@@ -97,6 +97,39 @@ def test_blend_b_has_extra_input() -> None:
     assert "__B__" in c.filter_str  # placeholder, rewritten by pipeline
 
 
+def test_blend_b_scale2ref_ordering() -> None:
+    """Regression: scale2ref must receive [__B__] BEFORE [__IN__].
+
+    scale2ref scales its FIRST input to match the SECOND's dimensions.
+    We want B scaled to A's dims, so B (the secondary input) comes
+    first and A (the primary in-label) comes second. The previous form
+    `[__B__]scale2ref=w=iw:h=ih` got wrapped by the pipeline as
+    `[in_lbl][__B__]scale2ref…` which silently scaled A to B's
+    dimensions and then blended an unchanged B at 97 % with a scaled A
+    at 3 % — the inverse of the intended effect.
+    """
+    from yt_uniquifier.core.transforms.video_blend import (
+        IN_PLACEHOLDER,
+        BlendBParams,
+    )
+
+    spec = get("video.blend_b")
+    c = spec.build(
+        BlendBParams(b_video_path="/tmp/b.mp4", opacity=0.03),
+        LabelAllocator(),
+        "0:v:0",
+    )
+    b_idx = c.filter_str.find("[__B__]")
+    in_idx = c.filter_str.find(f"[{IN_PLACEHOLDER}]")
+    assert b_idx >= 0, f"missing __B__ in filter_str: {c.filter_str!r}"
+    assert in_idx >= 0, f"missing __IN__ in filter_str: {c.filter_str!r}"
+    assert b_idx < in_idx, (
+        f"B must precede IN, got filter_str={c.filter_str!r}"
+    )
+    # Blend keeps the original (A) at 1 − opacity, mixes B at opacity.
+    assert "A*0.9700+B*0.0300" in c.filter_str
+
+
 def test_loudnorm_parse_measurement() -> None:
     from yt_uniquifier.core.transforms.audio_loudnorm import _parse_measurement
 

@@ -21,6 +21,12 @@ from yt_uniquifier.core.transforms.base import (
 )
 
 B_INPUT_PLACEHOLDER = "__B__"
+# Pipeline-recognised placeholder for the chain's primary in-label. When
+# filter_str contains `[__IN__]`, pipeline replaces it with `[in_label]`
+# and skips the default `[in_label]<filter_str>` prefix — required for
+# multi-input filters like scale2ref where the primary input must NOT be
+# first (scale2ref scales its first input, references the second).
+IN_PLACEHOLDER = "__IN__"
 
 
 class BlendBParams(BaseModel):
@@ -53,16 +59,20 @@ def _build_blend_b(
     a_ref = alloc.next("v")
     # Scale B to A's dimensions, then blend with the given opacity.
     a_opacity = 1.0 - params.opacity
-    # The pipeline wraps every chain as `[in_label]<filter_str>[out_label]`,
-    # so `filter_str` must NOT start with its own `[in_lbl]` token — that
-    # would double the prefix (`[in_lbl][in_lbl][__B__]scale2ref…`) and
-    # produce an invalid -filter_complex argument. blend_b is the only
-    # multi-input transform; the second input arrives via the `__B__`
-    # placeholder that the pipeline rewrites to `[N:v]` after assigning
-    # an `-i` index.
+    # scale2ref requires `[main][ref]` ordering — `main` gets scaled to
+    # `ref`'s dimensions. We want B scaled to A's dims, so B must be
+    # first and A must be the ref. The default pipeline wrap puts the
+    # primary in-label at the start of the chain, so we use the
+    # `__IN__` placeholder to position it ourselves. The previous form
+    # `[__B__]scale2ref=...` got wrapped as `[in_lbl][__B__]scale2ref...`
+    # which silently scaled A to B's dimensions and then blended an
+    # unchanged B at 97% with a scaled A at 3% — the opposite of the
+    # intended effect.
     filt = (
-        f"[{B_INPUT_PLACEHOLDER}]scale2ref=w=iw:h=ih[{scaled}][{a_ref}];"
+        f"[{B_INPUT_PLACEHOLDER}][{IN_PLACEHOLDER}]"
+        f"scale2ref=w=iw:h=ih[{scaled}][{a_ref}];"
         f"[{a_ref}][{scaled}]blend=all_expr='A*{a_opacity:.4f}+B*{params.opacity:.4f}'"
+        f"[{out}]"
     )
     return FilterChain(
         in_label=in_lbl,

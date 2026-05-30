@@ -62,18 +62,29 @@ def batch_cmd(
         raise typer.Exit(code=1) from exc
 
     results: list[_BatchResult] = []
-    with make_batch_progress(console) as bar:
-        task_id = bar.add_task("batch", total=len(inputs))
-        for src in inputs:
-            console.print(f"[bold]→ {src.name}[/bold]")
-            res = _process_one(
-                src, prof, output_dir, encoder_override,
-                work_dir, fast_qa=fast_qa, no_qa=no_qa, keep_segments=keep_segments,
-            )
-            results.append(res)
-            bar.advance(task_id)
-            if not res.ok and not continue_on_error:
-                break
+    try:
+        with make_batch_progress(console) as bar:
+            task_id = bar.add_task("batch", total=len(inputs))
+            for src in inputs:
+                console.print(f"[bold]→ {src.name}[/bold]")
+                res = _process_one(
+                    src, prof, output_dir, encoder_override,
+                    work_dir, fast_qa=fast_qa, no_qa=no_qa,
+                    keep_segments=keep_segments,
+                )
+                results.append(res)
+                bar.advance(task_id)
+                if not res.ok and not continue_on_error:
+                    break
+    except KeyboardInterrupt:
+        # POSIX convention: 128 + SIGINT(2) = 130. Files completed before
+        # Ctrl+C stay in `results`; the user can re-run with the same
+        # output_dir and the per-file work_dir/state.json resumes.
+        _print_summary(results)
+        console.print(
+            "[yellow]cancelled (Ctrl+C); processed files preserved[/yellow]",
+        )
+        raise typer.Exit(code=130) from None
 
     _print_summary(results)
     if any(not r.ok for r in results):

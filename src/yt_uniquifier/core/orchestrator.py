@@ -146,10 +146,17 @@ def run_full(
     # parallel on CPU encoders (libx264/libx265). GPU encoders silently
     # fall back to sequential inside process_video_segments_parallel.
     pending = [s for s in segments if s.status != "done"]
-    if cancel_token and cancel_token.is_cancelled():
-        raise PipelineError("cancelled by user")
     if pending:
+        # Re-check cancellation between each mark. A single check before
+        # the loop allowed a window where cancel fired AFTER the check
+        # but BEFORE the loop finished writing in_progress markers,
+        # leaving N segments stuck at in_progress that resume would
+        # never re-touch. With the check inside the loop, cancel
+        # observes whichever marks have already been flushed and stops
+        # cleanly.
         for seg in pending:
+            if cancel_token and cancel_token.is_cancelled():
+                raise PipelineError("cancelled by user")
             store.mark(seg.idx, "in_progress")
 
         def _on_segment_done(idx: int, src: Path, out: Path) -> None:
@@ -186,7 +193,8 @@ def run_full(
             # loop touches disk via store.mark → _flush; if _flush raises
             # (disk full, permissions) we must NOT propagate it in place
             # of the worker's original exception. Swallow flush errors
-            # here so the outer `raise` preserves the real cause.
+            # so the bare `raise` re-raises the original cause with its
+            # full traceback intact (Python preserves __traceback__).
             try:
                 for seg in store.all_segments():
                     if seg.status == "in_progress":

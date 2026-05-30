@@ -49,11 +49,29 @@ from yt_uniquifier.core.transforms.hdr_wrap import (
     needs_linear_wrap,
     wrap_linear,
 )
-from yt_uniquifier.core.transforms.video_blend import B_INPUT_PLACEHOLDER
+from yt_uniquifier.core.transforms.video_blend import (
+    B_INPUT_PLACEHOLDER,
+    IN_PLACEHOLDER,
+)
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 LOUDNORM_ID = "audio.loudnorm"
 BLEND_B_ID = "video.blend_b"
+
+
+def _wrap_chain_str(in_label: str, filter_str: str, out_label: str) -> str:
+    """Wrap a builder's filter_str with the standard ``[in][filter][out]``.
+
+    Multi-input transforms (currently only ``video.blend_b``) include the
+    ``__IN__`` placeholder in their filter_str so they can position the
+    primary stream after a secondary input (e.g. ``[B][__IN__]scale2ref…``).
+    For those, the wrap only substitutes ``[__IN__]`` and emits the
+    filter_str raw — the builder is responsible for its own trailing
+    ``[out_label]``. Single-input transforms get the legacy wrap.
+    """
+    if f"[{IN_PLACEHOLDER}]" in filter_str:
+        return filter_str.replace(f"[{IN_PLACEHOLDER}]", f"[{in_label}]")
+    return f"[{in_label}]{filter_str}[{out_label}]"
 
 
 def _group_runs(
@@ -169,7 +187,7 @@ def _build_video_chain(
                         f"fillcolor={sdr}", f"fillcolor={hdr}", 1,
                     )
                 v_chains.append(
-                    f"[{chain.in_label}]{filter_str}[{chain.out_label}]"
+                    _wrap_chain_str(chain.in_label, filter_str, chain.out_label)
                 )
                 v_label = chain.out_label
                 extra_inputs.extend(Path(p) for p in chain.extra_inputs)
@@ -260,11 +278,26 @@ class FilterGraph:
 
         # ---- assemble filter_complex ----
         # blend_b uses B_INPUT_PLACEHOLDER which must be replaced with concrete input refs.
+        # Contract: each entry in `extra_inputs` corresponds to exactly one
+        # `[__B__]` placeholder occurrence in `filter_complex`, in source order.
+        # The post-rewrite assertion catches both a builder that emits more
+        # placeholders than it declared inputs for AND a future caller that
+        # extends `extra_inputs` without producing a matching placeholder.
         all_chains = v_chains + a_chains
         filter_complex = ";".join(all_chains)
         for idx, _path in enumerate(extra_inputs, start=1):
+            if f"[{B_INPUT_PLACEHOLDER}]" not in filter_complex:
+                raise PipelineError(
+                    f"extra_input #{idx} declared but no [{B_INPUT_PLACEHOLDER}] "
+                    "placeholder remains in filter graph",
+                )
             filter_complex = filter_complex.replace(
                 f"[{B_INPUT_PLACEHOLDER}]", f"[{idx}:v]", 1
+            )
+        if f"[{B_INPUT_PLACEHOLDER}]" in filter_complex:
+            raise PipelineError(
+                f"unresolved [{B_INPUT_PLACEHOLDER}] placeholder after rewrite — "
+                "builder emitted more placeholders than declared extra_inputs",
             )
 
         # ---- ffmpeg args ----
@@ -455,8 +488,17 @@ def build_video_segment_command(
 
     filter_complex = ";".join(v_chains)
     for idx, _ in enumerate(extra_inputs, start=1):
+        if f"[{B_INPUT_PLACEHOLDER}]" not in filter_complex:
+            raise PipelineError(
+                f"extra_input #{idx} declared but no [{B_INPUT_PLACEHOLDER}] "
+                "placeholder remains in segment filter graph",
+            )
         filter_complex = filter_complex.replace(
             f"[{B_INPUT_PLACEHOLDER}]", f"[{idx}:v]", 1
+        )
+    if f"[{B_INPUT_PLACEHOLDER}]" in filter_complex:
+        raise PipelineError(
+            f"unresolved [{B_INPUT_PLACEHOLDER}] placeholder in segment filter graph",
         )
 
     args: list[str] = [

@@ -249,16 +249,25 @@ class QueueScreen(ScreenBase):
         if self.queue_root is None:
             return
         if self.status_worker is not None:
-            # quit() posts QThread.exit so the run-loop unblocks even if
-            # cancel_token alone hadn't elapsed within wait(500). Without
-            # this the wait() silently returns False and a live C++
-            # thread is left behind the dropped Python ref.
+            # Disconnect signal slots BEFORE quit() so any in-flight
+            # stats emit from the old worker can't reach `self._on_stats`
+            # after we've spawned the replacement. quit() posts
+            # QThread.exit so the run-loop unblocks even if cancel_token
+            # alone hadn't elapsed within wait(1000); without the
+            # disconnect, a stale emit racing the new worker would
+            # overwrite the freshly-updated stats label.
+            try:
+                self.status_worker.stats.disconnect()
+                self.status_worker.failed.disconnect()
+            except TypeError:
+                # PyQt raises TypeError if no connections existed
+                # (e.g. worker failed mid-init). The net effect we want
+                # is "no slots connected", so swallowing is correct.
+                pass
             self.status_worker.request_cancel()
             self.status_worker.quit()
             # 1000ms matches the cap used elsewhere in the GUI
-            # (CorpusScreen, CalibrateScreen). 500ms was tight relative
-            # to the 100ms poller slice and could let a live C++ thread
-            # outlive its Python ref on a slow scheduler.
+            # (CorpusScreen, CalibrateScreen).
             self.status_worker.wait(1000)
         self.status_worker = QueueStatusWorker(self.queue_root)
         self.status_worker.stats.connect(self._on_stats)

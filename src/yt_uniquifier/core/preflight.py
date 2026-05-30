@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib as _hashlib
+import logging as _logging
 import threading as _threading
 from typing import Literal
 
 from pydantic import BaseModel
 
 from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
+
+_log = _logging.getLogger(__name__)
 
 Severity = Literal["ok", "warn", "fail"]
 
@@ -291,32 +295,76 @@ def _check_hdr(
     return findings
 
 
+# Keyed on a hash of `ffmpeg -version` so an out-of-process binary
+# upgrade (Homebrew bump, container rebuild) invalidates the entry on
+# the next call instead of returning stale availability data.
 _FFMPEG_FILTERS_CACHE: dict[str, set[str]] = {}
 _FFMPEG_FILTERS_CACHE_LOCK = _threading.Lock()
+
+
+def _ffmpeg_version_key(ffmpeg_path: str) -> str:
+    """Stable digest of `ffmpeg -version` output for cache invalidation.
+
+    Used as the cache key in `_ffmpeg_has_filter` so swapping the ffmpeg
+    binary forces a fresh probe instead of returning stale filter sets.
+    Returns the literal string ``"unknown"`` when the version probe
+    fails — better to merge into one bucket than crash preflight on a
+    transient ffmpeg startup failure.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.check_output(
+            [ffmpeg_path, "-hide_banner", "-version"],
+            text=True, timeout=5,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return "unknown"
+    return _hashlib.sha256(out.encode("utf-8")).hexdigest()[:16]
 
 
 def _ffmpeg_has_filter(name: str) -> bool:
     """Cached check whether ffmpeg has a given filter (e.g. zscale).
 
-    Lock-guarded — under parallel batch / GUI workers two callers could
-    otherwise both miss the cache and launch redundant
-    ``ffmpeg -filters`` subprocesses; on free-threaded CPython 3.13+
-    the dict assignment race is real, not just wasted work.
+    Cache key includes a hash of ``ffmpeg -version`` so an out-of-process
+    binary upgrade invalidates the entry. Lock-guarded — under parallel
+    batch / GUI workers two callers could otherwise both miss the cache
+    and launch redundant ``ffmpeg -filters`` subprocesses; on
+    free-threaded CPython 3.13+ the dict assignment race is real, not
+    just wasted work.
+
+    A real ffmpeg failure (binary missing, hung, version mismatch) is
+    logged via ``logging.getLogger(__name__).warning`` before returning
+    False so the user sees the cause in CI logs instead of a silent
+    "feature unavailable".
     """
     import subprocess
 
     from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
-    key = "filters"
+    bin_path = ffmpeg_bin()
+    version_key = _ffmpeg_version_key(bin_path)
     with _FFMPEG_FILTERS_CACHE_LOCK:
-        if key not in _FFMPEG_FILTERS_CACHE:
+        if version_key not in _FFMPEG_FILTERS_CACHE:
             try:
+                # check=False so we can inspect returncode + stderr; the
+                # previous check=True swallowed the actual error text
+                # into an empty CalledProcessError handler.
                 proc = subprocess.run(
-                    [ffmpeg_bin(), "-hide_banner", "-filters"],
-                    capture_output=True, text=True, timeout=10, check=True,
+                    [bin_path, "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=10, check=False,
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-                _FFMPEG_FILTERS_CACHE[key] = set()
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                _log.warning("ffmpeg -filters probe failed: %s", exc)
+                _FFMPEG_FILTERS_CACHE[version_key] = set()
+                return False
+            if proc.returncode != 0:
+                _log.warning(
+                    "ffmpeg -filters exited %s: %s",
+                    proc.returncode,
+                    (proc.stderr or proc.stdout or "").strip()[-300:],
+                )
+                _FFMPEG_FILTERS_CACHE[version_key] = set()
                 return False
             # Word-split match: each ffmpeg filter listing line has the
             # filter name as the second whitespace token. A plain
@@ -327,8 +375,8 @@ def _ffmpeg_has_filter(name: str) -> bool:
                 parts = line.split()
                 if len(parts) >= 2:
                     names.add(parts[1])
-            _FFMPEG_FILTERS_CACHE[key] = names
-        return name in _FFMPEG_FILTERS_CACHE[key]
+            _FFMPEG_FILTERS_CACHE[version_key] = names
+        return name in _FFMPEG_FILTERS_CACHE[version_key]
 
 
 def _check_subtitles(source: SourceMeta) -> list[PreflightFinding]:

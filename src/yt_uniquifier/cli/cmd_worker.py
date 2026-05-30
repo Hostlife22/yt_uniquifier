@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+import signal
 import threading
 import traceback
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -14,6 +16,7 @@ from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.queue.leasing import FileQueue
+from yt_uniquifier.core.runner import CancelToken
 
 console = Console()
 
@@ -57,6 +60,20 @@ def worker_cmd(
         raise typer.Exit(code=1) from exc
 
     stop = threading.Event()
+    cancel = CancelToken()
+
+    # SIGINT / SIGTERM → cooperative cancel: set the worker-level stop flag
+    # (so the lease/poll loop exits at its next iteration) AND the
+    # CancelToken passed into run_full (so the in-flight file's segment
+    # encodes terminate at their next ffmpeg-progress tick instead of
+    # being SIGKILL'd mid-encode and leaving half-written segments).
+    def _on_signal(_signum: int, _frame: Any) -> None:
+        cancel.cancel()
+        stop.set()
+
+    prev_int = signal.signal(signal.SIGINT, _on_signal)
+    prev_term = signal.signal(signal.SIGTERM, _on_signal)
+
     hb_thread = threading.Thread(
         target=_heartbeat_loop, args=(q, stop, heartbeat_sec), daemon=True,
     )
@@ -83,7 +100,8 @@ def worker_cmd(
             console.print(f"[bold]→ {leased.name}[/bold]")
             try:
                 _process_one(leased, prof, out_dir, encoder_override,
-                              work_dir, workers, keep_segments)
+                              work_dir, workers, keep_segments,
+                              cancel_token=cancel)
                 q.release_done(leased)
                 processed += 1
                 console.print(f"[green]✓[/green] {leased.name}")
@@ -95,6 +113,8 @@ def worker_cmd(
                 console.print(f"[red]✗[/red] {leased.name} — {exc}")
     finally:
         stop.set()
+        signal.signal(signal.SIGINT, prev_int)
+        signal.signal(signal.SIGTERM, prev_term)
         hb_thread.join(timeout=2)
         console.print(f"\nsummary: {processed} ok, {failed} failed")
 
@@ -111,6 +131,8 @@ def _process_one(
     leased: Path, profile: object, out_dir: Path,
     encoder_override: str | None, work_root: Path,
     workers: int, keep_segments: bool,
+    *,
+    cancel_token: CancelToken | None = None,
 ) -> None:
     out = out_dir / (leased.stem + ".uniq.mp4")
     plan = build_plan(leased, profile, encoder_override)  # type: ignore[arg-type]
@@ -122,4 +144,4 @@ def _process_one(
         enforce_preflight=True,
         workers=workers,
     )
-    run_full(plan, options)
+    run_full(plan, options, cancel_token=cancel_token)
