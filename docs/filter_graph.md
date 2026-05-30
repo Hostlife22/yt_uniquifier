@@ -90,7 +90,6 @@ ffmpeg -hide_banner -y \
   -c:a:0 aac -b:a:0 256k \
   -movflags +faststart \
   -map_metadata -1 \
-  -metadata encoder=yt-uniquifier/0.1.0a0 \
   output.mp4
 ```
 

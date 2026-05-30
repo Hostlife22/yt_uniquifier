@@ -104,7 +104,7 @@ When adding a transform: snapshot test the `filter_complex` fragment. Do not ass
 
 ## GUI layer (v0.5)
 
-`gui/` is a PyQt6 desktop shell, not a thin wrapper. It has 10 screens (`gui/screens/`: `run`, `batch`, `queue`, `calibrate`, `validation`, `qa_viewer`, `profile_editor`, `history`, `corpus`, `settings`) and 10 background workers (`gui/workers/`: `run_worker`, `batch_worker`, `queue_worker`, `queue_status_worker`, `calibrate_worker`, `corpus_worker`, `qa_worker`, `probe_worker`, `generate_variants_worker`).
+`gui/` is a PyQt6 desktop shell, not a thin wrapper. It has 10 screens (`gui/screens/`: `run`, `batch`, `queue`, `calibrate`, `validation`, `qa_viewer`, `profile_editor`, `history`, `corpus`, `settings`) and 13 background workers (`gui/workers/`: `run_worker`, `batch_worker`, `queue_worker`, `queue_status_worker`, `calibrate_worker`, `corpus_worker`, `corpus_list_worker`, `qa_worker`, `probe_worker`, `generate_variants_worker`, `correlate_worker`, `encoder_detect_worker` — plus `base.py`).
 
 The rule: **workers wrap `core/` callables and stream `RunEvent`s back via Qt signals**. They never duplicate orchestration logic. A worker class typically inherits from `gui/workers/base.py` and bridges `on_event` callbacks → Qt `pyqtSignal`. If you find yourself reimplementing a pipeline step inside a worker, you're in the wrong layer — promote it to `core/`.
 
