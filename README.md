@@ -187,6 +187,8 @@ Run any command with `--help` for full flag listings.
 
 ## Status
 
+<!-- AUTO-GENERATED: regenerated from git tags; see CHANGELOG.md for details. -->
+
 - **v0.1.0** — foundation pipeline, single-host single-file flow ✅
 - **v0.2.0** — CID-divergence calibration, corpus, calibrate loop, scale tools ✅
 - **v0.3.0** — HDR→SDR tonemap, parallel GPU detect, distributed batch ✅
@@ -197,6 +199,21 @@ Run any command with `--help` for full flag listings.
 - **v0.3.3** — video temporal jitter (Fojcik 2025), audio FP Hamming KPI in
   `qa.json`, divergent per-segment seed strategy, parametric audio noise
   overlay ✅
+- **v0.4.0** — Poisson temporal_jitter, `video.subpixel_sharpen`, strip
+  `encoder=` metadata, drop placebo resample, weak-default bumps ✅
+- **v0.4.1** — real-CID validation harness: `tools/generate_variants.py`
+  + `validation_log.csv` schema + manual upload loop ✅
+- **v0.4.2** — per-segment audio divergence (60s windowed chain with
+  `acrossfade` seams; global loudnorm preserved) ✅
+- **v0.4.3** — opt-in `--sanitize-bitstream` libx264 second-pass ✅
+- **v0.5.0** — PyQt6 desktop foundation: sidebar nav + Run screen +
+  `WorkerBase(QThread)` contract ✅
+- **v0.5.1** — Batch + Calibrate screens + ChartWidget ✅
+- **v0.5.2** — QA Viewer (embedded `QWebEngineView`) + Profile Editor +
+  History ✅
+- **v0.5.3** — Queue dashboard + 3-step Validation wizard ✅
+- **v0.5.4** — Settings + Corpus screens + PyInstaller packaging
+  (`make build`) ✅
 
 `ruff` + `mypy --strict` clean. CI runs on Ubuntu + macOS for Python 3.11 / 3.12.
 
