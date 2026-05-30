@@ -769,8 +769,8 @@ def _encoder_args_for(plan: Plan) -> list[str]:
     """Same encoder args as FilterGraph._encoder_args, but free function."""
     enc = plan.encoder
     name = enc.name
+    mb = _max_bitrate_for(plan)
     if enc.vendor == "nvenc":
-        mb = _max_bitrate_for(plan)
         return [
             "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", "19",
             "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
@@ -780,8 +780,15 @@ def _encoder_args_for(plan: Plan) -> list[str]:
     if enc.vendor == "amf":
         return ["-c:v", name, "-rc", "cqp", "-qp_i", "19", "-qp_p", "19"]
     if enc.vendor == "videotoolbox":
-        return ["-c:v", name, "-q:v", "50"]
-    return ["-c:v", name, "-preset", "slow", "-crf", "18"]
+        return [
+            "-c:v", name, "-b:v", str(mb),
+            "-maxrate", str(int(mb * 1.5)), "-bufsize", str(mb * 2),
+            "-allow_sw", "1",
+        ]
+    return [
+        "-c:v", name, "-preset", "medium", "-crf", "18",
+        "-maxrate", str(mb), "-bufsize", str(mb * 2),
+    ]
 
 
 def _max_bitrate_for(plan: Plan) -> int:

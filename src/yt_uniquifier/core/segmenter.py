@@ -197,14 +197,23 @@ def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
 # ---- per-segment ops ---------------------------------------------------------
 
 def stream_copy_extract(segment: Segment, source: Path, dest: Path) -> None:
-    """Fast stream-copy cut between two keyframes."""
+    """Fast stream-copy cut between two keyframes.
+
+    Uses ``-t (end-start)`` rather than ``-to end`` because some MP4 sources
+    have packet PTS that extend past the container-reported duration (edit
+    lists, partial trailing samples). With ``-to`` the .mkv extract preserves
+    every packet up to the source EOF, making single-segment outputs longer
+    than the input. ``-t`` clamps to an exact wall-clock length.
+    (CRIT-2 from the 2026-05-30 test report.)
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    span = max(0.001, segment.end_sec - segment.start_sec)
     cmd = [
         ffmpeg_bin(),
         "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{segment.start_sec:.6f}",
-        "-to", f"{segment.end_sec:.6f}",
         "-i", str(source),
+        "-t", f"{span:.6f}",
         "-c", "copy",
         "-avoid_negative_ts", "make_zero",
         str(dest),
@@ -396,6 +405,7 @@ def concat_segments(
     work_dir: Path,
     map_chapters_from: Path | None = None,
     audio_passthrough_count: int = 2,
+    target_duration_sec: float | None = None,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
 
@@ -447,6 +457,14 @@ def concat_segments(
     else:
         cmd += ["-map_chapters", "-1"]
     cmd += ["-movflags", "+faststart"]
+    # Trim final output to source duration. Some MP4 sources have packet PTS
+    # extending past container.duration (edit lists, partial trailing
+    # samples); without `-t` the concatenated mkv preserves those packets
+    # and the muxed mp4 ends up longer than the input. (CRIT-2 from the
+    # 2026-05-30 test report — the fix at `stream_copy_extract` wasn't
+    # enough because PTS propagate through stream-copy.)
+    if target_duration_sec is not None and target_duration_sec > 0:
+        cmd += ["-t", f"{target_duration_sec:.6f}"]
     cmd += metadata_args
     cmd += [str(output)]
 

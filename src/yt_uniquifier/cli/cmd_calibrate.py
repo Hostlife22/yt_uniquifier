@@ -113,6 +113,7 @@ def calibrate_cmd(
     if result.note:
         console.print(f"[dim]{result.note}[/dim]")
 
+    out.parent.mkdir(parents=True, exist_ok=True)
     dump_profile(result.profile, out)
     console.print(f"Wrote: {out}")
 

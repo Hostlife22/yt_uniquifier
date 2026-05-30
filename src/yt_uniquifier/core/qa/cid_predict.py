@@ -56,12 +56,20 @@ def predict(
 
     n_chunks = max(1, int(duration // chunk_sec))
 
-    # ---- visual: sample one frame per chunk ----
-    in_frames = phash.sample_frames(input_path, n=n_chunks)
-    out_frames = phash.sample_frames(output_path, n=n_chunks)
+    # ---- visual: sample multiple frames per chunk; per-chunk visual = MAX over
+    # samples in that window. Single-sample-per-chunk (legacy) rounded
+    # soft/medium/aggressive profiles into the same bucket — CRIT-3 from the
+    # 2026-05-30 test report. 4× oversample gives enough resolution to
+    # distinguish subtle transforms without blowing up cost.
+    samples_per_chunk = 4
+    total_samples = max(n_chunks * samples_per_chunk, 16)
+    in_frames = phash.sample_frames(input_path, n=total_samples)
+    out_frames = phash.sample_frames(output_path, n=total_samples)
     in_phashes = [int(str(imagehash.phash(f)), 16) for f in in_frames]
     out_phashes = [int(str(imagehash.phash(f)), 16) for f in out_frames]
-    n_pairs = min(len(in_phashes), len(out_phashes), n_chunks)
+    actual_samples = min(len(in_phashes), len(out_phashes))
+    per_chunk = max(1, actual_samples // n_chunks)
+    n_pairs = n_chunks if actual_samples >= n_chunks else max(1, actual_samples)
 
     # ---- audio: full fingerprint, sliced into chunks ----
     in_fp = _full_fingerprint(input_path)
@@ -70,8 +78,18 @@ def predict(
 
     chunks: list[ChunkSimilarity] = []
     for i in range(n_pairs):
-        vis = _phash_pair_similarity(in_phashes[i], out_phashes[i])
-        aud = audio_per_chunk[i]
+        lo = i * per_chunk
+        hi = min((i + 1) * per_chunk, actual_samples)
+        if lo >= hi:
+            vis = 0.0
+        else:
+            # Content ID fires on the most-similar moment in a window, not
+            # the average — take the MAX phash-similarity within this chunk.
+            vis = max(
+                _phash_pair_similarity(in_phashes[j], out_phashes[j])
+                for j in range(lo, hi)
+            )
+        aud = audio_per_chunk[i] if i < len(audio_per_chunk) else 0.0
         combined = max(vis, aud)
         chunks.append(ChunkSimilarity(
             start_sec=i * chunk_sec,

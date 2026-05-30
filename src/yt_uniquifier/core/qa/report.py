@@ -61,6 +61,17 @@ def verdict(report: QAReport) -> VerdictResult:
         band = "yellow"
         reasons.append(f"SSIM {report.ssim_mean:.3f} < 0.90 — measurable change.")
 
+    # Duration mismatch ≥ 0.5s means the encode silently changed video length —
+    # a correctness failure, not a metric drift. Never let this slip into a
+    # GREEN verdict. (MED-1 from 2026-05-30 test report.)
+    if not report.duration_match:
+        if band == "green":
+            band = "red"
+        reasons.append(
+            f"duration mismatch: input {report.input_duration_sec:.3f}s vs "
+            f"output {report.output_duration_sec:.3f}s — encode changed length."
+        )
+
     if not reasons:
         reasons.append("All metrics within expected bands.")
     return VerdictResult(band=band, reasons=reasons)

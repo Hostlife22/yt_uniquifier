@@ -65,16 +65,19 @@ def compute(
         libvmaf_args += f":n_subsample={subsample}"
     if hdr_aware:
         libvmaf_args += ":phone_model=0"
-    # scale2ref the reference to match the distorted's dims; libvmaf needs them
-    # identical and the encoder side may have shaved 2px via micro-crop.
+    # Use the modern `scale=…:ref=…` form rather than the deprecated scale2ref
+    # filter (LOW item from 2026-05-30 test report). The reference frame is
+    # auto-resized to the distorted's dimensions; libvmaf needs them identical
+    # and the encoder side may have shaved 2px via micro-crop.
     cmd = [
         ffmpeg_bin(),
         "-hide_banner", "-nostats",
         "-i", str(output_path),
         "-i", str(input_path),
         "-lavfi",
-        "[1:v][0:v]scale2ref=w=iw:h=ih[ref][dist];"
-        "[dist]setsar=1[d];[ref]setsar=1[r];"
+        "[0:v]setsar=1[d];"
+        "[1:v][0:v]scale=rw:rh:flags=lanczos[r0];"
+        "[r0]setsar=1[r];"
         f"[d][r]{libvmaf_args}",
         "-f", "null",
         "-",
@@ -89,4 +92,16 @@ def compute(
     m = _SCORE_RE.search(proc.stderr)
     if not m:
         return VMAFResult(available=True, score=None, note="vmaf score not found in output")
-    return VMAFResult(available=True, score=float(m.group(1)), note=None)
+    score = float(m.group(1))
+    # libvmaf on very short clips occasionally returns ~0 even when frames
+    # are essentially identical (HIGH-1 from 2026-05-30 test report). Treat
+    # scores below 1.0 as unreliable and let the caller fall back to SSIM.
+    if score < 1.0:
+        return VMAFResult(
+            available=True, score=None,
+            note=(
+                f"VMAF returned {score:.2f} (unreliable on this pair); "
+                "falling back to SSIM"
+            ),
+        )
+    return VMAFResult(available=True, score=score, note=None)

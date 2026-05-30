@@ -11,11 +11,19 @@ from yt_uniquifier.core.profile_loader import ProfileLoadError, load_profile
 REPO_PROFILES = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
 
 
-@pytest.mark.parametrize("name", ["soft", "medium", "aggressive", "legacy_ab"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "soft", "medium", "aggressive",
+        "cid_aware", "cid_aggressive",
+        "medium_hdr", "cid_aware_hdr_to_sdr",
+    ],
+)
 def test_shipped_profiles_load(name: str) -> None:
     p = load_profile(REPO_PROFILES / f"{name}.yaml")
     assert p.name == name
-    assert p.target_codec == "h264"
+    # HDR profiles target hevc; SDR profiles target h264.
+    assert p.target_codec in {"h264", "hevc"}
 
 
 def test_missing_file_raises(tmp_path: Path) -> None:

@@ -42,8 +42,18 @@ def qa_cmd(
         help="Also search the local corpus for matches against the output.",
     ),
     corpus_dir: Path | None = typer.Option(None, "--corpus-dir"),
+    fast_qa: bool = typer.Option(
+        False, "--fast-qa",
+        help="Cheaper QA: skip VMAF, halve sample count. Same flag as `yt-uniq run`.",
+    ),
 ) -> None:
     """Compute similarity metrics for an (input, output) pair."""
+    if fast_qa:
+        # --fast-qa is shorthand: equivalent to --no-vmaf and --samples 60.
+        # Explicit --samples wins if the caller set a non-default value.
+        no_vmaf = True
+        if samples == 120:
+            samples = 60
     try:
         corpus = Corpus(corpus_dir) if vs_corpus else None
         report = build_report(

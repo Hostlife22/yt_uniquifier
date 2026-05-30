@@ -163,9 +163,15 @@ def run(
             time.sleep(_NVENC_OOM_BACKOFF_SEC)
             continue
 
-        tail = "\n".join(log_lines[-30:])
-        on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": tail}))
-        raise PipelineError(f"ffmpeg exited with {rc}; last log:\n{tail}")
+        # Trim user-visible tail to ~8 lines; full log already saved to
+        # log_path when caller supplied it. (MED-3 from 2026-05-30 test report.)
+        full_tail = "\n".join(log_lines[-30:])
+        short_tail = "\n".join(log_lines[-8:])
+        log_hint = f" (full log: {log_path})" if log_path is not None else ""
+        on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": full_tail}))
+        raise PipelineError(
+            f"ffmpeg exited with {rc}; last log:\n{short_tail}{log_hint}"
+        )
 
     # Loop either returns on success or raises on failure; this is unreachable.
     raise PipelineError("runner.run exhausted retries without a verdict")

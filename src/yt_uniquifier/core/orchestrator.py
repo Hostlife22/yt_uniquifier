@@ -234,6 +234,7 @@ def run_full(
         options.output,
         build_metadata_args(plan, title_template=options.title_template),
         work_dir=options.work_dir,
+        target_duration_sec=plan.source.duration_sec,
     )
     # v0.4.3 — optional bitstream sanitization (second-pass libx264).
     if options.sanitize_bitstream:
