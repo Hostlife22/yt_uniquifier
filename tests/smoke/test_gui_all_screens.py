@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
 
-
 pytestmark = pytest.mark.smoke
 
 

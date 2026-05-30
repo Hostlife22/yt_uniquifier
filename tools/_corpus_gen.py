@@ -22,8 +22,8 @@ def gen_sdr_4k(out: Path, duration: int = 12) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=3840x2160:rate=30,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=30,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", "-pix_fmt", "yuv420p", str(out),
     ])
@@ -34,8 +34,8 @@ def gen_hdr10(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"mandelbrot=size=1920x1080:rate=24",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "mandelbrot=size=1920x1080:rate=24",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx265", "-preset", "ultrafast",
         "-pix_fmt", "yuv420p10le",
         "-x265-params",
@@ -50,8 +50,8 @@ def gen_hlg(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1920x1080:rate=25",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx265", "-preset", "ultrafast",
         "-pix_fmt", "yuv420p10le",
         "-x265-params",
@@ -67,8 +67,8 @@ def gen_odd_dim(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1281x721:rate=30,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=1281x721:rate=30,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", str(out),
     ])
@@ -79,8 +79,8 @@ def gen_60fps(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=60,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=60,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", str(out),
     ])
@@ -91,8 +91,8 @@ def gen_2398fps(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=24000/1001,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24000/1001,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", str(out),
     ])
@@ -104,8 +104,8 @@ def gen_vfr(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=30,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-vf", "setpts='PTS*(1+0.3*sin(N/15))'",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-vsync", "vfr",
@@ -118,7 +118,7 @@ def gen_audio_5_1(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=25,format=yuv420p",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25,format=yuv420p",
         "-f", "lavfi", "-i",
         "sine=frequency=440:sample_rate=48000,aformat=channel_layouts=5.1",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
@@ -131,8 +131,8 @@ def gen_audio_mono(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=25,format=yuv420p",
-        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=44100",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "64k", "-ac", "1", str(out),
     ])
@@ -144,7 +144,7 @@ def gen_audio_hot(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=25,format=yuv420p",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25,format=yuv420p",
         "-f", "lavfi", "-i",
         "sine=frequency=440:sample_rate=44100,volume=20dB",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
@@ -158,7 +158,7 @@ def gen_audio_quiet(out: Path, duration: int = 10) -> Path:
     if out.exists():
         return out
     _run([
-        "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate=25,format=yuv420p",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25,format=yuv420p",
         "-f", "lavfi", "-i",
         "sine=frequency=440:sample_rate=44100,volume=-40dB",
         "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",

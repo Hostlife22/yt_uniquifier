@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-
 pytestmark = pytest.mark.integration
 
 

@@ -10,8 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # QT_QPA_PLATFORM is set in conftest.py before any PyQt import.
 
 

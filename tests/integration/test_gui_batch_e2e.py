@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QApplication

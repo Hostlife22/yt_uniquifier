@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 import shutil
 import signal
 import subprocess
-import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import typer

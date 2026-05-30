@@ -203,6 +203,57 @@ designed safety net — left intact.
 
 - **No checkpoint corruption observed** across any passing cell.
 
+### #4 — `audio_fp_similarity` is misleading UX (always 0.0)  *(severity: MINOR, documented)*
+
+**Cells**: 76/76 passing cells — every output mp4 we produced has
+`audio_fp_similarity == 0.0` in its `<out>.qa.json`, regardless of
+profile aggressiveness.
+
+**Root cause**: `core/qa/audio_fp.py::compare` computes Jaccard over
+the set of 32-bit chromaprint sub-fingerprints (`len(A ∩ B) / len(A ∪ B)`).
+Any single-bit change in any sub-fingerprint makes a sub-block
+completely different from the input's; chromaprint deliberately
+flips bits across the entire 32-bit code for small acoustic changes,
+so `loudnorm` alone is enough to produce a 100 % disjoint set.
+
+**Why it's misleading**: a user opening the QA report sees
+`"audio_fp_similarity": 0.0` next to `"audio_fp_match_confidence": 0.55`
+and reads "audio totally destroyed" — but the audio is perfectly
+recognisable. The Hamming-based `audio_fp_match_confidence` (mean
+Hamming per frame normalised by 32) is the metric that actually
+reflects perceived similarity.
+
+**Why not fixed in this pass**: the field is part of the documented
+QA schema (`docs/qa_report.md`) and is consumed by downstream
+analysis (`out/runs/_analyze.py`, calibration loop). Changing
+semantics would break analyses, and removing the field requires
+schema-version negotiation. Best fix is a one-paragraph clarification
+in `docs/qa_report.md` flagging that Jaccard-on-subfingerprint-sets
+is strict-by-design and should not be read as "audio similarity".
+
+### #5 — `h264_videotoolbox` probe fails on this Mac  *(severity: INFO, not yt-uniq's bug)*
+
+`yt-uniq probe --encoders` shows `h264_videotoolbox.works=false`
+with `error: Nothing was written into output file, because at least
+one of its streams received no packets`. `hevc_videotoolbox` works
+fine. This is an ffmpeg-on-this-system issue (the encoder's input
+format constraints fail against the `testsrc2` probe pixel format),
+not a yt-uniq defect. yt-uniq's fallback chain correctly degrades
+to `libx264` when h264_videotoolbox is unavailable, so user-visible
+behaviour is correct.
+
+Logged so that a future probe-tuning ticket can revisit the
+`encoder.py::detect_encoders` test pattern — sending a more
+VideoToolbox-friendly input (e.g. `nv12` or hardware-encoded source)
+might recover h264_videotoolbox detection.
+
+### #6 — `workers=4` parallel-segment path  *(severity: PASS)*
+
+Verified end-to-end with `clip_long.mp4` (90 s) at `--segment-sec 15`
+(6 segments) × `--workers 4`: exit 0, output produced, QA built. The
+recent `CheckpointStore` thread-safety hardening (`9dbc8fa`,
+`7338fa1`) holds under real parallel-segment load.
+
 ## Closed by this work
 
 - New preflight check `tonemap.sdr_input` (Finding #1)

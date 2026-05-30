@@ -17,7 +17,6 @@ import pytest
 from PyQt6.QtCore import QSize
 from PyQt6.QtWidgets import QApplication
 
-
 pytestmark = pytest.mark.visual
 
 
