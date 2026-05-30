@@ -96,4 +96,8 @@ def test_corpus_screen_table_populates(
     )
     with patch.object(Corpus, "list_all", return_value=[fake_entry]):
         screen = CorpusScreen(state)
+        # _refresh now dispatches a worker; synthesise the resulting
+        # `listed` signal so the table populates synchronously for the
+        # test without spinning a real QThread + event loop.
+        screen._on_listed([fake_entry])
     assert screen.table.rowCount() == 1
