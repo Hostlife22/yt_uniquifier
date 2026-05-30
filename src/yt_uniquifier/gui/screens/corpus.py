@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 from yt_uniquifier.core.qa.corpus import Corpus
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
+from yt_uniquifier.gui.workers.corpus_list_worker import CorpusListWorker
 from yt_uniquifier.gui.workers.corpus_worker import CorpusWorker
 
 
@@ -29,6 +30,7 @@ class CorpusScreen(ScreenBase):
         super().__init__(state)
         self.corpus = Corpus()
         self.worker: CorpusWorker | None = None
+        self.list_worker: CorpusListWorker | None = None
         self._build_ui()
         self._refresh()
 
@@ -84,7 +86,24 @@ class CorpusScreen(ScreenBase):
         layout.addWidget(self.status_label)
 
     def _refresh(self) -> None:
-        entries = self.corpus.list_all()
+        """Trigger a background corpus read.
+
+        For a few-entry index the JSON parse is sub-millisecond, but on
+        a corpus that has grown to hundreds of entries (especially after
+        bulk add) the synchronous read briefly blocked the event loop.
+        Dispatch a worker; render on its `listed` signal.
+        """
+        if self.list_worker is not None:
+            return  # one in flight already
+        self.status_label.setText("loading…")
+        self.list_worker = CorpusListWorker(self.corpus)
+        self.list_worker.listed.connect(self._on_listed)
+        self.list_worker.failed.connect(self._on_list_failed)
+        self.list_worker.start()
+
+    def _on_listed(self, entries: object) -> None:
+        if not isinstance(entries, list):
+            entries = []
         self.table.setRowCount(0)
         for e in entries:
             r = self.table.rowCount()
@@ -97,6 +116,11 @@ class CorpusScreen(ScreenBase):
             has_audio = "yes" if e.audio_fingerprint else "no"
             self.table.setItem(r, 4, QTableWidgetItem(has_audio))
         self.status_label.setText(f"{len(entries)} entries")
+        self.list_worker = None
+
+    def _on_list_failed(self, message: str) -> None:
+        self.status_label.setText(f"refresh failed: {message}")
+        self.list_worker = None
 
     def _on_add(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
