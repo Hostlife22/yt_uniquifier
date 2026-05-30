@@ -81,6 +81,7 @@ addopts = "-ra --strict-markers"
 markers = [
     "integration: tests that invoke real ffmpeg",
     "smoke: minimal CI sanity tests",
+    "visual: GUI screenshot regression (linux-offscreen only)",
 ]
 
 [tool.mypy]

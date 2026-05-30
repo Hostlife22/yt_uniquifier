@@ -81,6 +81,14 @@ test-gui:  ## Run GUI tests (headless via QT_QPA_PLATFORM=offscreen).
 test-integration:  ## Run integration tests (real ffmpeg required).
 	$(QT_OFFSCREEN) $(PYTEST) tests/integration/ -q
 
+.PHONY: test-visual
+test-visual:  ## Run GUI screenshot regression (Linux-offscreen only).
+	$(QT_OFFSCREEN) $(PYTEST) tests/visual/ -m visual -q
+
+.PHONY: test-visual-update
+test-visual-update:  ## Refresh GUI screenshot baselines (intentional change).
+	UPDATE_VISUAL_BASELINES=1 $(QT_OFFSCREEN) $(PYTEST) tests/visual/ -m visual -q
+
 .PHONY: check
 check: lint typecheck test  ## All quality gates: ruff + mypy + full pytest.
 	@echo "✓ all checks passed"
