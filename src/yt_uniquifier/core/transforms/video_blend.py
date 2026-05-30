@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -26,6 +26,18 @@ B_INPUT_PLACEHOLDER = "__B__"
 class BlendBParams(BaseModel):
     b_video_path: Path
     opacity: float = Field(default=0.03, ge=0.01, le=0.15)
+
+    @field_validator("b_video_path")
+    @classmethod
+    def _expanded_path(cls, v: Path) -> Path:
+        # Expand `~` so a profile written by a different user (different
+        # `HOME`) still finds the file. We deliberately do NOT call
+        # `.resolve()` because resolving collapses macOS `/tmp` →
+        # `/private/tmp` symlinks and changes the path the test
+        # snapshots assert against. Existence is not enforced here —
+        # ffmpeg's own "No such file" is acceptable as the user-facing
+        # error when the path is wrong.
+        return Path(v).expanduser()
 
 
 def _build_blend_b(

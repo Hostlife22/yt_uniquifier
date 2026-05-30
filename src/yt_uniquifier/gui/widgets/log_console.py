@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Literal
 
 from PyQt6.QtGui import QGuiApplication
@@ -31,7 +32,11 @@ class LogConsole(QWidget):
     def __init__(self, max_lines: int = 2000) -> None:
         super().__init__()
         self.max_lines = max_lines
-        self._lines: list[tuple[LogLevel, str]] = []
+        # deque(maxlen=…) drops the oldest entry in O(1) once the cap is
+        # reached. The previous `list[-max:]` slice was O(N) per append
+        # and became a hot spot in long batch encodes that emitted
+        # thousands of events per second.
+        self._lines: deque[tuple[LogLevel, str]] = deque(maxlen=max_lines)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -60,16 +65,13 @@ class LogConsole(QWidget):
         layout.addWidget(self.text, stretch=1)
 
     def log(self, line: str, level: LogLevel = "info") -> None:
-        self._lines.append((level, line))
-        # Cap retained lines (FIFO).
-        if len(self._lines) > self.max_lines:
-            self._lines = self._lines[-self.max_lines:]
+        self._lines.append((level, line))  # deque handles FIFO cap
         # Append-only refresh if filter allows; else just don't show.
         if self._allows(level):
             self._append_html(level, line)
 
     def clear(self) -> None:
-        self._lines = []
+        self._lines.clear()
         self.text.clear()
 
     def line_count(self) -> int:

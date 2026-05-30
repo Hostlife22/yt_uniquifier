@@ -105,6 +105,12 @@ class ChartWidget(QWidget):
         if HAS_QTCHARTS and self._chart is not None:
             chart: QChart = self._chart
             chart.removeAllSeries()
+            # Repopulate `_lines` from the freshly-added QLineSeries so
+            # later `add_point` calls find the live series instead of
+            # creating a duplicate. Without this the second iteration of
+            # a calibration drew every series twice (once from
+            # set_series, once from add_point).
+            self._lines.clear()
             for s in self._series:
                 line = QLineSeries()
                 line.setName(s.name)
@@ -114,6 +120,7 @@ class ChartWidget(QWidget):
                 for x, y in s.points:
                     line.append(QPointF(x, y))
                 chart.addSeries(line)
+                self._lines[s.name] = line
             chart.createDefaultAxes()
         else:
             self.update()  # triggers paintEvent (fallback)

@@ -287,16 +287,15 @@ def _ffmpeg_has_filter(name: str) -> bool:
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
                 _FFMPEG_FILTERS_CACHE[key] = set()
                 return False
-            # Substring match on the filters listing is enough for our
-            # needs (filter names are space-delimited words; false
-            # positives unlikely).
+            # Word-split match: each ffmpeg filter listing line has the
+            # filter name as the second whitespace token. A plain
+            # `name in proc.stdout` substring fallback would mis-match
+            # `eq` inside `equalizer`, so we don't use it.
             names: set[str] = set()
             for line in proc.stdout.splitlines():
                 parts = line.split()
                 if len(parts) >= 2:
                     names.add(parts[1])
-            if name in proc.stdout:
-                names.add(name)
             _FFMPEG_FILTERS_CACHE[key] = names
         return name in _FFMPEG_FILTERS_CACHE[key]
 

@@ -232,14 +232,34 @@ class ValidationScreen(ScreenBase):
     def _on_gen_finished(self, _msg: object = "") -> None:
         """Clear gen_worker so the next Generate click is allowed."""
         self.gen_log.log("All variants generated.", "info")
-        self.gen_worker = None
+        self._drop_gen_worker()
         self._refresh_gen_btn()
 
     def _on_gen_failed(self, msg: str) -> None:
         """Clear gen_worker on failure so the user can retry."""
         self.gen_log.log(f"FAILED: {msg}", "error")
-        self.gen_worker = None
+        self._drop_gen_worker()
         self._refresh_gen_btn()
+
+    def _drop_gen_worker(self) -> None:
+        if self.gen_worker is None:
+            return
+        # Tests sometimes substitute a plain `object()` placeholder; only
+        # call quit/wait on a real QThread.
+        if hasattr(self.gen_worker, "quit"):
+            self.gen_worker.quit()
+        if hasattr(self.gen_worker, "wait"):
+            self.gen_worker.wait(1000)
+        self.gen_worker = None
+
+    def _drop_corr_worker(self) -> None:
+        if self.corr_worker is None:
+            return
+        if hasattr(self.corr_worker, "quit"):
+            self.corr_worker.quit()
+        if hasattr(self.corr_worker, "wait"):
+            self.corr_worker.wait(1000)
+        self.corr_worker = None
 
     def _on_variant_done(self, rec: dict[str, object]) -> None:
         r = self.record_table.rowCount()
@@ -335,10 +355,10 @@ class ValidationScreen(ScreenBase):
 
     def _on_corr_done(self, stdout: str) -> None:
         self.corr_output.setPlainText(stdout)
-        self.corr_worker = None
+        self._drop_corr_worker()
         self.run_corr_btn.setEnabled(True)
 
     def _on_corr_failed(self, message: str) -> None:
         self.corr_output.setPlainText(message)
-        self.corr_worker = None
+        self._drop_corr_worker()
         self.run_corr_btn.setEnabled(True)

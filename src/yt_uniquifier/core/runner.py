@@ -77,6 +77,7 @@ def run(
     cancel_token: CancelToken | None = None,
     log_path: Path | None = None,
     progress_via_stdout: bool = True,
+    extra_env: dict[str, str] | None = None,
     _retried: bool = False,
 ) -> RunResult:
     """Execute the BuiltCommand and stream progress events.
@@ -89,17 +90,34 @@ def run(
 
     full_cmd = list(cmd.args)
     if progress_via_stdout:
-        # Insert just before the output path (last arg).
+        # Insert just before the output path (last arg). All build_*
+        # callers in pipeline.py end with `str(output)`; assert it so a
+        # future caller passing a `-flag` as the trailing argument fails
+        # loudly instead of silently producing an unparseable command
+        # line.
+        if full_cmd and full_cmd[-1].startswith("-"):
+            raise PipelineError(
+                f"runner.run expects the output path as the last arg, "
+                f"got option {full_cmd[-1]!r}",
+            )
         insert_at = len(full_cmd) - 1
         full_cmd[insert_at:insert_at] = ["-progress", "pipe:1", "-nostats"]
 
     start = time.monotonic()
+    # extra_env: per-call env overrides (e.g. OMP_NUM_THREADS=1 from the
+    # parallel batch path) — keeps the parent process's env untouched so
+    # concurrent batch invocations can't stomp on each other's values.
+    import os as _os
+    proc_env = None
+    if extra_env:
+        proc_env = {**_os.environ, **extra_env}
     proc = subprocess.Popen(
         full_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=proc_env,
     )
 
     log_lines: list[str] = []
@@ -152,7 +170,13 @@ def run(
         if stderr_data:
             log_lines.extend(stderr_data.splitlines())
 
-    rc = proc.wait()
+    # `proc.communicate()` already waited and set returncode; a follow-up
+    # `proc.wait()` is redundant and, if the bare `except` above swallowed
+    # a TimeoutExpired without reaping the process, would block forever.
+    # `getattr` so legacy / test fakes without `.returncode` still work.
+    rc = getattr(proc, "returncode", None)
+    if rc is None:
+        rc = proc.wait()
     duration = time.monotonic() - start
 
     if log_path is not None:
@@ -174,7 +198,8 @@ def run(
             return run(
                 cmd, output=output, on_event=on_event,
                 cancel_token=cancel_token, log_path=log_path,
-                progress_via_stdout=progress_via_stdout, _retried=True,
+                progress_via_stdout=progress_via_stdout,
+                extra_env=extra_env, _retried=True,
             )
         tail = "\n".join(log_lines[-30:])
         on_event(RunEvent(kind="error", payload={"returncode": rc, "tail": tail}))

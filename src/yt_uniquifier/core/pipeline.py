@@ -230,12 +230,15 @@ class FilterGraph:
             params = self._loudnorm_params(audio_transforms)
             self._loudnorm_measurement = measure(self.plan.source.path, params)
 
-        a_in = "0:a:0"
         a_chains: list[str] = []
-        a_label: str | None = a_in
-        if not self.plan.source.audio:
-            a_label = None
-        else:
+        a_label: str | None = None
+        if self.plan.source.audio:
+            # `0:a:0` is the ffmpeg *relative* audio specifier — "first
+            # audio stream of input 0", regardless of absolute container
+            # index. The dead `or a_in` fallback that used to live here
+            # is removed: `a_label` starts truthy and is reassigned to
+            # `chain.out_label` (also truthy) on every iteration.
+            a_label = "0:a:0"
             for tc in audio_transforms:
                 spec = get(tc.id)
                 params = spec.schema.model_validate({**spec.defaults, **tc.params})
@@ -244,10 +247,10 @@ class FilterGraph:
                     assert self._loudnorm_measurement is not None
                     chain = build_apply(
                         params, self._loudnorm_measurement, self.alloc,
-                        a_label or a_in, rng=rng,
+                        a_label, rng=rng,
                     )
                 else:
-                    chain = call_build(spec, params, self.alloc, a_label or a_in, rng=rng)
+                    chain = call_build(spec, params, self.alloc, a_label, rng=rng)
                 a_chains.append(
                     f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"
                 )
@@ -615,6 +618,8 @@ def build_main_audio_command_windowed(
     alloc = LabelAllocator()
     window_chains: list[str] = []
     window_out_labels: list[str] = []
+    # Relative audio specifier — same as FilterGraph.build.
+    main_audio_specifier = "0:a:0"
 
     for w in windows:
         seg_seed = derive_segment_seed(
@@ -627,7 +632,7 @@ def build_main_audio_command_windowed(
         # Start the per-window chain: atrim the slice, reset PTS to 0.
         trim_out = alloc.next("a")
         chain_parts = [
-            f"[0:a:0]atrim=start={cut_in:.4f}:end={cut_out:.4f},"
+            f"[{main_audio_specifier}]atrim=start={cut_in:.4f}:end={cut_out:.4f},"
             f"asetpts=PTS-STARTPTS[{trim_out}]"
         ]
         a_label = trim_out

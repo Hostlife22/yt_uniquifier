@@ -51,6 +51,24 @@ class RunOptions:
     # libx264-source runs. Refused on HDR/HEVC paths.
     sanitize_bitstream: bool = False
 
+    def __post_init__(self) -> None:
+        # Validate bounds at the public contract level. Without these:
+        #   - target_segment_sec=0 made plan_segments spin (`span >= 0`
+        #     is always true), producing tens of thousands of microseg
+        #     ffmpeg forks.
+        #   - workers=10_000_000 was clamped only deeper inside
+        #     process_video_segments_parallel; surfacing the rule here
+        #     gives callers a clear error early.
+        if not (1.0 <= self.target_segment_sec <= 86400.0):
+            raise ValueError(
+                f"target_segment_sec must be in [1, 86400] seconds; "
+                f"got {self.target_segment_sec}",
+            )
+        if not (1 <= self.workers <= 64):
+            raise ValueError(
+                f"workers must be in [1, 64]; got {self.workers}",
+            )
+
 
 @dataclass(frozen=True)
 class RunSummary:
@@ -150,13 +168,20 @@ def run_full(
             )
         except Exception:
             # A worker crashed; reset segments that never reached "done"
-            # back to "failed" so resume sees a clean state. Without this
-            # they remain "in_progress" forever, confusing the GUI's
-            # progress display and any future resume logic that might
-            # treat in_progress as recoverable.
-            for seg in store.all_segments():
-                if seg.status == "in_progress":
-                    store.mark(seg.idx, "failed")
+            # back to "failed" so resume sees a clean state. The re-mark
+            # loop touches disk via store.mark → _flush; if _flush raises
+            # (disk full, permissions) we must NOT propagate it in place
+            # of the worker's original exception. Swallow flush errors
+            # here so the outer `raise` preserves the real cause.
+            try:
+                for seg in store.all_segments():
+                    if seg.status == "in_progress":
+                        store.mark(seg.idx, "failed")
+            except Exception as flush_exc:  # noqa: BLE001
+                emit(RunEvent(kind="error", payload={
+                    "phase": "checkpoint",
+                    "message": f"failed to re-mark segments: {flush_exc}",
+                }))
             raise
 
     # Main audio (cached via state.json).

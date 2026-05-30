@@ -109,13 +109,26 @@ class CheckpointStore:
             self._flush()
 
     def all_segments(self) -> list[Segment]:
-        return [Segment.model_validate(s) for s in self._state.get("segments", [])]
+        with self._lock:
+            return [Segment.model_validate(s) for s in self._state.get("segments", [])]
 
     def pending(self) -> list[Segment]:
-        return [s for s in self.all_segments() if s.status != "done"]
+        # Filter at the dict level before model_validate to avoid parsing
+        # every segment twice (once for all_segments, once for the
+        # filter). On thousand-segment plans this halves the cost.
+        with self._lock:
+            return [
+                Segment.model_validate(s)
+                for s in self._state.get("segments", [])
+                if s.get("status") != "done"
+            ]
 
     def all_done(self) -> bool:
-        return all(s.status == "done" for s in self.all_segments())
+        with self._lock:
+            return all(
+                s.get("status") == "done"
+                for s in self._state.get("segments", [])
+            )
 
     # ---- loudnorm cache ----
 
@@ -154,7 +167,15 @@ class CheckpointStore:
             # it; a crash between os.replace and the page hitting disk
             # produces a zero-byte state.json — the exact failure the
             # atomic-write pattern is supposed to prevent.
-            with tmp.open("w", encoding="utf-8") as fh:
+            #
+            # Open with mode 0o600 so the file is owner-only. state.json
+            # carries absolute paths to the user's source / output / main
+            # audio files — on shared / mis-umask'd hosts this would
+            # otherwise leak which content a user is processing.
+            fd = os.open(
+                tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(payload)
                 fh.flush()
                 os.fsync(fh.fileno())

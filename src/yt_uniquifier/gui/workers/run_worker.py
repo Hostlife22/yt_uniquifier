@@ -26,6 +26,12 @@ class RunWorker(WorkerBase):
     finished_ok = pyqtSignal(str, str)             # output_path, qa_html_path
     segment_progress = pyqtSignal(int, str)        # segment_idx, status
     cancelled = pyqtSignal()                       # user-initiated cancel
+    # Marshal history writes back onto the GUI thread. `AppState` is a
+    # QObject owned by the GUI thread; mutating its `_history` list and
+    # emitting `history_changed` from the worker `run()` body would race
+    # with the GUI's table updates and corrupt the on-disk JSON. Qt
+    # delivers cross-thread signals via QueuedConnection by default.
+    _history_request = pyqtSignal(object)          # HistoryEntry
 
     def __init__(
         self,
@@ -44,6 +50,8 @@ class RunWorker(WorkerBase):
         self.state = state
         self._total_us = max(int(plan.source.duration_sec * 1_000_000), 1)
         self._seg_us: dict[int, int] = {}
+        if self.state is not None:
+            self._history_request.connect(self._on_history_request)
 
     def run(self) -> None:  # noqa: D401 - Qt override
         try:
@@ -80,21 +88,34 @@ class RunWorker(WorkerBase):
         )
 
     def _push_history(self, status: str, qa_html: Path | None = None) -> None:
-        """v0.5.2 — record history entry on done / failed (best-effort)."""
+        """v0.5.2 — record history entry on done / failed (best-effort).
+
+        Called from the worker thread. The `HistoryEntry` is constructed
+        here (cheap, pure-data) and emitted via `_history_request` — Qt
+        delivers the signal to `_on_history_request` on the GUI thread,
+        which is the only place that touches `AppState`.
+        """
         if self.state is None:
+            return
+        entry = HistoryEntry(
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            source_path=str(self.plan.source.path),
+            profile_name=self.plan.profile.name,
+            encoder_name=self.plan.encoder.name,
+            output_path=str(self.options.output),
+            qa_html_path=str(qa_html) if qa_html else None,
+            plan_hash=self.plan.plan_hash,
+            status=status,
+        )
+        self._history_request.emit(entry)
+
+    def _on_history_request(self, entry: object) -> None:
+        """GUI-thread slot — invoked via QueuedConnection from worker thread."""
+        if self.state is None or not isinstance(entry, HistoryEntry):
             return
         import contextlib
         with contextlib.suppress(Exception):
-            self.state.push_history(HistoryEntry(
-                timestamp=datetime.now().isoformat(timespec="seconds"),
-                source_path=str(self.plan.source.path),
-                profile_name=self.plan.profile.name,
-                encoder_name=self.plan.encoder.name,
-                output_path=str(self.options.output),
-                qa_html_path=str(qa_html) if qa_html else None,
-                plan_hash=self.plan.plan_hash,
-                status=status,
-            ))
+            self.state.push_history(entry)
 
     def _on_event(self, ev: RunEvent) -> None:
         if ev.kind == "log":

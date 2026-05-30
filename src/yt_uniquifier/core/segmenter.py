@@ -29,8 +29,19 @@ from yt_uniquifier.core.seed_resolver import derive_segment_seed
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
-KEYFRAME_CACHE_DIR = Path.home() / ".cache" / "yt_uniquifier" / "keyframes"
 KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
+
+
+def _keyframe_cache_dir() -> Path:
+    """Return the cache dir, honoring runtime reassignment of
+    ``KEYFRAME_CACHE_DIR`` (tests monkeypatch this constant).
+    """
+    import sys as _sys
+    return _sys.modules[__name__].KEYFRAME_CACHE_DIR
+
+
+# Default resolved at import. Tests reassign / monkeypatch this.
+KEYFRAME_CACHE_DIR = Path.home() / ".cache" / "yt_uniquifier" / "keyframes"
 
 # ---- planning ----------------------------------------------------------------
 
@@ -76,14 +87,28 @@ def list_keyframes(source: Path, *, force: bool = False) -> list[float]:
             ks.append(float(t))
         except (TypeError, ValueError):
             continue
-    result = sorted(set(ks))
+    # Deduplicate with 1 ms tolerance: containers with imprecise PTS can
+    # emit `10.000000` and `10.000001` for the same keyframe, which a
+    # plain `set()` keeps as distinct, producing a 1 µs segment that
+    # passes plan_segments but fails stream_copy_extract with empty
+    # output.
+    result = _dedup_keyframes(sorted(ks))
     _save_keyframe_cache(source, result)
     return result
 
 
+def _dedup_keyframes(sorted_ks: list[float], tol_sec: float = 1e-3) -> list[float]:
+    """Collapse keyframes within `tol_sec` of the previously-kept one."""
+    out: list[float] = []
+    for t in sorted_ks:
+        if not out or t - out[-1] > tol_sec:
+            out.append(t)
+    return out
+
+
 def _keyframe_cache_path(source: Path) -> Path:
     digest = md5_file(source)
-    return KEYFRAME_CACHE_DIR / f"{digest}.json"
+    return _keyframe_cache_dir() / f"{digest}.json"
 
 
 def _load_keyframe_cache(source: Path) -> list[float] | None:
@@ -202,6 +227,7 @@ def process_video_segment(
     *,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[Path, Path]:
     """Extract + apply video transforms. Returns (src_seg_path, out_seg_path)."""
     src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
@@ -212,6 +238,7 @@ def process_video_segment(
     run_ffmpeg(
         cmd, output=out, on_event=on_event, cancel_token=cancel_token,
         log_path=out.with_suffix(".mkv.log"),
+        extra_env=extra_env,
     )
     return src, out
 
@@ -276,39 +303,31 @@ def process_video_segments_parallel(
     # We use threads (not processes) because each segment spawns its own
     # ffmpeg subprocess via run_ffmpeg, which already releases the GIL.
     # OMP_NUM_THREADS=1 is wanted to prevent libavfilter from
-    # oversubscribing the CPU; we used to mutate os.environ globally
-    # which leaked to every unrelated subprocess the host launched. The
-    # ffmpeg subprocess inherits env from the Python process by default,
-    # so setting it only on each subprocess invocation (via runner.py
-    # picking up the env) would be the cleanest fix — but that change
-    # crosses module boundaries. Apply it process-locally only when the
-    # caller has not already supplied a value, and only for the
-    # duration of this parallel block. (Best-effort: nested parallel
-    # batches with conflicting values are not supported.)
-    prior_omp = os.environ.get("OMP_NUM_THREADS")
-    if prior_omp is None:
-        os.environ["OMP_NUM_THREADS"] = "1"
+    # oversubscribing the CPU. The previous implementation mutated
+    # os.environ globally, which raced between concurrent batch
+    # invocations and leaked the value to every unrelated subprocess
+    # the host launched. Instead, pass it through `extra_env` so it
+    # lives only on the ffmpeg child's environment — never on the
+    # parent process.
+    extra_env: dict[str, str] = {}
+    if os.environ.get("OMP_NUM_THREADS") is None:
+        extra_env["OMP_NUM_THREADS"] = "1"
     results = []
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
-            futures = {
-                pool.submit(
-                    process_video_segment, seg, plan, work_dir,
-                    on_event=on_event, cancel_token=cancel_token,
-                ): seg
-                for seg in pending
-            }
-            for fut in concurrent.futures.as_completed(futures):
-                seg = futures[fut]
-                src, out = fut.result()
-                results.append((seg.idx, src, out))
-                if on_segment_done:
-                    on_segment_done(seg.idx, src, out)
-    finally:
-        # Restore the pre-existing env so the value we set doesn't leak
-        # to later unrelated subprocess invocations in the same process.
-        if prior_omp is None:
-            os.environ.pop("OMP_NUM_THREADS", None)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
+        futures = {
+            pool.submit(
+                process_video_segment, seg, plan, work_dir,
+                on_event=on_event, cancel_token=cancel_token,
+                extra_env=extra_env or None,
+            ): seg
+            for seg in pending
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            seg = futures[fut]
+            src, out = fut.result()
+            results.append((seg.idx, src, out))
+            if on_segment_done:
+                on_segment_done(seg.idx, src, out)
     return results
 
 
@@ -406,4 +425,12 @@ def concat_segments(
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3600)
     except subprocess.CalledProcessError as exc:
-        raise PipelineError(f"concat failed: {exc.stderr.strip()[-500:]}") from exc
+        # Show both head + tail of stderr. ffmpeg often emits the real
+        # cause in the first few lines (bad path, codec mismatch) and a
+        # tail-only window of 500 chars would silently hide it behind
+        # cosmetic warnings.
+        full = exc.stderr.strip() if exc.stderr else ""
+        head = full[:300]
+        tail = full[-500:] if len(full) > 800 else ""
+        snippet = head + ("\n…\n" + tail if tail else "")
+        raise PipelineError(f"concat failed: {snippet}") from exc

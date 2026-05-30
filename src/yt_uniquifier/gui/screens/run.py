@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan
-from yt_uniquifier.core.preflight import has_fail, preflight
+from yt_uniquifier.core.preflight import has_fail
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -28,6 +28,7 @@ from yt_uniquifier.gui.widgets.kpi_pills import KpiPills
 from yt_uniquifier.gui.widgets.log_console import LogConsole
 from yt_uniquifier.gui.widgets.preflight_panel import PreflightPanel
 from yt_uniquifier.gui.widgets.segment_timeline import SegmentTimeline
+from yt_uniquifier.gui.workers.preflight_worker import PreflightWorker
 from yt_uniquifier.gui.workers.probe_worker import ProbeWorker
 from yt_uniquifier.gui.workers.run_worker import RunWorker
 
@@ -41,6 +42,7 @@ class RunScreen(ScreenBase):
         super().__init__(state)
         self.run_worker: RunWorker | None = None
         self.probe_worker: ProbeWorker | None = None
+        self.preflight_worker: PreflightWorker | None = None
         self.qa_html_path: Path | None = None
         # (input_path, profile_path, encoder_override) → built Plan.
         # Lets _on_run reuse the Plan that _on_preflight already
@@ -149,9 +151,7 @@ class RunScreen(ScreenBase):
         if path is None:
             return
         # Auto-probe
-        if self.probe_worker is not None:
-            self.probe_worker.quit()
-            self.probe_worker.wait(500)
+        self._drop_probe_worker()
         self.probe_worker = ProbeWorker(path)
         self.probe_worker.probed.connect(self._on_probed)
         self.probe_worker.failed.connect(
@@ -178,29 +178,72 @@ class RunScreen(ScreenBase):
             f"{meta.duration_sec:.1f}s · HDR={v.color.is_hdr}",
             "info",
         )
+        # Probe done — release the worker so the QThread doesn't sit
+        # idle in Python's ref graph until the next input change.
+        self._drop_probe_worker()
+
+    def _drop_probe_worker(self) -> None:
+        if self.probe_worker is None:
+            return
+        self.probe_worker.quit()
+        self.probe_worker.wait(500)
+        self.probe_worker = None
 
     def _on_preflight(self) -> None:
         if self.state.input_path is None:
             return
-        try:
-            profile_path = Path(self.profile_combo.currentData())
-            profile = load_profile(profile_path)
-            enc_override = self.encoder_selector.currentData()
-            plan = build_plan(self.state.input_path, profile, enc_override)
-        except YtUniquifierError as exc:
-            QMessageBox.critical(self, "Plan error", str(exc))
-            return
-        findings = preflight(plan.source, plan, plan.encoder)
-        self.preflight_panel.set_findings(findings)
-        # Cache the Plan so _on_run can reuse it.
-        self._plan_cache = (
-            self.state.input_path, profile_path, enc_override, plan,
+        if self.preflight_worker is not None:
+            return  # already running
+        profile_path = Path(self.profile_combo.currentData())
+        enc_override = self.encoder_selector.currentData()
+        self.preflight_btn.setEnabled(False)
+        self.log.log("preflight: probing source + checking encoder…", "info")
+        self.preflight_worker = PreflightWorker(
+            self.state.input_path, profile_path, enc_override,
         )
+        # Capture (input, profile_path, enc_override) for the plan-ready
+        # slot so it can build the cache key even if the user has
+        # tweaked the UI selectors while preflight ran.
+        cache_key = (self.state.input_path, profile_path, enc_override)
+        self.preflight_worker.plan_ready.connect(
+            lambda plan, findings: self._on_preflight_ready(plan, findings, cache_key),
+        )
+        self.preflight_worker.failed.connect(self._on_preflight_failed)
+        self.preflight_worker.start()
+
+    def _on_preflight_ready(
+        self,
+        plan: object,
+        findings: object,
+        cache_key: tuple[object, object, object],
+    ) -> None:
+        from yt_uniquifier.core.models import Plan as _Plan
+        if not isinstance(plan, _Plan) or not isinstance(findings, list):
+            self._drop_preflight_worker()
+            self.preflight_btn.setEnabled(True)
+            return
+        self.preflight_panel.set_findings(findings)
+        self._plan_cache = (*cache_key, plan)
         self.log.log(
             f"preflight: {len(findings)} finding(s), "
             f"{'FAIL' if has_fail(findings) else 'PASS'}",
             "info",
         )
+        self._drop_preflight_worker()
+        self.preflight_btn.setEnabled(True)
+
+    def _on_preflight_failed(self, msg: str) -> None:
+        self.log.log(f"preflight: {msg}", "error")
+        QMessageBox.critical(self, "Plan error", msg)
+        self._drop_preflight_worker()
+        self.preflight_btn.setEnabled(True)
+
+    def _drop_preflight_worker(self) -> None:
+        if self.preflight_worker is None:
+            return
+        self.preflight_worker.quit()
+        self.preflight_worker.wait(500)
+        self.preflight_worker = None
 
     def _on_has_fail(self, has_fail_now: bool) -> None:
         self._refresh_run_button(preflight_fail=has_fail_now)
@@ -289,8 +332,12 @@ class RunScreen(ScreenBase):
             try:
                 qa = json.loads(qa_json.read_text())
                 self.kpi_pills.set_qa(qa)
-            except (OSError, json.JSONDecodeError):
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                # KPI pills are best-effort decoration; the QA HTML
+                # report is the authoritative artifact. Log so a missing
+                # JSON file is visible during triage instead of a silent
+                # empty pill row.
+                self.log.log(f"KPI: failed to read {qa_json.name}: {exc}", "log")
         self._refresh_run_button()
 
     def _on_failed(self, message: str) -> None:

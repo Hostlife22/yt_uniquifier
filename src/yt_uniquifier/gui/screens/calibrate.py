@@ -211,15 +211,23 @@ class CalibrateScreen(ScreenBase):
         factor_s = f"{float(factor):.2f}" if isinstance(factor, (int, float)) else "?"
         sm_s = f"{float(final_sm):.3f}" if isinstance(final_sm, (int, float)) else "?"
         self.log.log(f"{verdict} — factor={factor_s} self_match={sm_s}", "info")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self.run_btn.setEnabled(self.input_path is not None)
 
     def _on_failed(self, msg: str) -> None:
         self.log.log(f"FAILED: {msg}", "error")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self.run_btn.setEnabled(self.input_path is not None)
+
+    def _drop_worker(self) -> None:
+        """Join the worker QThread before dropping the Python ref."""
+        if self.worker is None:
+            return
+        self.worker.quit()
+        self.worker.wait(1000)
+        self.worker = None
 
     def _on_save(self) -> None:
         from yt_uniquifier.core.models import Profile as _Profile

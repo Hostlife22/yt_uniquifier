@@ -170,7 +170,21 @@ class CorpusScreen(ScreenBase):
         self.add_btn.setEnabled(True)
         self.status_label.setText(f"FAILED: {msg}")
         QMessageBox.warning(self, "Corpus add failed", msg)
+        self._drop_worker()
 
     def _on_finished(self) -> None:
         self.add_btn.setEnabled(True)
+        self._drop_worker()
+
+    def _drop_worker(self) -> None:
+        """Join the worker QThread before dropping the Python ref.
+
+        Mirrors `_drop_list_worker`. Without quit()+wait() the C++
+        QThread can outlive the Python reference and segfault on its
+        next event dispatch.
+        """
+        if self.worker is None:
+            return
+        self.worker.quit()
+        self.worker.wait(1000)
         self.worker = None

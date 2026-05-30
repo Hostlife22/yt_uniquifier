@@ -35,4 +35,8 @@ class CorpusListWorker(WorkerBase):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
         self.listed.emit(entries)
-        self.finished_ok.emit(entries)
+        # Emit a lightweight summary on the base `finished_ok` channel
+        # (entry count, not the full list) so downstream code reacts to
+        # completion without re-serialising the entries list through
+        # Qt's signal mechanism.
+        self.finished_ok.emit(len(entries))

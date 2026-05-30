@@ -139,11 +139,14 @@ def build_apply(
 def _build_placeholder(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str
 ) -> FilterChain:
-    """Registry build fn: pipeline must replace this via build_apply after measurement.
+    """Registry build fn — pipeline must replace this via build_apply.
 
-    Falls back to a no-op `anull` so unit tests that snapshot the graph without
-    actual measurement still produce something valid; the pipeline replaces this
-    with the real loudnorm filter at run time.
+    Returns ``anull`` so the registry-walking unit tests in
+    ``test_named_invariants`` can iterate every transform. The pipeline
+    special-cases ``LOUDNORM_ID`` and calls ``build_apply`` with a
+    measurement; if that path ever regressed the snapshot tests would
+    catch it (the emitted filter would be ``anull``, not a real
+    ``loudnorm=…`` invocation).
     """
     out = alloc.next("a")
     return FilterChain(in_label=in_lbl, out_label=out, filter_str="anull")

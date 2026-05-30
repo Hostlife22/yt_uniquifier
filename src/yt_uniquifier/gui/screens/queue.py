@@ -20,11 +20,11 @@ from PyQt6.QtWidgets import (
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import load_profile
-from yt_uniquifier.core.queue.leasing import FileQueue, init_queue
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 from yt_uniquifier.gui.widgets.log_console import LogConsole
+from yt_uniquifier.gui.workers.queue_io_worker import QueueIoWorker
 from yt_uniquifier.gui.workers.queue_status_worker import QueueStatusWorker
 from yt_uniquifier.gui.workers.queue_worker import QueueWorker
 
@@ -38,6 +38,7 @@ class QueueScreen(ScreenBase):
         self.out_dir: Path | None = None
         self.status_worker: QueueStatusWorker | None = None
         self.drain_worker: QueueWorker | None = None
+        self.io_worker: QueueIoWorker | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -159,17 +160,12 @@ class QueueScreen(ScreenBase):
         self._refresh_start_btn()
 
     def _init_queue(self) -> None:
-        if self.queue_root is None:
+        if self.queue_root is None or self.io_worker is not None:
             return
-        try:
-            init_queue(self.queue_root)
-        except YtUniquifierError as exc:
-            QMessageBox.critical(self, "Init failed", str(exc))
-            return
-        QMessageBox.information(self, "Initialised", f"Queue ready at {self.queue_root}")
+        self._run_io_worker("init", success_title="Initialised")
 
     def _add_files(self) -> None:
-        if self.queue_root is None:
+        if self.queue_root is None or self.io_worker is not None:
             return
         files, _ = QFileDialog.getOpenFileNames(
             self, "Add files to queue", "",
@@ -177,32 +173,62 @@ class QueueScreen(ScreenBase):
         )
         if not files:
             return
-        try:
-            q = FileQueue(self.queue_root)
-        except Exception as exc:
-            QMessageBox.critical(self, "Queue error", str(exc))
-            return
-        added = 0
-        for f in files:
-            try:
-                q.add(Path(f))
-                added += 1
-            except FileExistsError:
-                continue
-            except Exception as exc:
-                self.worker_log.log(f"add {f}: {exc}", "error")
-        self.worker_log.log(f"added {added} file(s)", "info")
+        self._run_io_worker(
+            "add", files=[Path(f) for f in files], log_to_worker_log=True,
+        )
 
     def _reset_stale(self) -> None:
-        if self.queue_root is None:
+        if self.queue_root is None or self.io_worker is not None:
             return
-        try:
-            q = FileQueue(self.queue_root)
-            n = q.reap_stale()
-        except Exception as exc:
-            QMessageBox.critical(self, "Reset failed", str(exc))
+        self._run_io_worker("reset_stale", success_title="Reset")
+
+    def _run_io_worker(
+        self,
+        op: str,
+        *,
+        files: list[Path] | None = None,
+        success_title: str | None = None,
+        log_to_worker_log: bool = False,
+    ) -> None:
+        """Common dispatcher for queue FS ops. Keeps the GUI thread free."""
+        assert self.queue_root is not None
+        # All op signatures are tight Literals on QueueIoWorker; cast at
+        # the boundary so the type system is happy.
+        from typing import cast
+
+        from yt_uniquifier.gui.workers.queue_io_worker import Op as _Op
+        self.io_worker = QueueIoWorker(
+            self.queue_root, cast(_Op, op), files=files,
+        )
+        self.io_worker.done.connect(
+            lambda n, msg: self._on_io_done(n, msg, success_title, log_to_worker_log),
+        )
+        self.io_worker.failed.connect(self._on_io_failed)
+        self.io_worker.start()
+
+    def _on_io_done(
+        self,
+        count: int,
+        msg: str,
+        success_title: str | None,
+        log_to_worker_log: bool,
+    ) -> None:
+        if log_to_worker_log:
+            self.worker_log.log(msg, "info")
+        elif success_title is not None:
+            QMessageBox.information(self, success_title, msg)
+        self._drop_io_worker()
+
+    def _on_io_failed(self, msg: str) -> None:
+        QMessageBox.critical(self, "Queue operation failed", msg)
+        self._drop_io_worker()
+
+    def _drop_io_worker(self) -> None:
+        if self.io_worker is None:
             return
-        QMessageBox.information(self, "Reset", f"Reclaimed {n} stale file(s).")
+        self.io_worker.quit()
+        self.io_worker.wait(500)
+        self.io_worker = None
 
     def _pick_out(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Output directory")
@@ -223,7 +249,12 @@ class QueueScreen(ScreenBase):
         if self.queue_root is None:
             return
         if self.status_worker is not None:
+            # quit() posts QThread.exit so the run-loop unblocks even if
+            # cancel_token alone hadn't elapsed within wait(500). Without
+            # this the wait() silently returns False and a live C++
+            # thread is left behind the dropped Python ref.
             self.status_worker.request_cancel()
+            self.status_worker.quit()
             self.status_worker.wait(500)
         self.status_worker = QueueStatusWorker(self.queue_root)
         self.status_worker.stats.connect(self._on_stats)

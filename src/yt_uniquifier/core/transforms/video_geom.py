@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import random
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -12,6 +13,12 @@ from yt_uniquifier.core.transforms.base import (
     TransformSpec,
     register,
 )
+
+# Allow only ffmpeg colour-name forms safe to interpolate into
+# `-filter_complex`. A `;`/`[`/`]`/`,` here would close the current
+# filter fragment and inject new graph nodes from a shared profile.
+# Accepts:  black | white | gray | green | red | 0xRRGGBB | #RRGGBB.
+_SAFE_COLOR_RE = re.compile(r"^(?:#|0x)?[A-Za-z0-9]{1,16}$")
 
 
 class CropResizeParams(BaseModel):
@@ -62,6 +69,21 @@ class RotateParams(BaseModel):
     # in 10-bit (0x101010 in 8-bit terms) reads as black after PQ EOTF.
     fillcolor_sdr: str = "black"
     fillcolor_pq: str = "0x101010"
+
+    @field_validator("fillcolor_sdr", "fillcolor_pq")
+    @classmethod
+    def _safe_color(cls, v: str) -> str:
+        # ffmpeg -filter_complex parses ; [ ] , as structural delimiters;
+        # an unescaped string can close the current fragment and inject
+        # new graph nodes. A shared profile with
+        # `fillcolor_sdr: "black,scale=1:1[x];[x]"` would otherwise
+        # redirect the output chain. Reject anything outside hex / name.
+        if not _SAFE_COLOR_RE.match(v):
+            raise ValueError(
+                f"fillcolor must be alphanumeric/hex (e.g. 'black' or "
+                f"'0x101010'); got {v!r}",
+            )
+        return v
 
 
 def _build_rotate(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:

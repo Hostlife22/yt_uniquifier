@@ -20,8 +20,24 @@ from yt_uniquifier.core.errors import EncoderError
 from yt_uniquifier.core.models import EncoderCandidate, EncoderKind, EncoderVendor
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
-CACHE_PATH = Path.home() / ".cache" / "yt_uniquifier" / "encoders.json"
 CACHE_TTL_SEC = 7 * 24 * 3600
+
+
+def _cache_path() -> Path:
+    """Return the encoder cache path.
+
+    Reads the module-level ``CACHE_PATH`` so test fixtures can redirect
+    it via ``monkeypatch.setattr(..., "CACHE_PATH", tmp)``. If a fresh
+    process needs to honor a `HOME` change made after import, reassign
+    ``CACHE_PATH`` directly instead of mutating the env.
+    """
+    import sys as _sys
+    return _sys.modules[__name__].CACHE_PATH
+
+
+# Default cache location resolved at import. Tests / tooling can
+# reassign this constant (or monkeypatch it) to redirect the cache.
+CACHE_PATH = Path.home() / ".cache" / "yt_uniquifier" / "encoders.json"
 
 # Vendor-default concurrent encode session counts when we can't query
 # anything more specific (e.g. nvidia-smi missing).
@@ -202,10 +218,11 @@ def _ffmpeg_version_hash() -> str:
 
 
 def _load_cache(version_key: str) -> list[EncoderCandidate] | None:
-    if not CACHE_PATH.exists():
+    cache_path = _cache_path()
+    if not cache_path.exists():
         return None
     try:
-        raw: dict[str, Any] = json.loads(CACHE_PATH.read_text())
+        raw: dict[str, Any] = json.loads(cache_path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
     if raw.get("version_key") != version_key:
@@ -216,23 +233,28 @@ def _load_cache(version_key: str) -> list[EncoderCandidate] | None:
 
 
 def _save_cache(version_key: str, candidates: list[EncoderCandidate]) -> None:
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    cache_path = _cache_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
         "version_key": version_key,
         "written_at": time.time(),
-        "candidates": [c.model_dump() for c in candidates],
+        # mode="json" coerces any Enum/Path/datetime fields to JSON-native
+        # form. Today EncoderCandidate uses Literal types so plain
+        # model_dump() works, but a future Enum field would silently
+        # break json.dumps. Consistent with checkpoint.py + compute_plan_hash.
+        "candidates": [c.model_dump(mode="json") for c in candidates],
     }
     # PID-suffixed tmp + fsync. Concurrent `yt-uniq batch` processes share
     # this cache path; without per-process tmp names, two probes racing on
-    # `encoders.json.tmp` can land in a torn write whose stale read makes the
-    # other process silently miss encoders. fsync forces the bytes to disk
-    # before the rename so a crash mid-flush leaves either the old cache or
-    # the new one, never a zero-byte file.
-    tmp = CACHE_PATH.with_name(f"encoders.{os.getpid()}.tmp")
+    # `encoders.json.tmp` can land in a torn write whose stale read makes
+    # the other process silently miss encoders. fsync forces the bytes
+    # to disk before the rename so a crash mid-flush leaves either the
+    # old cache or the new one, never a zero-byte file.
+    tmp = cache_path.with_name(f"encoders.{os.getpid()}.tmp")
     serialised = json.dumps(payload, indent=2)
     with tmp.open("w", encoding="utf-8") as fh:
         fh.write(serialised)
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, CACHE_PATH)
+    os.replace(tmp, cache_path)
