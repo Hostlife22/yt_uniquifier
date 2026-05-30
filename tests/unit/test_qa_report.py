@@ -63,6 +63,28 @@ def test_verdict_yellow_when_vmaf_moderate() -> None:
     assert v.band == "yellow"
 
 
+def test_verdict_red_when_duration_mismatch() -> None:
+    # MED-1 (2026-05-30 test report): duration mismatch is a correctness failure,
+    # not a metric drift — must never slip into GREEN.
+    r = _report(
+        phash_similarity=0.80,
+        vmaf_mean=92.0,
+        ssim_mean=0.99,
+        duration_match=False,
+        input_duration_sec=30.183,
+        output_duration_sec=32.280,
+    )
+    v = report_mod.verdict(r)
+    assert v.band == "red"
+    assert any("duration mismatch" in r for r in v.reasons)
+
+
+def test_verdict_preserves_red_when_duration_mismatch() -> None:
+    r = _report(phash_similarity=0.99, duration_match=False)
+    v = report_mod.verdict(r)
+    assert v.band == "red"
+
+
 # --- build_report aggregation ------------------------------------------------
 
 @dataclass

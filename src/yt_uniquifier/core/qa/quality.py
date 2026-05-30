@@ -24,8 +24,13 @@ from yt_uniquifier.core.qa import phash, ssim, vmaf
 QualityMetric = Literal["vmaf", "ssim", "phash"]
 
 # VMAF below this is treated as "unreliable" — libvmaf gives up on
-# severely distorted pairs and emits something near zero.
-_VMAF_TRUST_FLOOR = 1.0
+# severely distorted pairs and emits something near zero. Set above 5.0
+# to also catch the libvmaf-on-short-clips flap (HIGH-1, 2026-05-30 v2):
+# on 15-second test clips libvmaf has been observed to return 7.0 once
+# then 0.81 then 0.01 across calibration iterations, defeating
+# convergence. Anything below this floor is treated as a non-signal and
+# the caller falls back to SSIM.
+_VMAF_TRUST_FLOOR = 10.0
 
 
 @dataclass(frozen=True)

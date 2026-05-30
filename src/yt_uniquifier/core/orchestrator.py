@@ -128,6 +128,50 @@ def run_full(
     segments = store.init_or_resume(
         plan_segments(plan, target_size_sec=options.target_segment_sec)
     )
+
+    # Idempotent re-run over a previously-completed work-dir
+    # (HIGH-4 from 2026-05-30 v2 test report). If state.json says every
+    # segment is done AND the final output exists, return early — the
+    # work was already finished. If output is missing but state says done,
+    # the segments were cleaned up after a successful concat; reset to
+    # pending so the run re-processes from scratch.
+    if (
+        segments
+        and all(s.status == "done" for s in segments)
+        and not options.force_new_variant
+    ):
+        if options.output.exists() and options.output.stat().st_size > 0:
+            emit(RunEvent(kind="log", payload={
+                "phase": "resume",
+                "message": "output already exists and all segments done — no-op",
+                "output": str(options.output),
+            }))
+            return RunSummary(
+                output=options.output,
+                plan=plan,
+                segments_done=len(segments),
+                preflight_findings=findings,
+            )
+        # Output gone but state.json reports done → segments were cleaned
+        # up after a successful concat. Reset segments to pending so the
+        # run re-processes from scratch instead of failing in concat
+        # with "Impossible to open seg_0000.mkv".
+        out_paths_exist = any(
+            s.out_path and s.out_path.exists()
+            for s in segments
+        )
+        if not out_paths_exist:
+            emit(RunEvent(kind="log", payload={
+                "phase": "resume",
+                "message": (
+                    "state.json reports all segments done but output and "
+                    "segment files are missing — resetting to fresh run"
+                ),
+            }))
+            for s in segments:
+                store.mark(s.idx, "pending")
+            segments = store.all_segments()
+
     # Resume: if state.json carried a run_seed from an earlier run, reuse it
     # so the resumed encoding reproduces the same stochastic transforms.
     if not options.force_new_variant:
