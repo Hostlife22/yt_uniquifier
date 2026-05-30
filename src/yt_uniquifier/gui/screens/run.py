@@ -42,6 +42,11 @@ class RunScreen(ScreenBase):
         self.run_worker: RunWorker | None = None
         self.probe_worker: ProbeWorker | None = None
         self.qa_html_path: Path | None = None
+        # (input_path, profile_path, encoder_override) → built Plan.
+        # Lets _on_run reuse the Plan that _on_preflight already
+        # produced when the user clicked Preflight first — avoids a
+        # redundant probe and prevents the two paths from diverging.
+        self._plan_cache: tuple[object, object, object, object] | None = None
         self._build_ui()
         self._refresh_run_button()
 
@@ -178,7 +183,8 @@ class RunScreen(ScreenBase):
         if self.state.input_path is None:
             return
         try:
-            profile = load_profile(Path(self.profile_combo.currentData()))
+            profile_path = Path(self.profile_combo.currentData())
+            profile = load_profile(profile_path)
             enc_override = self.encoder_selector.currentData()
             plan = build_plan(self.state.input_path, profile, enc_override)
         except YtUniquifierError as exc:
@@ -186,6 +192,10 @@ class RunScreen(ScreenBase):
             return
         findings = preflight(plan.source, plan, plan.encoder)
         self.preflight_panel.set_findings(findings)
+        # Cache the Plan so _on_run can reuse it.
+        self._plan_cache = (
+            self.state.input_path, profile_path, enc_override, plan,
+        )
         self.log.log(
             f"preflight: {len(findings)} finding(s), "
             f"{'FAIL' if has_fail(findings) else 'PASS'}",
@@ -199,9 +209,24 @@ class RunScreen(ScreenBase):
         if self.state.input_path is None or self.state.output_path is None:
             return
         try:
-            profile = load_profile(Path(self.profile_combo.currentData()))
+            profile_path = Path(self.profile_combo.currentData())
             enc_override = self.encoder_selector.currentData()
-            plan = build_plan(self.state.input_path, profile, enc_override)
+            # Reuse the Plan that Preflight already built when the
+            # user's selections have not changed — avoids re-probing
+            # the source and guarantees the two paths see the same
+            # encoder, plan_hash, and findings.
+            cache_key = (self.state.input_path, profile_path, enc_override)
+            if (
+                self._plan_cache is not None
+                and self._plan_cache[:3] == cache_key
+            ):
+                plan = self._plan_cache[3]  # type: ignore[assignment]
+                assert hasattr(plan, "plan_hash")
+            else:
+                profile = load_profile(profile_path)
+                plan = build_plan(
+                    self.state.input_path, profile, enc_override,
+                )
         except YtUniquifierError as exc:
             QMessageBox.critical(self, "Plan error", str(exc))
             return
