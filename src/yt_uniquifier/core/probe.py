@@ -191,6 +191,31 @@ def _parse_fps(value: str | None) -> float:
     return _to_float(value, 0.0)
 
 
+def _parse_fraction(value: str) -> float:
+    """Strict fraction parser — raises ProbeError on invalid input.
+
+    Counterpart to ``_parse_fps``. Use where downstream logic genuinely
+    needs a valid frame rate (segment math, encoder bitrate). The lenient
+    ``_parse_fps`` returns 0 for attached-picture streams and other
+    degenerate cases; the strict variant catches the same cases as a
+    typed exception so callers don't silently propagate fps=0 into
+    arithmetic that divides by it.
+    """
+    from yt_uniquifier.core.errors import ProbeError
+
+    if not value or "/" not in value:
+        raise ProbeError(f"invalid frame rate {value!r}; expected 'num/den'")
+    num_s, den_s = value.split("/", 1)
+    try:
+        num = float(num_s)
+        den = float(den_s)
+    except ValueError as exc:
+        raise ProbeError(f"invalid frame rate {value!r}: {exc}") from exc
+    if den == 0:
+        raise ProbeError(f"invalid frame rate {value!r}: zero denominator")
+    return num / den
+
+
 def _to_int(value: Any, default: int) -> int:
     try:
         return int(value)

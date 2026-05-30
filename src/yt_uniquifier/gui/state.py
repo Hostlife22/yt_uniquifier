@@ -9,11 +9,28 @@ Screens subscribe to changes via Qt signals.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+_log = logging.getLogger(__name__)
+
+
+def _archive_corrupt(path: Path) -> None:
+    """Rename a corrupt JSON file aside so the next save doesn't overwrite it.
+
+    Silent recovery used to hide loss of recents/history from users;
+    archiving leaves a forensic trail and surfaces a clear warning.
+    """
+    with contextlib.suppress(OSError):
+        archived = path.with_suffix(f".json.corrupt-{int(time.time())}")
+        path.rename(archived)
+        _log.warning("archived corrupt %s -> %s", path.name, archived.name)
 
 CONFIG_DIR = Path.home() / ".config" / "yt_uniquifier"
 STATE_PATH = CONFIG_DIR / "state.json"
@@ -155,8 +172,12 @@ class AppState(QObject):
                     val = data.get(key)
                     if isinstance(val, str):
                         setattr(self, attr, Path(val) if attr.endswith("path") else val)
-        except (OSError, json.JSONDecodeError):
-            pass  # corrupted state — start fresh
+        except json.JSONDecodeError:
+            # File exists but isn't parseable — archive it so we don't
+            # silently lose the user's recents/prefs on the next save.
+            _archive_corrupt(STATE_PATH)
+        except OSError as exc:
+            _log.warning("could not read %s: %s", STATE_PATH, exc)
 
         try:
             if HISTORY_PATH.exists():
@@ -165,7 +186,11 @@ class AppState(QObject):
                     HistoryEntry(**e) for e in raw[:HISTORY_CAP]
                     if isinstance(e, dict)
                 ]
-        except (OSError, json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError:
+            _archive_corrupt(HISTORY_PATH)
+            self._history = []
+        except (OSError, TypeError) as exc:
+            _log.warning("could not read %s: %s", HISTORY_PATH, exc)
             self._history = []
 
     def save(self) -> None:

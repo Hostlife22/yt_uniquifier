@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan
 from yt_uniquifier.core.preflight import has_fail
 from yt_uniquifier.core.profile_loader import load_profile
@@ -35,6 +37,33 @@ from yt_uniquifier.gui.workers.run_worker import RunWorker
 PROFILES_DIR = Path(__file__).parents[2] / "profiles"
 
 
+@dataclass(frozen=True)
+class PlanCacheEntry:
+    """Cached Plan keyed by the inputs that produced it.
+
+    Replaces a positional 4-tuple. Named fields make the cache hit/miss
+    check at _on_run readable and robust to future field additions
+    (e.g. a workers override) without index shifts.
+    """
+
+    input_path: Path
+    profile_path: Path
+    encoder: str | None
+    plan: Plan
+
+    def matches(
+        self,
+        input_path: Path,
+        profile_path: Path,
+        encoder: str | None,
+    ) -> bool:
+        return (
+            self.input_path == input_path
+            and self.profile_path == profile_path
+            and self.encoder == encoder
+        )
+
+
 class RunScreen(ScreenBase):
     """Single-file uniquification: probe → preflight → run → QA."""
 
@@ -44,11 +73,12 @@ class RunScreen(ScreenBase):
         self.probe_worker: ProbeWorker | None = None
         self.preflight_worker: PreflightWorker | None = None
         self.qa_html_path: Path | None = None
-        # (input_path, profile_path, encoder_override) → built Plan.
-        # Lets _on_run reuse the Plan that _on_preflight already
-        # produced when the user clicked Preflight first — avoids a
-        # redundant probe and prevents the two paths from diverging.
-        self._plan_cache: tuple[object, object, object, object] | None = None
+        # Cached Plan from the most recent preflight, keyed by
+        # (input_path, profile_path, encoder). Lets _on_run reuse the
+        # Plan that _on_preflight already produced when the user clicked
+        # Preflight first — avoids a redundant probe and prevents the
+        # two paths from diverging.
+        self._plan_cache: PlanCacheEntry | None = None
         self._build_ui()
         self._refresh_run_button()
 
@@ -215,15 +245,20 @@ class RunScreen(ScreenBase):
         self,
         plan: object,
         findings: object,
-        cache_key: tuple[object, object, object],
+        cache_key: tuple[Path, Path, str | None],
     ) -> None:
-        from yt_uniquifier.core.models import Plan as _Plan
-        if not isinstance(plan, _Plan) or not isinstance(findings, list):
+        if not isinstance(plan, Plan) or not isinstance(findings, list):
             self._drop_preflight_worker()
             self.preflight_btn.setEnabled(True)
             return
         self.preflight_panel.set_findings(findings)
-        self._plan_cache = (*cache_key, plan)
+        input_path, profile_path, encoder = cache_key
+        self._plan_cache = PlanCacheEntry(
+            input_path=input_path,
+            profile_path=profile_path,
+            encoder=encoder,
+            plan=plan,
+        )
         self.log.log(
             f"preflight: {len(findings)} finding(s), "
             f"{'FAIL' if has_fail(findings) else 'PASS'}",
@@ -258,13 +293,10 @@ class RunScreen(ScreenBase):
             # user's selections have not changed — avoids re-probing
             # the source and guarantees the two paths see the same
             # encoder, plan_hash, and findings.
-            cache_key = (self.state.input_path, profile_path, enc_override)
-            if (
-                self._plan_cache is not None
-                and self._plan_cache[:3] == cache_key
+            if self._plan_cache is not None and self._plan_cache.matches(
+                self.state.input_path, profile_path, enc_override,
             ):
-                plan = self._plan_cache[3]  # type: ignore[assignment]
-                assert hasattr(plan, "plan_hash")
+                plan = self._plan_cache.plan
             else:
                 profile = load_profile(profile_path)
                 plan = build_plan(
@@ -287,8 +319,13 @@ class RunScreen(ScreenBase):
         # may continue to deliver into now-dangling Python slots when
         # the screen is rebuilt.
         if self.run_worker is not None:
+            # `QObject.disconnect()` with no args removes every signal
+            # connection on this object. The PyQt6 typeshed dropped the
+            # `disconnect(receiver)` overload; the no-arg form is the
+            # supported way to detach all slots before dropping the
+            # Python reference.
             with contextlib.suppress(TypeError, RuntimeError):
-                self.run_worker.disconnect(self)  # type: ignore[arg-type]
+                self.run_worker.disconnect()
 
         self.run_worker = RunWorker(
             plan, options, run_qa=True, fast_qa=False, state=self.state,

@@ -141,9 +141,11 @@ def test_multitrack_audio_passthrough(tmp_path: Path) -> None:
     args = " ".join(built.args)
     # main audio mapped through filter graph, but no audio transforms -> a_label == "0:a:0"
     assert "[0:a:0]" not in built.filter_complex  # no audio chain emitted
-    # additional tracks: -map 0:a:1? and -map 0:a:2? with -c:a:1 copy / -c:a:2 copy
-    assert "-map 0:a:1?" in args
+    # `_src` allocates AudioStream index = 1+i, so n_audio=3 -> indices [1, 2, 3].
+    # Main is index 1; passthrough tracks are mapped by their **source** indices
+    # (2 and 3), not by their output slot. `-c:a:1/2 copy` still uses output slots.
     assert "-map 0:a:2?" in args
+    assert "-map 0:a:3?" in args
     assert "-c:a:1 copy" in args
     assert "-c:a:2 copy" in args
 

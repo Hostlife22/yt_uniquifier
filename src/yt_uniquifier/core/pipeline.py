@@ -227,8 +227,10 @@ class FilterGraph:
         # ---- audio chain (main track only) ----
         loudnorm_used = any(tc.id == LOUDNORM_ID for tc in audio_transforms)
         if loudnorm_used and self._loudnorm_measurement is None:
-            params = self._loudnorm_params(audio_transforms)
-            self._loudnorm_measurement = measure(self.plan.source.path, params)
+            # Use a distinct local so the in-loop `params: BaseModel` below
+            # isn't narrowed to LoudnormParams by mypy's flow analysis.
+            ln_params = self._loudnorm_params(audio_transforms)
+            self._loudnorm_measurement = measure(self.plan.source.path, ln_params)
 
         a_chains: list[str] = []
         a_label: str | None = None
@@ -362,13 +364,13 @@ class FilterGraph:
             indices_for_passthrough = []
 
         args: list[str] = []
-        # Stream index per-output; the main processed audio is :a:0.
-        # Use absolute audio-stream specifiers from source via :a:<N> with N starting at 1.
-        for n, _src_idx in enumerate(indices_for_passthrough, start=1):
-            # Map by source-stream index from the original container.
-            args += ["-map", f"0:a:{n}?"]
-        # Codec copies for those outputs.
-        for n in range(1, len(indices_for_passthrough) + 1):
+        # `src_idx` is the audio-relative index of each passthrough track in
+        # the source container (e.g. tracks [1, 3]); `n` is just its slot in
+        # the assembled output, 1-based because :a:0 is the processed main.
+        # Using `n` for `0:a:{...}?` would silently remap non-contiguous
+        # tracks (e.g. tracks [1, 3] would become [1, 2] of the source).
+        for n, src_idx in enumerate(indices_for_passthrough, start=1):
+            args += ["-map", f"0:a:{src_idx}?"]
             args += [f"-c:a:{n}", "copy"]
         return args
 

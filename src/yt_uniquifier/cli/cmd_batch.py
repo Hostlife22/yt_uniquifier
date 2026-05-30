@@ -49,7 +49,10 @@ def batch_cmd(
     inputs = sorted(inputs_dir.glob(pattern))
     if not inputs:
         console.print(f"[yellow]No inputs match {pattern!r} in {inputs_dir}[/yellow]")
-        raise typer.Exit(code=0)
+        # Exit 2 signals "no inputs matched" — distinct from success (0) and
+        # from a real processing failure (1). Distributed harnesses check
+        # this code to distinguish a no-op from a completed batch.
+        raise typer.Exit(code=2)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:

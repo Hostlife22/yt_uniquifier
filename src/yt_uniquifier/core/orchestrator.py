@@ -153,6 +153,20 @@ def run_full(
             store.mark(seg.idx, "in_progress")
 
         def _on_segment_done(idx: int, src: Path, out: Path) -> None:
+            # Verify the worker actually produced a non-empty output file
+            # before recording it as done. If ffmpeg exited 0 but the file
+            # was clobbered (or never written) we'd otherwise concat with
+            # a `None` out_path and silently drop the segment.
+            if not out.exists() or out.stat().st_size == 0:
+                store.mark(idx, "failed")
+                emit(RunEvent(kind="error", payload={
+                    "phase": "segment",
+                    "segment": idx,
+                    "message": f"segment {idx} produced no output at {out}",
+                }))
+                raise PipelineError(
+                    f"segment {idx} reported done but {out} is missing/empty"
+                )
             store.mark(idx, "done", src_path=src, out_path=out)
 
         try:
@@ -236,12 +250,7 @@ def run_full(
     emit(RunEvent(kind="done", payload={"output": str(options.output)}))
 
     if not options.keep_segments:
-        for s in store.all_segments():
-            for p in (s.src_path, s.out_path):
-                if p and p.exists():
-                    p.unlink(missing_ok=True)
-        if main_audio and main_audio.exists():
-            main_audio.unlink(missing_ok=True)
+        _cleanup_artifacts(store, main_audio, emit)
 
     return RunSummary(
         output=options.output,
@@ -249,6 +258,39 @@ def run_full(
         segments_done=len(final_segments),
         preflight_findings=findings,
     )
+
+
+def _cleanup_artifacts(
+    store: CheckpointStore,
+    main_audio: Path | None,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    """Best-effort segment + main-audio cleanup, surfacing persistent failures.
+
+    `unlink(missing_ok=True)` only suppresses ENOENT; permissions and
+    filesystem errors still raise. Without this wrapper they would
+    propagate from the success path and mask a completed run as failed.
+    """
+    failures: list[str] = []
+    for s in store.all_segments():
+        for p in (s.src_path, s.out_path):
+            if not p or not p.exists():
+                continue
+            try:
+                p.unlink(missing_ok=True)
+            except OSError as exc:
+                failures.append(f"{p}: {exc}")
+    if main_audio and main_audio.exists():
+        try:
+            main_audio.unlink(missing_ok=True)
+        except OSError as exc:
+            failures.append(f"{main_audio}: {exc}")
+    if failures:
+        emit(RunEvent(kind="error", payload={
+            "phase": "cleanup",
+            "message": f"could not delete {len(failures)} artifact(s)",
+            "details": failures,
+        }))
 
 
 def _format_findings(findings: list[PreflightFinding]) -> str:

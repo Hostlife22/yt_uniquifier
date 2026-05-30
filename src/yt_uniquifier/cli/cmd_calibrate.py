@@ -45,7 +45,13 @@ def calibrate_cmd(
         help="Per-iteration scratch area.",
     ),
 ) -> None:
-    """Bisect intensity until predicted self-match drops below --target."""
+    """Bisect intensity until predicted self-match drops below --target.
+
+    Exit codes:
+      0  converged within --iterations
+      1  profile load / calibration error
+      2  did not converge within --iterations (tuned profile still written)
+    """
     try:
         base_profile = load_profile(base)
     except YtUniquifierError as exc:

@@ -145,6 +145,9 @@ def _inject_b_video(profile: Profile, b_video: Path) -> Profile:
     return profile.model_copy(update={"transforms": new_transforms})
 
 
+_warned_unparseable_time = False
+
+
 def _extract_out_time_us(ev: RunEvent) -> int:
     payload = ev.payload
     raw_us = payload.get("out_time_us")
@@ -152,11 +155,27 @@ def _extract_out_time_us(ev: RunEvent) -> int:
         try:
             return int(raw_us)
         except ValueError:
-            pass
+            _warn_unparseable_time_once(raw_us)
     raw_ms = payload.get("out_time_ms")
     if isinstance(raw_ms, str):
         try:
             return int(raw_ms) * 1000
         except ValueError:
-            pass
+            _warn_unparseable_time_once(raw_ms)
     return 0
+
+
+def _warn_unparseable_time_once(raw: str) -> None:
+    """Emit one warning per process for unparseable ffmpeg progress timestamps.
+
+    Silent fallback to 0 made progress bars stall with no diagnostics. We
+    only warn once because a malformed format typically repeats every
+    progress tick, and a stream of identical warnings drowns the bar.
+    """
+    global _warned_unparseable_time
+    if not _warned_unparseable_time:
+        _warned_unparseable_time = True
+        console.print(
+            f"[yellow]warning:[/yellow] unparseable ffmpeg progress "
+            f"timestamp {raw!r}; progress may stall."
+        )

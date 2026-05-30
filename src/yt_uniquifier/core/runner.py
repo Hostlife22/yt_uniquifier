@@ -89,13 +89,18 @@ def run(
     on_event = on_event or (lambda _e: None)
 
     full_cmd = list(cmd.args)
+    if not full_cmd:
+        # Empty BuiltCommand.args has no binary and no output path. The
+        # subsequent insert/Popen would silently emit garbage; raise so
+        # the caller fixes its builder instead.
+        raise PipelineError("runner.run received an empty ffmpeg command")
     if progress_via_stdout:
         # Insert just before the output path (last arg). All build_*
         # callers in pipeline.py end with `str(output)`; assert it so a
         # future caller passing a `-flag` as the trailing argument fails
         # loudly instead of silently producing an unparseable command
         # line.
-        if full_cmd and full_cmd[-1].startswith("-"):
+        if full_cmd[-1].startswith("-"):
             raise PipelineError(
                 f"runner.run expects the output path as the last arg, "
                 f"got option {full_cmd[-1]!r}",
@@ -163,9 +168,14 @@ def run(
             proc.kill()
             try:
                 _, stderr_data = proc.communicate(timeout=5)
-            except Exception:  # noqa: BLE001
+            except (subprocess.TimeoutExpired, OSError):
                 stderr_data = ""
-        except Exception:  # noqa: BLE001
+        except (OSError, ValueError):
+            # ValueError catches closed-pipe edge cases on Windows /
+            # cancelled stdouts; OSError catches every other I/O fault
+            # during stderr drain. Bare `except Exception` previously
+            # also swallowed AttributeError from malformed proc fakes
+            # in tests — surface those instead.
             stderr_data = ""
         if stderr_data:
             log_lines.extend(stderr_data.splitlines())

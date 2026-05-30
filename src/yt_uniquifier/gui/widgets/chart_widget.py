@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
@@ -74,13 +75,13 @@ class ChartWidget(QWidget):
                 pen = QPen(QColor(existing.color))
                 pen.setWidth(2)
                 line.setPen(pen)
-                chart: QChart = self._chart  # type: ignore[assignment]
+                chart = cast(QChart, self._chart)
                 chart.addSeries(line)
                 self._lines[name] = line
                 # Re-create default axes on first point of a new series
                 # so the line is rendered with proper scales.
                 chart.createDefaultAxes()
-            line.append(QPointF(x, y))  # type: ignore[union-attr]
+            cast(QLineSeries, line).append(QPointF(x, y))
         else:
             self.update()  # paintEvent fallback
 

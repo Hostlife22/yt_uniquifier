@@ -37,7 +37,8 @@ def _keyframe_cache_dir() -> Path:
     ``KEYFRAME_CACHE_DIR`` (tests monkeypatch this constant).
     """
     import sys as _sys
-    return _sys.modules[__name__].KEYFRAME_CACHE_DIR
+    from typing import cast
+    return cast(Path, _sys.modules[__name__].KEYFRAME_CACHE_DIR)
 
 
 # Default resolved at import. Tests reassign / monkeypatch this.
@@ -373,6 +374,7 @@ def concat_segments(
     *,
     work_dir: Path,
     map_chapters_from: Path | None = None,
+    audio_passthrough_count: int = 2,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
 
@@ -409,8 +411,13 @@ def concat_segments(
     cmd += ["-map", "0:v:0"]
     if main_audio is not None:
         cmd += ["-map", "1:a:0"]
-    # Preserve any audio tracks already inside the concatenated stream beyond track 0.
-    cmd += ["-map", "0:a:1?", "-map", "0:a:2?"]
+    # Preserve any audio tracks already inside the concatenated stream
+    # beyond track 0. `audio_passthrough_count` lets callers extend the
+    # range for sources with > 2 extra audio dorozhki without dropping
+    # tracks silently. The default (2) preserves legacy behaviour for
+    # the 99% common case.
+    for n in range(1, audio_passthrough_count + 1):
+        cmd += ["-map", f"0:a:{n}?"]
     cmd += ["-map", "0:s?"]
     cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
     if map_chapters_from is not None:

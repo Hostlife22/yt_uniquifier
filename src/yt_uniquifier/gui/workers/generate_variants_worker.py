@@ -36,9 +36,13 @@ class GenerateVariantsWorker(WorkerBase):
     def run(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         records: list[dict[str, object]] = []
+        # Count successes separately from the loop index so progress
+        # reflects work actually completed. Tying progress to `i` over-
+        # reports when variants fail mid-run.
+        completed = 0
         for i in range(1, self.n + 1):
             if self.cancel_token.is_cancelled():
-                self.log.emit(f"cancelled after {i - 1}/{self.n}")
+                self.log.emit(f"cancelled after {completed}/{self.n}")
                 break
             try:
                 plan = build_plan(self.source, self.profile, self.encoder_override)
@@ -76,8 +80,9 @@ class GenerateVariantsWorker(WorkerBase):
                     "vmaf_mean": qa.get("vmaf_mean"),
                 }
                 records.append(rec)
+                completed += 1
                 self.variant_done.emit(rec)
-                self.progress.emit(i / self.n, f"{i} / {self.n}")
+                self.progress.emit(completed / self.n, f"{completed} / {self.n}")
             except Exception as exc:
                 self.log.emit(f"variant {i}: FAILED — {type(exc).__name__}: {exc}")
 

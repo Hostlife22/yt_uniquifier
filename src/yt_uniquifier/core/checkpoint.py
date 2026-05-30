@@ -83,8 +83,9 @@ class CheckpointStore:
 
     def stored_run_seed(self) -> int | None:
         """Return the run_seed persisted in state.json, if any."""
-        raw = self._state.get("run_seed")
-        return int(raw) if raw is not None else None
+        with self._lock:
+            raw = self._state.get("run_seed")
+            return int(raw) if raw is not None else None
 
     # ---- segment ops ----
 
@@ -133,8 +134,9 @@ class CheckpointStore:
     # ---- loudnorm cache ----
 
     def get_loudnorm(self) -> LoudnormMeasurement | None:
-        raw = self._state.get("loudnorm_measurement")
-        return LoudnormMeasurement.model_validate(raw) if raw else None
+        with self._lock:
+            raw = self._state.get("loudnorm_measurement")
+            return LoudnormMeasurement.model_validate(raw) if raw else None
 
     def set_loudnorm(self, m: LoudnormMeasurement) -> None:
         with self._lock:
@@ -144,8 +146,9 @@ class CheckpointStore:
     # ---- main audio cache ----
 
     def get_main_audio(self) -> Path | None:
-        raw = self._state.get("main_audio_path")
-        return Path(raw) if raw else None
+        with self._lock:
+            raw = self._state.get("main_audio_path")
+            return Path(raw) if raw else None
 
     def set_main_audio(self, path: Path) -> None:
         with self._lock:
@@ -160,7 +163,14 @@ class CheckpointStore:
         # set_loudnorm, set_main_audio) wrap state mutations + flush
         # together so they are atomic w.r.t. concurrent workers.
         with self._lock:
-            tmp = self.state_path.with_suffix(".json.tmp")
+            # PID-suffix the tmp file so concurrent `yt-uniq batch`
+            # processes sharing a work_dir cannot stomp on each other's
+            # partially-written tmp before os.replace lands. Matches the
+            # convention used by encoder.py::_save_cache and the keyframe
+            # cache in segmenter.py. The intra-process RLock prevents
+            # racing within one worker; the PID prevents racing across
+            # workers.
+            tmp = self.state_path.with_suffix(f".json.{os.getpid()}.tmp")
             payload = json.dumps(self._state, indent=2, default=str)
             # write → flush → fsync the *tmp* file before rename. Without
             # fsync the OS may have queued the page write but not committed

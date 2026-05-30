@@ -7,6 +7,7 @@ v0.5.0 — replaces the single-window v0.4 shell. Adds 10 sidebar entries
 from __future__ import annotations
 
 import contextlib
+import logging
 import sys
 from typing import cast
 
@@ -36,6 +37,8 @@ from yt_uniquifier.gui.screens.settings import SettingsScreen
 from yt_uniquifier.gui.screens.validation import ValidationScreen
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.theme import ThemeName, qss_for
+
+_log = logging.getLogger(__name__)
 
 # (Label, factory) — factory takes AppState and returns the screen widget.
 # Placeholders are anonymous factories that ignore state.
@@ -129,7 +132,7 @@ class MainWindow(QMainWindow):
     def _on_theme_changed(self, theme: str) -> None:
         self.setStyleSheet(qss_for(cast(ThemeName, theme)))
 
-    def closeEvent(self, event: QCloseEvent | None) -> None:  # type: ignore[override]
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         """Cancel and join every running worker before the window closes.
 
         Without this, QueueStatusWorker's infinite poll loop keeps the
@@ -154,6 +157,13 @@ class MainWindow(QMainWindow):
                 try:
                     obj = getattr(screen, attr_name)
                 except Exception:  # noqa: BLE001 - defensive walker
+                    # Surface the exception so a property that raises on
+                    # shutdown doesn't silently leave its underlying
+                    # QThread alive after the window closes.
+                    _log.exception(
+                        "closeEvent: getattr(%s, %s) raised; skipping",
+                        type(screen).__name__, attr_name,
+                    )
                     continue
                 if isinstance(obj, QThread) and obj.isRunning():
                     cancel = getattr(obj, "request_cancel", None)

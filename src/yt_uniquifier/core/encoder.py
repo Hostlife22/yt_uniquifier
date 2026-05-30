@@ -32,7 +32,8 @@ def _cache_path() -> Path:
     ``CACHE_PATH`` directly instead of mutating the env.
     """
     import sys as _sys
-    return _sys.modules[__name__].CACHE_PATH
+    from typing import cast
+    return cast(Path, _sys.modules[__name__].CACHE_PATH)
 
 
 # Default cache location resolved at import. Tests / tooling can
