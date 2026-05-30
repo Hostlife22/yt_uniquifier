@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import logging
 import os
 import subprocess
 import time
@@ -28,6 +29,8 @@ from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
+
+_log = logging.getLogger(__name__)
 
 KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
 
@@ -118,14 +121,19 @@ def _load_keyframe_cache(source: Path) -> list[float] | None:
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        # Surface the corruption so a silently-bypassed cache doesn't
+        # masquerade as a 30-60s "slow probe" on every subsequent run.
+        _log.warning("keyframe cache unreadable at %s: %s; will re-scan", path, exc)
         return None
     if not isinstance(raw, dict):
+        _log.warning("keyframe cache schema invalid at %s; will re-scan", path)
         return None
     if time.time() - raw.get("written_at", 0) > KEYFRAME_CACHE_TTL_SEC:
         return None
     kfs = raw.get("keyframes")
     if not isinstance(kfs, list):
+        _log.warning("keyframe cache missing keyframes list at %s; will re-scan", path)
         return None
     return [float(x) for x in kfs]
 
@@ -323,12 +331,25 @@ def process_video_segments_parallel(
             ): seg
             for seg in pending
         }
-        for fut in concurrent.futures.as_completed(futures):
-            seg = futures[fut]
-            src, out = fut.result()
-            results.append((seg.idx, src, out))
-            if on_segment_done:
-                on_segment_done(seg.idx, src, out)
+        try:
+            for fut in concurrent.futures.as_completed(futures):
+                seg = futures[fut]
+                src, out = fut.result()
+                results.append((seg.idx, src, out))
+                if on_segment_done:
+                    on_segment_done(seg.idx, src, out)
+        except BaseException:
+            # First failure (or external cancel) — signal all in-flight
+            # workers to stop ASAP instead of letting `ThreadPoolExecutor.
+            # __exit__` block on full segment encodes. `runner.run` checks
+            # `cancel_token` between every progress line, so each worker
+            # exits within seconds rather than at the next segment
+            # boundary (which could be 10+ minutes).
+            if cancel_token is not None:
+                cancel_token.cancel()
+            for f in futures:
+                f.cancel()
+            raise
     return results
 
 

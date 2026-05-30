@@ -227,7 +227,7 @@ class QueueScreen(ScreenBase):
         if self.io_worker is None:
             return
         self.io_worker.quit()
-        self.io_worker.wait(500)
+        self.io_worker.wait(1000)
         self.io_worker = None
 
     def _pick_out(self) -> None:
@@ -255,7 +255,11 @@ class QueueScreen(ScreenBase):
             # thread is left behind the dropped Python ref.
             self.status_worker.request_cancel()
             self.status_worker.quit()
-            self.status_worker.wait(500)
+            # 1000ms matches the cap used elsewhere in the GUI
+            # (CorpusScreen, CalibrateScreen). 500ms was tight relative
+            # to the 100ms poller slice and could let a live C++ thread
+            # outlive its Python ref on a slow scheduler.
+            self.status_worker.wait(1000)
         self.status_worker = QueueStatusWorker(self.queue_root)
         self.status_worker.stats.connect(self._on_stats)
         self.status_worker.failed.connect(

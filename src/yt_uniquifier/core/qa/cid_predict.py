@@ -86,6 +86,11 @@ def predict(
         weakest: ChunkSimilarity | None = None
     else:
         match_prob = max(c.combined for c in chunks)
+        # `weakest_chunk` is the chunk where our CID-evasion defence is
+        # weakest — i.e. the chunk most similar to the source, which is
+        # also where Content ID is most likely to fire. So it is argmax
+        # of `combined`, not argmin. Naming preserved for QAReport
+        # field compatibility (see docs/qa_report.md).
         weakest = max(chunks, key=lambda c: c.combined)
 
     corpus_matches: list[CorpusMatch] = []

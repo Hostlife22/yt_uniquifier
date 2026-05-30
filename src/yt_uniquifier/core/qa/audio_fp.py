@@ -88,7 +88,16 @@ def compare(input_path: Path, output_path: Path) -> AudioFPResult:
             available=False, similarity=None, note="malformed fpcalc output"
         )
     if not ai or not bi:
-        return AudioFPResult(available=True, similarity=0.0, note=None)
+        # An empty subfingerprint set is "no data", not "fully divergent".
+        # The previous return of similarity=0.0 with available=True caused
+        # the QA report to display a maximum-divergence reading even when
+        # fpcalc emitted an empty fingerprint (e.g. silent or unsupported
+        # audio).
+        return AudioFPResult(
+            available=False,
+            similarity=None,
+            note="fpcalc returned an empty fingerprint (silent / unsupported audio)",
+        )
 
     set_a, set_b = set(ai), set(bi)
     union = len(set_a | set_b)

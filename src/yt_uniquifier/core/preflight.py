@@ -47,7 +47,38 @@ def preflight(
     # mis-placed video.tonemap_sdr in the profile would otherwise get
     # no warning because _check_hdr only fires on HDR sources.
     findings.extend(_check_tonemap_order(plan))
+    findings.extend(_check_blend_b_input(plan))
     return findings
+
+
+def _check_blend_b_input(plan: Plan) -> list[PreflightFinding]:
+    """Verify the `b_video_path` for video.blend_b exists.
+
+    Without this, a missing/typo'd path is only discovered when ffmpeg
+    fails inside the first segment encode — minutes into a multi-hour
+    run.
+    """
+    from pathlib import Path as _Path
+    out: list[PreflightFinding] = []
+    for tc in plan.profile.transforms:
+        if not tc.enabled or tc.id != "video.blend_b":
+            continue
+        params = tc.params or {}
+        b_path = params.get("b_video_path")
+        if not b_path:
+            out.append(PreflightFinding(
+                code="blend_b.path.missing", severity="fail",
+                message="video.blend_b is enabled but b_video_path is empty.",
+                suggestion="Set b_video_path to a real file, or disable video.blend_b.",
+            ))
+            continue
+        if not _Path(str(b_path)).exists():
+            out.append(PreflightFinding(
+                code="blend_b.path.not_found", severity="fail",
+                message=f"video.blend_b.b_video_path does not exist: {b_path}",
+                suggestion="Fix the path, or disable video.blend_b in the profile.",
+            ))
+    return out
 
 
 def has_fail(findings: list[PreflightFinding]) -> bool:

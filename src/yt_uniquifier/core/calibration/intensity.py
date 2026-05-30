@@ -116,6 +116,46 @@ def _scale_params(
     elif transform_id == "audio.loudnorm":
         scaled = dict(effective)  # target loudness shouldn't scale with intensity
 
+    elif transform_id == "audio.haas_stereo":
+        scaled = dict(effective)
+        if "delay_ms" in scaled:
+            scaled["delay_ms"] = scaled["delay_ms"] * factor
+
+    elif transform_id == "audio.compand":
+        scaled = dict(effective)
+        # `amount` is a unit-magnitude knob on [0..1] → multiply.
+        if "amount" in scaled:
+            scaled["amount"] = scaled["amount"] * factor
+
+    elif transform_id == "audio.reverb":
+        scaled = dict(effective)
+        for key in ("wet", "room_size", "damping"):
+            if key in scaled:
+                scaled[key] = scaled[key] * factor
+
+    elif transform_id == "audio.noise_overlay":
+        scaled = dict(effective)
+        # `amix_weight_noise` is the only intensity knob exposed; the
+        # `anoisesrc` color and amplitude are fixed by the spec.
+        if "amix_weight_noise" in scaled:
+            scaled["amix_weight_noise"] = scaled["amix_weight_noise"] * factor
+
+    elif transform_id == "video.subpixel_sharpen":
+        scaled = dict(effective)
+        for key in ("amount", "radius"):
+            if key in scaled:
+                scaled[key] = scaled[key] * factor
+
+    elif transform_id == "video.temporal_jitter":
+        scaled = dict(effective)
+        if "shift_frames" in scaled:
+            # Integer knob — round after scaling.
+            scaled["shift_frames"] = int(round(scaled["shift_frames"] * factor))
+
+    elif transform_id == "video.tonemap_sdr":
+        # Tonemap is a fixed colorspace conversion; intensity does not apply.
+        scaled = dict(effective)
+
     else:  # unknown transforms pass through unchanged
         scaled = dict(effective)
 

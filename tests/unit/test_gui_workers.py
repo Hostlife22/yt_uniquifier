@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtCore import QThread
 
-from yt_uniquifier.gui.worker import Worker  # back-compat shim
 from yt_uniquifier.gui.workers.base import WorkerBase
+from yt_uniquifier.gui.workers.run_worker import RunWorker
 
 
 def test_workerbase_has_required_signals() -> None:
@@ -33,10 +33,13 @@ def test_workerbase_is_qthread_subclass() -> None:
     assert issubclass(WorkerBase, QThread)
 
 
-def test_shim_worker_is_run_worker() -> None:
-    """Pre-v0.5 import path `gui.worker.Worker` still resolves to RunWorker."""
-    from yt_uniquifier.gui.workers.run_worker import RunWorker
-    assert Worker is RunWorker
+def test_run_worker_module_resolves() -> None:
+    """v0.5+: RunWorker is imported directly from gui.workers.run_worker.
+
+    The pre-v0.5 `gui.worker.Worker` shim was removed in the audit
+    cleanup pass; this test pins the supported import path.
+    """
+    assert RunWorker.__name__ == "RunWorker"
 
 
 def test_run_worker_cancel_does_not_report_failed(

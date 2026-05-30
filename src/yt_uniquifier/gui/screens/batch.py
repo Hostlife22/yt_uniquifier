@@ -201,15 +201,30 @@ class BatchScreen(ScreenBase):
 
     def _on_done(self, _payload: object) -> None:
         self.status_label.setText("Done.")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._refresh_run_btn()
 
     def _on_failed(self, msg: str) -> None:
         self.status_label.setText(f"FAILED: {msg}")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._refresh_run_btn()
+
+    def _drop_worker(self) -> None:
+        """Join the BatchWorker QThread before dropping the Python ref.
+
+        Qt delivers finished_ok / failed via QueuedConnection while the
+        thread's run() may still be unwinding. Setting ``self.worker = None``
+        without first quit()+wait() can leave a live C++ QThread behind
+        the dropped Python reference, causing a "QThread: Destroyed
+        while thread is still running" abort.
+        """
+        if self.worker is None:
+            return
+        self.worker.quit()
+        self.worker.wait(1000)
+        self.worker = None
 
     def _set_status(
         self, path: str, status: str, *, out: str = "", note: str = "",

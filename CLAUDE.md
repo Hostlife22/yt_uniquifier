@@ -39,7 +39,7 @@ Custom pytest markers (declared in `pyproject.toml`): `integration` (real ffmpeg
 
 CLI entry points (after `pip install -e .`):
 
-- `yt-uniq` — `yt_uniquifier.cli.app:app` (subcommands: `version`, `probe`, `preflight`, `run`, `qa`, `batch`)
+- `yt-uniq` — `yt_uniquifier.cli.app:app` (subcommands: `version`, `probe`, `preflight`, `run`, `qa`, `batch`, `calibrate`, `worker`, `corpus`, `queue`)
 - `yt-uniq-gui` — `yt_uniquifier.gui.app_pyqt:main` (requires `[gui]` extra)
 
 Requires `ffmpeg`/`ffprobe` on PATH. Optional binaries — graceful skip if absent: `fpcalc` (chromaprint), ffmpeg with `libvmaf`.
@@ -74,7 +74,7 @@ Key invariants:
 - **Resume = split-process-concat, not keyframe seek.** A crash during a multi-hour run resumes at segment boundary granularity (see `core/segmenter.py`, `core/checkpoint.py`). Plan hash keys the resume cache — changing the profile invalidates it.
 - **Audio is never split across segments.** `process_main_audio` runs on the full source so loudnorm and pitch transients don't break at seams. The two-pass loudnorm measurement is cached in `state.json`.
 - **Single orchestrator entry point.** `core/orchestrator.py::run_full(plan, options, on_event, cancel_token) -> RunSummary` is what CLI commands and the GUI Worker both call. It takes an `on_event` callback so UIs can stream `RunEvent`s without coupling. The legacy AB prototype embedded the pipeline inside a `QThread` — don't reintroduce that.
-- **Transforms self-register on import.** `core/transforms/__init__.py` imports every submodule; each calls `register(TransformSpec(...))`. To add a transform: create a new submodule, register, add to `__init__.py`, write a snapshot test in `tests/unit/test_transforms.py` against the generated `filter_complex` string.
+- **Transforms self-register on import.** `core/transforms/__init__.py` imports every submodule (including `hdr_wrap`, which is also referenced directly by `core/pipeline.py`); each calls `register(TransformSpec(...))`. To add a transform: create a new submodule, register, add to `__init__.py`, write a snapshot test in `tests/unit/test_transforms.py` against the generated `filter_complex` string.
 - **Encoder detection is real, cached.** `core/encoder.py::detect_encoders` runs each candidate against a `lavfi` null source and caches results. Tests must use the `isolated_cache` fixture (redirects `CACHE_PATH` to `tmp_path`) so they don't pollute or depend on the user's cache.
 - **Even-dimensions guard at the tail of the video chain.** `scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p` — `libx264` rejects odd dims after micro-crop.
 - **`video.blend_b` is the only multi-input transform.** It returns `extra_inputs` and uses the `__B__` token rewritten to `[1:v]` after `-i B.mp4` is appended.
@@ -87,7 +87,7 @@ Key invariants:
 
 `core/models.py` holds every pydantic dataclass: `SourceMeta`, `Profile`, `Plan`, `Segment`, `EncoderCandidate`, `QAReport`, `RunEvent`. The `Plan` is JSON-serializable on purpose — it crosses thread/process boundaries and is hashed for resume.
 
-Profiles (`src/yt_uniquifier/profiles/*.yaml`) are loaded via `core/profile_loader.py` with `extra=forbid`. Shipped: `soft.yaml`, `medium.yaml`, `aggressive.yaml`, `legacy_ab.yaml`. See `docs/profiles.md` for the schema.
+Profiles (`src/yt_uniquifier/profiles/*.yaml`) are loaded via `core/profile_loader.py` with `extra=forbid`. Shipped: `soft.yaml`, `medium.yaml`, `medium_hdr.yaml`, `aggressive.yaml`, `legacy_ab.yaml`, `cid_aware.yaml`, `cid_aware_hdr_to_sdr.yaml`, `cid_aggressive.yaml`. See `docs/profiles.md` for the schema.
 
 ## Tests
 
@@ -104,7 +104,7 @@ When adding a transform: snapshot test the `filter_complex` fragment. Do not ass
 
 ## GUI layer (v0.5)
 
-`gui/` is a PyQt6 desktop shell, not a thin wrapper. It has 10 screens (`gui/screens/`: `run`, `batch`, `queue`, `calibrate`, `validation`, `qa_viewer`, `profile_editor`, `history`, `corpus`, `settings`) and 13 background workers (`gui/workers/`: `run_worker`, `batch_worker`, `queue_worker`, `queue_status_worker`, `calibrate_worker`, `corpus_worker`, `corpus_list_worker`, `qa_worker`, `probe_worker`, `generate_variants_worker`, `correlate_worker`, `encoder_detect_worker` — plus `base.py`).
+`gui/` is a PyQt6 desktop shell, not a thin wrapper. It has 10 screens (`gui/screens/`: `run`, `batch`, `queue`, `calibrate`, `validation`, `qa_viewer`, `profile_editor`, `history`, `corpus`, `settings`) and 14 background workers (`gui/workers/`: `run_worker`, `batch_worker`, `queue_worker`, `queue_status_worker`, `queue_io_worker`, `calibrate_worker`, `corpus_worker`, `corpus_list_worker`, `qa_worker`, `probe_worker`, `preflight_worker`, `generate_variants_worker`, `correlate_worker`, `encoder_detect_worker` — plus `base.py`).
 
 The rule: **workers wrap `core/` callables and stream `RunEvent`s back via Qt signals**. They never duplicate orchestration logic. A worker class typically inherits from `gui/workers/base.py` and bridges `on_event` callbacks → Qt `pyqtSignal`. If you find yourself reimplementing a pipeline step inside a worker, you're in the wrong layer — promote it to `core/`.
 

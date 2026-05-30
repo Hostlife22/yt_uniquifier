@@ -195,15 +195,23 @@ class QaViewerScreen(ScreenBase):
 
     def _on_failed(self, msg: str) -> None:
         self.compute_log.log(f"FAILED: {msg}", "error")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._refresh_compute_btn()
 
     def _on_finished(self, _payload: object) -> None:
         self.compute_log.log("QA done.", "info")
-        self.worker = None
+        self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._refresh_compute_btn()
+
+    def _drop_worker(self) -> None:
+        """Join the QaWorker QThread before dropping the Python ref."""
+        if self.worker is None:
+            return
+        self.worker.quit()
+        self.worker.wait(1000)
+        self.worker = None
 
     def _open_in_browser(self) -> None:
         if self.qa_html_path and self.qa_html_path.exists():

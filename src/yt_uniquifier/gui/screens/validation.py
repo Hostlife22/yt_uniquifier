@@ -32,9 +32,34 @@ from yt_uniquifier.gui.workers.correlate_worker import CorrelateWorker
 from yt_uniquifier.gui.workers.generate_variants_worker import GenerateVariantsWorker
 
 PROFILES_DIR = Path(__file__).parents[2] / "profiles"
+
+
+def _find_tools_dir() -> Path:
+    """Locate the repo `tools/` directory.
+
+    Editable installs (`pip install -e .`) leave the source tree intact
+    so `Path(__file__).parents[4] / "tools"` resolves to the real repo
+    root. Wheel / PyInstaller installs do not ship `tools/`, so we fall
+    back to a user-config directory under XDG so the screen still
+    functions (the user can drop `validation_correlate.py` there).
+    """
+    editable_root = Path(__file__).parents[4]
+    editable_tools = editable_root / "tools"
+    if editable_tools.is_dir():
+        return editable_tools
+    # Fallback for non-editable installs. Honour XDG_DATA_HOME first,
+    # then ~/.local/share. The directory is created on demand by the
+    # _save_csv path.
+    import os as _os
+    xdg = _os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return base / "yt_uniquifier" / "validation"
+
+
+_TOOLS_DIR = _find_tools_dir()
 REPO_ROOT = Path(__file__).parents[4]
-DEFAULT_CSV = REPO_ROOT / "tools" / "validation_log.csv"
-CORRELATE_TOOL = REPO_ROOT / "tools" / "validation_correlate.py"
+DEFAULT_CSV = _TOOLS_DIR / "validation_log.csv"
+CORRELATE_TOOL = _TOOLS_DIR / "validation_correlate.py"
 
 
 class ValidationScreen(ScreenBase):

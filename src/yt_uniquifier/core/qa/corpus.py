@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import json
 import os
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -63,6 +64,15 @@ class Corpus:
         self.root = root or DEFAULT_CORPUS_DIR
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / "index.json"
+        # In-process lock guarding the read-modify-write sequence in
+        # remove() / _upsert(). The GUI shares a single Corpus instance
+        # between the UI thread (CorpusScreen.remove()) and worker
+        # threads (CorpusWorker.add / CorpusListWorker.list_all). Without
+        # this lock the JSON index can be corrupted when a concurrent
+        # reader catches the file mid-write between the worker's load
+        # and save. The cross-process flock in _corpus_flock handles
+        # inter-process races; this lock handles intra-process ones.
+        self._mutex = threading.RLock()
 
     # ---- public API --------------------------------------------------------
 
@@ -101,15 +111,17 @@ class Corpus:
         return entry
 
     def remove(self, entry_id: str) -> bool:
-        entries = self._load_all()
-        new = [e for e in entries if e.id != entry_id]
-        if len(new) == len(entries):
-            return False
-        self._save_all(new)
+        with self._mutex, _corpus_flock(self.index_path):
+            entries = self._load_all()
+            new = [e for e in entries if e.id != entry_id]
+            if len(new) == len(entries):
+                return False
+            self._save_all(new)
         return True
 
     def list_all(self) -> list[CorpusEntry]:
-        return self._load_all()
+        with self._mutex:
+            return self._load_all()
 
     def search_match(
         self,
@@ -200,8 +212,10 @@ class Corpus:
         # across processes; two concurrent `yt-uniq batch` workers
         # calling add() would each read the same snapshot, append, and
         # one would silently overwrite the other. Hold an exclusive
-        # flock on a sibling lock file for the duration.
-        with _corpus_flock(self.index_path):
+        # flock on a sibling lock file for the duration. The in-process
+        # mutex covers the GUI case where CorpusWorker and CorpusScreen
+        # share the same Corpus instance across threads.
+        with self._mutex, _corpus_flock(self.index_path):
             entries = self._load_all()
             new = [e for e in entries if e.id != entry.id]
             new.append(entry)

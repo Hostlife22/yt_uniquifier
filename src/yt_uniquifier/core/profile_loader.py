@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.models import Profile
@@ -34,5 +35,9 @@ def load_profile(path: Path) -> Profile:
         raise ProfileLoadError(f"profile root must be a mapping, got {type(raw).__name__}")
     try:
         return Profile.model_validate(raw)
-    except Exception as exc:
+    except ValidationError as exc:
+        # Narrow except: catch only pydantic's validation failure. A bare
+        # `Exception` previously swallowed unrelated errors (MemoryError,
+        # programming bugs in transform spec lookup) into a misleading
+        # "profile validation failed" message.
         raise ProfileLoadError(f"profile validation failed for {path}: {exc}") from exc

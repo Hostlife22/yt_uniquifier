@@ -17,7 +17,7 @@ _HAVE_PYQT6 = importlib.util.find_spec("PyQt6") is not None
 
 @pytest.mark.skipif(not _HAVE_PYQT6, reason="PyQt6 not installed")
 def test_worker_module_imports() -> None:
-    from yt_uniquifier.gui.worker import Worker  # noqa: F401
+    from yt_uniquifier.gui.workers.run_worker import RunWorker  # noqa: F401
 
 
 @pytest.mark.skipif(not _HAVE_PYQT6, reason="PyQt6 not installed")

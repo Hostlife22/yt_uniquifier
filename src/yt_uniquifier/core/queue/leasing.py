@@ -175,10 +175,20 @@ class FileQueue:
             if not host_dir.is_dir():
                 continue
             alive = self.layout.in_progress / f"{host_dir.name}.alive"
-            if not alive.exists():
-                continue
-            if now - alive.stat().st_mtime <= stale_sec:
-                continue
+            if alive.exists():
+                if now - alive.stat().st_mtime <= stale_sec:
+                    continue
+            else:
+                # No heartbeat anchor — worker crashed before/at startup.
+                # Use the oldest file's mtime in the host_dir as a
+                # conservative liveness proxy, and only reclaim if even
+                # that is older than stale_sec. Empty dirs are skipped.
+                try:
+                    mtimes = [f.stat().st_mtime for f in host_dir.iterdir()]
+                except OSError:
+                    continue
+                if not mtimes or now - min(mtimes) <= stale_sec:
+                    continue
             for f in list(host_dir.iterdir()):
                 try:
                     os.rename(f, self.layout.pending / f.name)

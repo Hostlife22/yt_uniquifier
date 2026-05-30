@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QStandardItem, QStandardItemModel
+from PyQt6.QtGui import QCloseEvent, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QComboBox
 
 from yt_uniquifier.gui.state import AppState
@@ -78,7 +78,31 @@ class EncoderSelector(QComboBox):
         self._clear_worker()
 
     def _clear_worker(self) -> None:
+        """Join the EncoderDetectWorker QThread before dropping the ref.
+
+        Cold-start detection can take several seconds. If the user closes
+        the window mid-probe, dropping the Python ref while the C++
+        QThread is still in run() leads to "QThread: Destroyed while
+        thread is still running". EncoderSelector lives inside multiple
+        screens (Run, Batch, Queue, Validation) and the screens'
+        closeEvent walker doesn't see this attribute, so it has to clean
+        up its own worker.
+        """
+        if self._detect_worker is None:
+            return
+        # Tests sometimes substitute a plain placeholder for the worker
+        # (e.g. to assert `_clear_worker` is reached after `failed`);
+        # only call quit/wait on a real QThread.
+        if hasattr(self._detect_worker, "quit"):
+            self._detect_worker.quit()
+        if hasattr(self._detect_worker, "wait"):
+            self._detect_worker.wait(1000)
         self._detect_worker = None
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:
+        """Ensure the detect worker is joined when the parent window closes."""
+        self._clear_worker()
+        super().closeEvent(event)
 
     def _on_changed(self, idx: int) -> None:
         item = self._model.item(idx)

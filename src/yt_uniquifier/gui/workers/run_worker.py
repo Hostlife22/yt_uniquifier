@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -50,6 +51,12 @@ class RunWorker(WorkerBase):
         self.state = state
         self._total_us = max(int(plan.source.duration_sec * 1_000_000), 1)
         self._seg_us: dict[int, int] = {}
+        # ThreadPoolExecutor inside orchestrator.process_video_segments_parallel
+        # invokes on_event concurrently from worker threads when workers > 1.
+        # Without this lock the dict mutation + sum() composite is a data race
+        # under PyPy and free-threaded CPython 3.13+; even under standard
+        # CPython it produces transient progress overshoot.
+        self._seg_us_lock = threading.Lock()
         if self.state is not None:
             self._history_request.connect(self._on_history_request)
 
@@ -113,9 +120,12 @@ class RunWorker(WorkerBase):
         """GUI-thread slot — invoked via QueuedConnection from worker thread."""
         if self.state is None or not isinstance(entry, HistoryEntry):
             return
-        import contextlib
-        with contextlib.suppress(Exception):
+        try:
             self.state.push_history(entry)
+        except OSError as exc:
+            # Disk full / permissions / read-only FS. Surface so the user
+            # knows the history entry was lost; do not crash the run.
+            self.log.emit(f"history write failed: {exc}")
 
     def _on_event(self, ev: RunEvent) -> None:
         if ev.kind == "log":
@@ -130,10 +140,12 @@ class RunWorker(WorkerBase):
 
         seg = ev.payload.get("segment")
         out_us = self._extract_out_time_us(ev)
+        with self._seg_us_lock:
+            if isinstance(seg, int):
+                self._seg_us[seg] = out_us
+            total = sum(self._seg_us.values())
         if isinstance(seg, int):
-            self._seg_us[seg] = out_us
             self.segment_progress.emit(seg, "in_progress")
-        total = sum(self._seg_us.values())
         fraction = min(total / self._total_us, 1.0)
         msg = f"{int(fraction * 100)}% — segment {seg if seg is not None else '?'}"
         self.progress.emit(fraction, msg)

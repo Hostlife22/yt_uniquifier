@@ -240,7 +240,9 @@ def run_full(
                 "phase": "sanitize",
                 "message": f"re-encoding {plan.encoder.vendor} output via libx264",
             }))
-            sanitize_bitstream(options.output, options.output)
+            sanitize_bitstream(
+                options.output, options.output, cancel_token=cancel_token,
+            )
         else:
             emit(RunEvent(kind="log", payload={
                 "phase": "sanitize",
