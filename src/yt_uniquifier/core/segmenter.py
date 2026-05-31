@@ -254,8 +254,24 @@ def process_video_segment(
     stream_copy_extract(segment, plan.source.path, src)
     seg_plan = _plan_for_segment(plan, segment.idx)
     cmd = build_video_segment_command(seg_plan, src, out)
+    # Inject segment idx into every event so downstream consumers (GUI
+    # progress bar, history log) can correlate ffmpeg `progress=...`
+    # blocks with the segment they belong to. Without this, the GUI
+    # shows "segment ?" for the entire encode because runner.py only
+    # sees ffmpeg's stdout (`out_time_us`, `frame=...`) — it has no
+    # knowledge of the segment index.
+    if on_event is not None:
+        _on_event = on_event
+
+        def _wrap(ev: RunEvent) -> None:
+            if "segment" not in ev.payload:
+                ev.payload["segment"] = segment.idx
+            _on_event(ev)
+        forwarded_on_event: Callable[[RunEvent], None] | None = _wrap
+    else:
+        forwarded_on_event = None
     run_ffmpeg(
-        cmd, output=out, on_event=on_event, cancel_token=cancel_token,
+        cmd, output=out, on_event=forwarded_on_event, cancel_token=cancel_token,
         log_path=out.with_suffix(".mkv.log"),
         extra_env=extra_env,
     )

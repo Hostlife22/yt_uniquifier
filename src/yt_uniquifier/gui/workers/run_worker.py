@@ -167,7 +167,18 @@ class RunWorker(WorkerBase):
         if isinstance(seg, int):
             self.segment_progress.emit(seg, "in_progress")
         fraction = min(total / self._total_us, 1.0)
-        msg = f"{int(fraction * 100)}% — segment {seg if seg is not None else '?'}"
+        # `seg` is an int while a video segment is encoding; None for
+        # the post-segment audio chain + concat mux. Show a phase label
+        # in that tail window so the user knows the encode hasn't
+        # stalled (previously displayed "segment ?" indistinguishable
+        # from a hang).
+        if isinstance(seg, int):
+            label = f"segment {seg}"
+        elif fraction >= 0.99:
+            label = "finalizing (audio + mux)"
+        else:
+            label = "preparing"
+        msg = f"{int(fraction * 100)}% — {label}"
         self.progress.emit(fraction, msg)
 
     @staticmethod
