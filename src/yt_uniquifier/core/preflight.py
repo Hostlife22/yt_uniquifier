@@ -283,7 +283,7 @@ def _check_hdr(
         # caught this on the synth_hdr10 × cid_aware_hdr_to_sdr cell;
         # the OK-only path slipped past a zimg-missing ffmpeg build.
         if not _ffmpeg_filter_works(
-            "zscale=t=bt709:m=bt709:p=bt709", "video"
+            "zscale=tin=bt709:min=bt709:pin=bt709:t=bt709:m=bt709:p=bt709", "video"
         ):
             findings.append(PreflightFinding(
                 code="tonemap.zscale.missing", severity="fail",
@@ -333,7 +333,7 @@ def _check_hdr(
     # Dry-run probe rather than text-parse for the same reason as
     # rubberband (see _check_pitch_rubberband). zscale=t=bt709 is a
     # benign no-op color transfer that any working zimg build accepts.
-    if not _ffmpeg_filter_works("zscale=t=bt709:m=bt709:p=bt709", "video"):
+    if not _ffmpeg_filter_works("zscale=tin=bt709:min=bt709:pin=bt709:t=bt709:m=bt709:p=bt709", "video"):
         findings.append(PreflightFinding(
             code="hdr.zscale.missing", severity="fail",
             message=(

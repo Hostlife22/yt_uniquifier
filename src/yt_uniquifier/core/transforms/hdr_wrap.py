@@ -68,8 +68,18 @@ def wrap_linear(inner_filters: list[str], color: HDRInfo) -> str:
 
     target_transfer = _transfer_for_zscale(color.transfer)
     npl = npl_for(color)
+    # Pre-zscale even-dim guard: zscale rejects odd dimensions on
+    # yuv420p10le (chroma subsampling = 4:2:0 → both axes must be even)
+    # with "code 1027: image dimensions must be divisible by subsampling
+    # factor". Geometric transforms upstream (video.crop_resize at any
+    # max_strength > 0, video.rotate at non-multiple-of-90 angles) can
+    # produce odd dims that the final scale tail catches for the encoder
+    # but reaches zscale uncorrected. Found 2026-05-31 on
+    # medium_hdr × synth_hdr10 × libx265 once a real zimg ffmpeg
+    # became available.
     return ",".join(
         [
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             f"zscale=transfer=linear:npl={npl}",
             inner_joined,
             f"zscale=transfer={target_transfer}:npl={npl}",
