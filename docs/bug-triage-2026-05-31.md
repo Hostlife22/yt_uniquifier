@@ -113,14 +113,19 @@ locked that wrong answer in for the duration of the matrix run. After
 brew install chromaprint completed, the version hash changed,
 invalidating cache. Hard to reproduce on demand.
 
-**Defense-in-depth recommendation** (not implemented this pass, would
-expand scope):
-- Replace the `ffmpeg -filters` substring parse with an actual dry-run
+**Defense-in-depth** (implemented across two passes):
+- ~~Replace the `ffmpeg -filters` substring parse with an actual dry-run
   of `ffmpeg -af 'rubberband=pitch=1.0' -t 0.001 -f null -i 'sine=440' -`
-  which faithfully reports whether the filter graph can be opened.
-- Or have `core/audio_windows.py` re-verify filter availability
+  which faithfully reports whether the filter graph can be opened.~~
+  **Done** — `core/preflight.py::_ffmpeg_filter_works` (this pass).
+- ~~Or have `core/audio_windows.py` re-verify filter availability
   immediately before invoking the audio chain, after 18 min of
-  video work has already burned.
+  video work has already burned.~~ **Done** —
+  `core/audio_windows.py::verify_audio_filters_available` called from
+  `core/segmenter.py::process_main_audio` right before `run_ffmpeg`
+  on the audio chain (2026-05-31 follow-up). 3 new unit tests in
+  `tests/unit/test_pitch_rubberband.py` cover happy path, lost-filter
+  PipelineError, and asetrate-bypass.
 
 **Verification table** (post-fix):
 
@@ -386,8 +391,22 @@ can spend the wall-time stay on `cid_*`.
 
 - GUI deep sweep on all 10 screens (matrix already exercised CLI +
   orchestrator + preflight + QA + checkpoint)
+  - **Closed by follow-up** (`.claude/plans/bug-triage-followups.plan.md`,
+    2026-05-31): `tools/gui_sweep.py` drives MainWindow through all 10
+    screens on the real Qt platform with PNG + Qt-log capture; manual
+    checklist lives in `docs/gui_sweep.md`. Developer-only — offscreen
+    `tests/visual/test_gui_screenshots.py` remains the CI baseline.
 - Cost of `rubberband` on 4K / 5-min content: 2 of the 4 timeouts are
   cid_aware × {sdr_4k, long_5min} and 2 are cid_aggressive × same;
   the audio chain genuinely runs >30 minutes on these inputs. Tuning
   the rubberband filter parameters or providing a fast-path for
   long-form content is a future perf project, not a bug.
+  - **Closed by follow-up** (`.claude/plans/bug-triage-followups.plan.md`,
+    2026-05-31): `core/preflight.py::_check_rubberband_perf` emits
+    `audio.pitch.rubberband.slow` (severity=warn) when a
+    rubberband-enabled profile runs on a source `>60 s` or `>1080p`,
+    surfacing the wall-cost before the encode starts. Measured matrix
+    table moved to `docs/profiles.md#rubberband-performance-characteristic`
+    with `method='asetrate'` fast-path snippet. 5 new unit tests in
+    `tests/unit/test_pitch_rubberband.py`. Filter tuning + audio-chain
+    parallelisation still deferred (true perf project).

@@ -104,6 +104,53 @@ and when to pick which.
   `brew install ffmpeg --HEAD` or build from source with
   `--enable-librubberband --enable-libzimg`.
 
+### Rubberband performance characteristic
+
+The 2026-05-31 real-video matrix (`docs/bug-triage-2026-05-31.md` §9)
+measured wall time across the shipped profile × input combinations on
+`evermeet.cx` ffmpeg 8.1.1 + `librubberband` + `libzimg` + `libvmaf`,
+single-worker, `libx264`. Numbers are wall seconds:
+
+| Profile         | clip_a 30 s | clip_long 90 s | synth_sdr_4k 12 s | synth_long_5min 300 s |
+|---              |---:         |---:            |---:               |---:                   |
+| `soft`          | 17          | 37             | —                 | 136 (run) + 326 (resume) |
+| `medium`        | 17          | 39             | —                 | 145                   |
+| `aggressive`    | 20          | 46             | —                 | 242                   |
+| `cid_aware`     | 224         | 623            | TIMEOUT (>1800)   | TIMEOUT (>1800)       |
+| `cid_aggressive`| 316         | 871            | TIMEOUT (>1800)   | TIMEOUT (>1800)       |
+
+`cid_aware` / `cid_aggressive` run ~10–15× the wall time of
+`soft` / `medium` / `aggressive` on the same content. The rubberband
+audio chain is single-threaded inside ffmpeg and runs serially with
+the (parallel) video chain, so on `>60 s` or `>1080p` sources the
+audio pass dominates wall time. Choice is intentional:
+
+- **Keep `rubberband`** when formant preservation matters more than
+  throughput — voice content, podcasts, talking-head video, anything
+  where the "chipmunk effect" of `asetrate` would be unacceptable.
+  Smitelli 2010 places the CID match boundary at ±5% pitch, so the
+  pitch shift in `cid_*` profiles is intentionally past that threshold.
+- **Switch to `asetrate`** when throughput matters more — B-roll,
+  music-only content, batch jobs of large files. Edit the profile YAML
+  in place or save a derived copy:
+
+```yaml
+# my_fast_cid.yaml — cid_aware with the asetrate fallback
+transforms:
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.06, randomize_within: 0.005, method: asetrate}
+```
+
+`preflight()` emits `audio.pitch.rubberband.slow` (severity=`warn`)
+when a rubberband-enabled profile runs on a source `>60 s` or
+`>1080p` so the wall-cost is surfaced before the encode starts. The
+WARN is informational — encode still proceeds. Implemented in
+`src/yt_uniquifier/core/preflight.py::_check_rubberband_perf`.
+
+_(Measured 2026-05-31 on `evermeet.cx` ffmpeg 8.1.1 + librubberband
+on an 8-core Mac. Re-measure annually or after an ffmpeg major bump.)_
+
 ## Why these defaults? — Smitelli citation
 
 The `cid_aware` and `cid_aggressive` profiles target YouTube Content ID

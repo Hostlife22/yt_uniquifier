@@ -17,6 +17,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from yt_uniquifier.core.errors import PipelineError
+from yt_uniquifier.core.models import Plan
+
 # 60 s windows + 0.1 s crossfade at each internal boundary.
 WINDOW_SEC = 60.0
 CROSSFADE_SEC = 0.1
@@ -32,6 +35,49 @@ class AudioWindow:
     end_sec: float
     crossfade_in_sec: float    # 0 for the first window
     crossfade_out_sec: float   # 0 for the last window
+
+
+def verify_audio_filters_available(plan: Plan) -> None:
+    """Re-probe ffmpeg filter availability right before the audio chain runs.
+
+    Defense-in-depth against the 2026-05-31 matrix incident
+    (`docs/bug-triage-2026-05-31.md` #2): preflight's
+    `_check_pitch_rubberband` reported `rubberband` available, but
+    runtime ffmpeg threw "No such filter: 'rubberband'" 18 minutes into
+    an encode after all video segments completed. Root cause
+    unconfirmed (likely transient cache state during a concurrent
+    `brew` operation), but the cost was clear: the user burned 18 min
+    of video work before the audio chain failed.
+
+    Calling this immediately before `run_ffmpeg` on the audio chain
+    closes the window between preflight and runtime. The probe takes
+    ~200 ms (cached after the first call within the process) — cheap
+    insurance against another multi-minute lost-work incident.
+
+    Raises `PipelineError` with a clear remediation message when a
+    required filter cannot be opened. Stays silent on the happy path.
+    """
+    # Lazy import: preflight imports from many places and audio_windows
+    # is in the core hot-path. Avoid a top-level circular-risk dep.
+    from yt_uniquifier.core.preflight import _ffmpeg_filter_works
+
+    needs_rb = any(
+        tc.enabled and tc.id == "audio.pitch_tempo"
+        and (tc.params or {}).get("method") == "rubberband"
+        for tc in plan.profile.transforms
+    )
+    if not needs_rb:
+        return
+    if _ffmpeg_filter_works("rubberband=pitch=1.0", "audio"):
+        return
+    raise PipelineError(
+        "Audio chain pre-flight failed: ffmpeg cannot open the "
+        "`rubberband` filter even though preflight reported it "
+        "available. Profile uses audio.pitch_tempo method='rubberband' "
+        "which requires ffmpeg built with --enable-librubberband. "
+        "Re-install ffmpeg (Homebrew default ships it; system ffmpeg "
+        "may not) or switch the profile to method='asetrate'."
+    )
 
 
 def plan_windows(duration_sec: float) -> list[AudioWindow]:

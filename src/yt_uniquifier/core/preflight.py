@@ -47,6 +47,7 @@ def preflight(
     findings.extend(_check_loudnorm(plan))
     findings.extend(_check_bitrate(source))
     findings.extend(_check_pitch_rubberband(plan))
+    findings.extend(_check_rubberband_perf(plan, source))
     # Tonemap-order check runs unconditionally — an SDR source with a
     # mis-placed video.tonemap_sdr in the profile would otherwise get
     # no warning because _check_hdr only fires on HDR sources.
@@ -228,6 +229,67 @@ def _check_pitch_rubberband(plan: Plan) -> list[PreflightFinding]:
     )]
 
 
+_RUBBERBAND_SLOW_DURATION_SEC = 60.0
+_RUBBERBAND_SLOW_HEIGHT_PX = 1080
+
+
+def _check_rubberband_perf(
+    plan: Plan, source: SourceMeta
+) -> list[PreflightFinding]:
+    """Warn that rubberband on long / hi-res sources runs ~10-15× wall time.
+
+    The 2026-05-31 real-video matrix (`docs/bug-triage-2026-05-31.md` §9)
+    timed out 4 cells — `{cid_aware, cid_aggressive} × {synth_sdr_4k,
+    synth_long_5min}` — all hitting the 1800s ceiling. Not a bug: the
+    `rubberband` filter is single-threaded inside ffmpeg and runs the
+    audio chain in serial with the (now-parallel) video chain, so on
+    >60s or >1080p sources the rubberband pass dominates wall time.
+
+    Emitted at WARN severity so the encode still proceeds. Users who
+    accept the wall cost (formant preservation for voice — Smitelli
+    2010 ±5% CID match boundary) can ignore the message; users on
+    throughput-sensitive batches get pointed at `method='asetrate'`.
+    """
+    if not source.video:
+        return []
+    needs_rb = any(
+        tc.enabled and tc.id == "audio.pitch_tempo"
+        and (tc.params or {}).get("method") == "rubberband"
+        for tc in plan.profile.transforms
+    )
+    if not needs_rb:
+        return []
+    v = source.video[0]
+    long_source = source.duration_sec > _RUBBERBAND_SLOW_DURATION_SEC
+    hi_res_source = v.height > _RUBBERBAND_SLOW_HEIGHT_PX
+    if not (long_source or hi_res_source):
+        return []
+    triggers = []
+    if long_source:
+        triggers.append(
+            f"duration {source.duration_sec:.0f}s "
+            f"> {_RUBBERBAND_SLOW_DURATION_SEC:.0f}s"
+        )
+    if hi_res_source:
+        triggers.append(
+            f"height {v.height}p > {_RUBBERBAND_SLOW_HEIGHT_PX}p"
+        )
+    return [PreflightFinding(
+        code="audio.pitch.rubberband.slow", severity="warn",
+        message=(
+            f"Profile uses audio.pitch_tempo method='rubberband' on a "
+            f"{' and '.join(triggers)} source. Rubberband runs ~10-15× "
+            f"wall time vs 'asetrate' on long / >=4K content "
+            f"(see docs/profiles.md#rubberband-performance-characteristic)."
+        ),
+        suggestion=(
+            "For throughput, switch the profile to "
+            "audio.pitch_tempo.method='asetrate'. Keep 'rubberband' "
+            "when formant preservation matters more than wall time."
+        ),
+    )]
+
+
 def _check_tonemap_order(plan: Plan) -> list[PreflightFinding]:
     """Warn if video.tonemap_sdr is not the first enabled transform.
 
@@ -333,7 +395,8 @@ def _check_hdr(
     # Dry-run probe rather than text-parse for the same reason as
     # rubberband (see _check_pitch_rubberband). zscale=t=bt709 is a
     # benign no-op color transfer that any working zimg build accepts.
-    if not _ffmpeg_filter_works("zscale=tin=bt709:min=bt709:pin=bt709:t=bt709:m=bt709:p=bt709", "video"):
+    _zscale_probe = "zscale=tin=bt709:min=bt709:pin=bt709:t=bt709:m=bt709:p=bt709"
+    if not _ffmpeg_filter_works(_zscale_probe, "video"):
         findings.append(PreflightFinding(
             code="hdr.zscale.missing", severity="fail",
             message=(

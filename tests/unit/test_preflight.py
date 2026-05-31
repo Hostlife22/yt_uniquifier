@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from yt_uniquifier.core.models import (
     AudioStream,
     EncoderCandidate,
@@ -131,7 +133,7 @@ def test_tonemap_sdr_input_fails(tmp_path: Path) -> None:
 
 
 def test_tonemap_sdr_with_hdr_input_passes(
-    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """HDR source + video.tonemap_sdr is the supported path; must not fail."""
     import pytest  # noqa: F401  (annotation reference)
@@ -152,7 +154,7 @@ def test_tonemap_sdr_with_hdr_input_passes(
 
 
 def test_tonemap_sdr_zscale_missing_fails(
-    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """HDR source + tonemap_sdr profile must FAIL if zscale absent.
 

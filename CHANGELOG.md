@@ -16,7 +16,39 @@ Post-v0.5.4 hardening — robustness, concurrency, and lifecycle fixes
 surfaced by two rounds of internal audit. No new user-facing features;
 all changes additive or behaviour-preserving.
 
-### Fixed
+### Added
+
+- **`core/preflight.py::_check_rubberband_perf`** — preflight WARN
+  (`audio.pitch.rubberband.slow`) when a rubberband-enabled profile
+  runs on a source `>60 s` or `>1080p`. The 2026-05-31 matrix §9
+  measured cid_aware/cid_aggressive at 10–15× wall time vs
+  soft/medium on 4K and 5-min content, all hitting the 1800 s
+  ceiling. Severity=warn so the encode still proceeds; suggestion
+  points at `method='asetrate'` for throughput-sensitive batches.
+  +5 unit tests + 1 order-guard test. Backed by a measured wall-time
+  matrix in `docs/profiles.md#rubberband-performance-characteristic`.
+- **`core/audio_windows.py::verify_audio_filters_available`** —
+  defense-in-depth re-probe of `rubberband` filter availability
+  immediately before the audio chain runs. Closes the
+  preflight-vs-runtime window that burned 18 min of video work on
+  the 2026-05-31 matrix incident (preflight cache reported the
+  filter present, runtime ffmpeg threw "No such filter" mid-encode).
+  Wired into `core/segmenter.py::process_main_audio` before
+  `run_ffmpeg`; raises `PipelineError` with a clear remediation if
+  the filter cannot be opened. +3 unit tests.
+- **`tools/gui_sweep.py`** — developer-only harness that drives
+  `MainWindow` through all 10 screens on the real Qt platform
+  (refuses `QT_QPA_PLATFORM=offscreen`), captures PNG per screen +
+  Qt message log + a `report.md`. Companion to the offscreen
+  visual regression suite (`tests/visual/test_gui_screenshots.py`)
+  for compositor / font / HiDPI issues the offscreen baseline
+  can't surface. Optional `--smoke-worker` flag fires a tiny
+  `RunWorker` against `clip_a × soft.yaml` to exercise the
+  worker bus end-to-end.
+- **`docs/gui_sweep.md`** — manual per-screen sweep checklist
+  (setup + 10 screens × interactions/verify/watch-for + triage
+  table). Closes the GUI-deep-sweep backlog item from the
+  2026-05-31 matrix triage.
 
 - **`core/transforms/hdr_wrap.py`** — pre-zscale even-dim guard for the
   `keep_hdr=true` color-wrap path. zscale on `yuv420p10le` rejects odd

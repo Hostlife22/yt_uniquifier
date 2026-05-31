@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from yt_uniquifier.core.audio_windows import verify_audio_filters_available
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan, Segment
 from yt_uniquifier.core.pipeline import (
@@ -387,6 +388,11 @@ def process_main_audio(
         )
     if not cmd.args:
         return None, measurement
+    # Defense-in-depth: re-probe rubberband availability right before
+    # the audio chain runs. Closes the window between preflight and
+    # runtime that burned 18 min of video work on the 2026-05-31 matrix
+    # incident (see audio_windows.verify_audio_filters_available docstring).
+    verify_audio_filters_available(plan)
     run_ffmpeg(
         cmd, output=out, on_event=on_event, cancel_token=cancel_token,
         log_path=out.with_suffix(".m4a.log"),
