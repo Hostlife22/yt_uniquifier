@@ -18,6 +18,13 @@ all changes additive or behaviour-preserving.
 
 ### Fixed
 
+- **`core/preflight.py`** — `video.tonemap_sdr` profile against HDR
+  source used to crash mid-encode (~10-30s in) with "No such filter:
+  zscale" on ffmpeg builds without zimg. New `tonemap.zscale.missing`
+  preflight FAIL catches this at second zero. Found by post-fix
+  matrix re-run on 2026-05-31 (cid_aware_hdr_to_sdr × HDR-input cell);
+  symmetric to the rubberband gap fixed earlier in the same pass.
+  +1 regression test.
 - **`core/preflight.py`** — SDR source against an HDR-to-SDR profile
   (e.g. `cid_aware_hdr_to_sdr` applied to plain BT.709 content) used to
   crash mid-encode with a cryptic `Could not open encoder before EOF`

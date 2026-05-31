@@ -275,6 +275,30 @@ def _check_hdr(
         tc.enabled and tc.id == "video.tonemap_sdr" for tc in plan.profile.transforms
     )
     if tonemap_present:
+        # video.tonemap_sdr generates a `zscale=transfer=linear → tonemap
+        # → zscale=transfer=bt709` chain (see core/transforms/video_tonemap.py).
+        # If ffmpeg lacks zscale, the run crashes mid-encode with
+        # "No such filter: zscale" at the first segment — fail-fast at
+        # preflight instead. Real-video matrix re-run on 2026-05-31
+        # caught this on the synth_hdr10 × cid_aware_hdr_to_sdr cell;
+        # the OK-only path slipped past a zimg-missing ffmpeg build.
+        if not _ffmpeg_filter_works(
+            "zscale=t=bt709:m=bt709:p=bt709", "video"
+        ):
+            findings.append(PreflightFinding(
+                code="tonemap.zscale.missing", severity="fail",
+                message=(
+                    "Profile applies video.tonemap_sdr, which depends on "
+                    "the `zscale` filter (zimg). ffmpeg on this system "
+                    "lacks zscale, so tonemap would fail mid-encode."
+                ),
+                suggestion=(
+                    "Install ffmpeg built with --enable-libzimg "
+                    "(Homebrew default does), or pick a profile without "
+                    "video.tonemap_sdr."
+                ),
+            ))
+            return findings
         findings.append(PreflightFinding(
             code="hdr.tonemap.ok", severity="ok",
             message=(

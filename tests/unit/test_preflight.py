@@ -130,8 +130,17 @@ def test_tonemap_sdr_input_fails(tmp_path: Path) -> None:
     assert "tonemap.sdr_input" in _codes(f)
 
 
-def test_tonemap_sdr_with_hdr_input_passes(tmp_path: Path) -> None:
+def test_tonemap_sdr_with_hdr_input_passes(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
     """HDR source + video.tonemap_sdr is the supported path; must not fail."""
+    import pytest  # noqa: F401  (annotation reference)
+
+    from yt_uniquifier.core import preflight as preflight_mod
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda _spec, _kind: True,
+    )
     src = _source(tmp_path, hdr=True)
     plan = _plan(src, [
         TransformConfig(id="video.tonemap_sdr"),
@@ -140,6 +149,33 @@ def test_tonemap_sdr_with_hdr_input_passes(tmp_path: Path) -> None:
     f = preflight(src, plan, plan.encoder)
     assert "tonemap.sdr_input" not in _codes(f)
     assert "hdr.tonemap.ok" in _codes(f)
+
+
+def test_tonemap_sdr_zscale_missing_fails(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """HDR source + tonemap_sdr profile must FAIL if zscale absent.
+
+    Regression: 2026-05-31 matrix re-run found that
+    cid_aware_hdr_to_sdr × HDR-input crashed mid-encode with
+    "No such filter: zscale" on a ffmpeg build without zimg —
+    preflight was only emitting the OK status, never probing zscale.
+    """
+    import pytest  # noqa: F401
+
+    from yt_uniquifier.core import preflight as preflight_mod
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda _spec, _kind: False,
+    )
+    src = _source(tmp_path, hdr=True)
+    plan = _plan(src, [
+        TransformConfig(id="video.tonemap_sdr"),
+        TransformConfig(id="audio.loudnorm"),
+    ])
+    f = preflight(src, plan, plan.encoder)
+    assert has_fail(f)
+    assert "tonemap.zscale.missing" in _codes(f)
 
 
 def test_hdr_with_color_transforms_fails(tmp_path: Path) -> None:

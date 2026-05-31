@@ -247,6 +247,58 @@ Logged so that a future probe-tuning ticket can revisit the
 VideoToolbox-friendly input (e.g. `nv12` or hardware-encoded source)
 might recover h264_videotoolbox detection.
 
+### #7 — `video.tonemap_sdr` × zscale-missing crashes mid-encode  *(severity: HIGH, fixed)*
+
+**Cells**: 1 — `synth_hdr10.mp4 × cid_aware_hdr_to_sdr` (and the
+companion HLG cell, intermittently). Profile + input combo that
+is the SUPPORTED HDR→SDR path, but ffmpeg on this Mac lacks the
+`zscale` (zimg) filter.
+
+**Symptom** (pre-fix):
+```
+Encoder: libx264 (x264)
+error: ffmpeg exited with 8; last log:
+[AVFilterGraph @ ...] No such filter: 'zscale'
+Error : Filter not found (full log: .../seg_0000.mkv.log)
+```
+
+**Root cause**: `core/transforms/video_tonemap.py` emits a chain
+`zscale=transfer=linear → tonemap → zscale=transfer=bt709`. The
+preflight `_check_hdr` tonemap branch was emitting only the
+`hdr.tonemap.ok` status finding and early-returning — it never
+verified zscale availability. Companion gap to Bug #2 (rubberband):
+both transforms have an ffmpeg-filter dependency that wasn't gated
+at preflight.
+
+**Found by**: matrix re-run on 2026-05-31 (post-Bug #1/#2 fixes)
+combined with direct repro showing ffmpeg exit 8 at segment 0.
+
+**Fix**: `core/preflight.py::_check_hdr` tonemap branch now calls
+`_ffmpeg_filter_works("zscale=t=bt709:m=bt709:p=bt709", "video")`
+before the OK finding; emits `tonemap.zscale.missing` severity=`fail`
+if absent. +1 regression test
+(`test_tonemap_sdr_zscale_missing_fails`).
+
+**Verified post-fix**:
+```
+$ .venv/bin/yt-uniq run synth_hdr10.mp4 \
+    --profile cid_aware_hdr_to_sdr.yaml ...
+Encoder: libx264 (x264)
+error: preflight failed:
+  [FAIL] tonemap.zscale.missing: Profile applies video.tonemap_sdr,
+  which depends on the `zscale` filter (zimg). ffmpeg on this system
+  lacks zscale, so tonemap would fail mid-encode.
+```
+
+### #8 — Full matrix re-run (post-fix verification)  *(severity: PASS)*
+
+Matrix re-run after Bug #1 + #2 + #7 fixes (excluding the just-now
+zscale gap): wall time dropped **115 min → 16 min (-86%)**. 31 cells
+flipped from slow-failure (or false-pass for the zscale subset) to
+sub-second preflight FAIL. The 76 originally-passing cells stayed
+passing with no metric drift (`ssim_mean`, `cid_predict_self`,
+`phash_similarity` within ±0.01 of the original). No new regressions.
+
 ### #6 — `workers=4` parallel-segment path  *(severity: PASS)*
 
 Verified end-to-end with `clip_long.mp4` (90 s) at `--segment-sec 15`

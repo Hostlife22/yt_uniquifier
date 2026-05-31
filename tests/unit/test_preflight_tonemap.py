@@ -54,8 +54,17 @@ def _codes(findings: list) -> set[str]:
 
 @pytest.fixture(autouse=True)
 def _ffmpeg_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tonemap path doesn't query zscale availability — but other HDR checks do."""
+    """Mock both legacy and dry-run filter probes to True.
+
+    Tonemap branch now dry-runs zscale (post-2026-05-31 zscale gap
+    fix); these tests cover non-zscale concerns so we pretend
+    everything is available.
+    """
     monkeypatch.setattr(preflight_mod, "_ffmpeg_has_filter", lambda _n: True)
+    monkeypatch.setattr(
+        preflight_mod, "_ffmpeg_filter_works",
+        lambda _spec, _kind: True,
+    )
 
 
 def test_tonemap_present_no_color_fail(tmp_path: Path) -> None:
