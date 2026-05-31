@@ -18,6 +18,22 @@ all changes additive or behaviour-preserving.
 
 ### Fixed
 
+- **`core/transforms/hdr_wrap.py`** — pre-zscale even-dim guard for the
+  `keep_hdr=true` color-wrap path. zscale on `yuv420p10le` rejects odd
+  dimensions with `code 1027: image dimensions must be divisible by
+  subsampling factor`; geometric transforms upstream (`video.crop_resize`,
+  `video.rotate`) can produce odd dims that the chain's final
+  even-dim guard catches for the encoder but reaches zscale uncorrected.
+  `wrap_linear` now prepends `scale=trunc(iw/2)*2:trunc(ih/2)*2` so
+  zscale always sees even dims. Found 2026-05-31 once a real
+  zimg-enabled ffmpeg (evermeet.cx static build) made the HDR
+  keep-path actually exercisable. +1 unit test.
+- **`core/preflight.py`** — zscale dry-run probe spec now specifies
+  input colorspace flags (`tin=bt709:min=bt709:pin=bt709`) so the
+  probe distinguishes "zscale absent" from "zscale present but
+  rejecting testsrc2's untagged colorspace". Verified against both a
+  no-zimg ffmpeg (correctly reports missing) and a zimg-enabled
+  ffmpeg (correctly reports present).
 - **`core/preflight.py`** — `video.tonemap_sdr` profile against HDR
   source used to crash mid-encode (~10-30s in) with "No such filter:
   zscale" on ffmpeg builds without zimg. New `tonemap.zscale.missing`

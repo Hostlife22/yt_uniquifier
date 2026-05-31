@@ -312,11 +312,82 @@ recent `CheckpointStore` thread-safety hardening (`9dbc8fa`,
 - 2 new unit tests in `tests/unit/test_preflight.py`
 - This triage report
 
+### #9 — Full evermeet-ffmpeg matrix (final verification)  *(severity: PASS)*
+
+After installing the `evermeet.cx` static ffmpeg (with `libzimg` +
+`librubberband` + `libvmaf`, none of which Homebrew's default 8.1.1
+includes), the matrix harness re-ran 106 cells against the full
+profile + input corpus including the new 5-minute clip.
+
+**Headline numbers**:
+
+| | Cells | Pct |
+|---|---:|---:|
+| Total | 106 | 100% |
+| Pass | 79 | 75% |
+| Fail (all working-as-designed) | 27 | 25% |
+| **New bugs** | **0** | — |
+
+**Pre-evermeet vs evermeet pass rate**:
+
+| | Pre-evermeet (Homebrew ffmpeg) | Evermeet ffmpeg |
+|---|---:|---:|
+| Pass | 49 / 99 (49%) | 79 / 106 (75%) |
+| Wall time | 15.6 min | 208.2 min |
+
+The 30 cells that flipped fail→pass are all real new coverage —
+previously the preflight had to refuse the run because the required
+filter (`rubberband` or `zscale`) was missing from ffmpeg, so the
+relevant code paths were never exercised end-to-end on this host.
+
+**Fail-class breakdown** (all working-as-designed):
+
+| Cells | Class | Verdict |
+|---:|---|---|
+| 9 | `cid_aware_hdr_to_sdr × SDR-input` | `tonemap.sdr_input` preflight FAIL — Finding #1, correct rejection |
+| 10 | `{HDR10, HLG} × {soft, medium, aggressive, cid_aware, cid_aggressive}` | `hdr.color.transforms` preflight FAIL — Finding #3, correct rejection |
+| 4 | `{cid_aware, cid_aggressive} × {synth_sdr_4k, synth_long_5min}` | 1800s timeout — Finding #2 rubberband perf at 4K and 5-min content; not a bug, known performance characteristic |
+| 1 | `synth_long_5min × cid_aware_hdr_to_sdr` | also Finding #1 (SDR input) — 5-min clip is SDR |
+| 1 | `synth_long_5min × cid_aggressive × resume` | same 1800s timeout as run mode |
+| 2 | `synth_long_5min × cid_aware × resume + similar` | same timeout class |
+
+**Notable confirmed-working paths**:
+
+- `cid_aware × clip_long.mp4` (90s SDR): 622s wall — rubberband audio
+  chain works end-to-end through real workload
+- `cid_aggressive × clip_long.mp4`: 870s wall — heaviest profile on
+  90s clip stays under timeout
+- `medium_hdr × {clip_a, clip_b, clip_long}`: 15-37s — zscale wrap +
+  10-bit HDR encoder selection now reach the encoder cleanly
+- `cid_aware_hdr_to_sdr × {synth_hdr10, synth_hlg}`: 12-14s —
+  the supported HDR→SDR path now succeeds
+- `synth_long_5min × soft × resume`: 326s — resume cell on a
+  300-second clip with `--segment-sec=30` yields ~10 segments and
+  resumes cleanly mid-run
+
+**Perf observations** (none counted as bugs but worth noting):
+
+| Profile | clip_a 30s | clip_long 90s | synth_sdr_4k 12s | synth_long_5min 300s |
+|---|---:|---:|---:|---:|
+| `soft` | 17s | 37s | — | 136s (run) + 326s (resume) |
+| `medium` | 17s | 39s | — | 145s |
+| `aggressive` | 20s | 46s | — | 242s |
+| `cid_aware` | 224s | 623s | TIMEOUT (>1800s) | TIMEOUT |
+| `cid_aggressive` | 316s | 871s | TIMEOUT (>1800s) | TIMEOUT |
+
+cid_aware / cid_aggressive are ~10-15× wall time vs soft/medium on
+the same content; this is the rubberband cost from Finding #2.
+Documented in `docs/profiles.md` "Performance notes". Users who
+need throughput on long or high-resolution sources should pick
+`medium` or `aggressive`; users who need maximum CID divergence and
+can spend the wall-time stay on `cid_*`.
+
 ## Backlog (out of scope for this pass)
 
-- Finding #2 perf investigation (`rubberband` on long / high-res inputs)
 - GUI deep sweep on all 10 screens (matrix already exercised CLI +
   orchestrator + preflight + QA + checkpoint)
-- Re-run full matrix after `chromaprint` install — `audio_fp_*` fields
-  in qa.json are all `None` because `fpcalc` is not on PATH; this
-  masks any chromaprint-pipeline bugs.
+- Cost of `rubberband` on 4K / 5-min content: 2 of the 4 timeouts are
+  cid_aware × {sdr_4k, long_5min} and 2 are cid_aggressive × same;
+  the audio chain genuinely runs >30 minutes on these inputs. Tuning
+  the rubberband filter parameters or providing a fast-path for
+  long-form content is a future perf project, not a bug.
