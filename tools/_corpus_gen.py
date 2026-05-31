@@ -167,6 +167,26 @@ def gen_audio_quiet(out: Path, duration: int = 10) -> Path:
     return out
 
 
+def gen_long_5min(out: Path, duration: int = 300) -> Path:
+    """5-minute clip — stress segmentation + concat at realistic length.
+
+    Multiple segments at default --segment-sec=600 still produces 1 segment
+    so we set the matrix harness to drop --segment-sec=30 for this clip,
+    yielding 10 segments. Exercises checkpoint resume + concat-demuxer on
+    a non-trivial segment count without ballooning ffmpeg wall time
+    (testsrc2 at 720p25 = ~5 min wall on libx264 ultrafast).
+    """
+    if out.exists():
+        return out
+    _run([
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25,format=yuv420p",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+        "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k", str(out),
+    ])
+    return out
+
+
 CORPUS: dict[str, tuple[callable, str]] = {
     "synth_sdr_4k.mp4":     (gen_sdr_4k,      "sdr_4k"),
     "synth_hdr10.mp4":      (gen_hdr10,       "hdr10"),
@@ -179,6 +199,7 @@ CORPUS: dict[str, tuple[callable, str]] = {
     "synth_audio_mono.mp4": (gen_audio_mono,  "mono"),
     "synth_audio_hot.mp4":  (gen_audio_hot,   "hot"),
     "synth_audio_quiet.mp4":(gen_audio_quiet, "quiet"),
+    "synth_long_5min.mp4":  (gen_long_5min,   "long_5min"),
 }
 
 

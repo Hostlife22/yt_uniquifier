@@ -167,7 +167,22 @@ def _nvenc_max_parallel() -> int:
 
 
 def _probe_one(name: str, vendor: EncoderVendor, codec: EncoderKind) -> EncoderCandidate:
-    """Run a 0.1s null encode through this encoder; record success/failure."""
+    """Run a 0.5s test-pattern encode through this encoder; record success/failure.
+
+    Previously used ``nullsrc=s=256x256`` which produced a single black
+    frame at sub-VideoToolbox-minimum dimensions, causing h264_videotoolbox
+    to report ``Nothing was written into output file, because at least
+    one of its streams received no packets`` on macOS — making the
+    user-visible probe falsely flag h264_videotoolbox as broken. The
+    2026-05-31 real-video sweep caught this on a Mac with working
+    VideoToolbox: probe said `works=false`, but a manual encode via
+    `--encoder h264_videotoolbox` succeeded.
+
+    ``testsrc2=s=640x360:r=15:d=0.5`` produces 7-8 frames of a real
+    test pattern at a resolution every hardware encoder accepts.
+    ``-pix_fmt yuv420p`` is explicit so encoders that demand a specific
+    chroma layout (VideoToolbox) don't reject the input.
+    """
     cmd = [
         ffmpeg_bin(),
         "-hide_banner",
@@ -176,11 +191,11 @@ def _probe_one(name: str, vendor: EncoderVendor, codec: EncoderKind) -> EncoderC
         "-f",
         "lavfi",
         "-i",
-        "nullsrc=s=256x256:r=10:d=0.1",
+        "testsrc2=s=640x360:r=15:d=0.5",
+        "-pix_fmt",
+        "yuv420p",
         "-c:v",
         name,
-        "-frames:v",
-        "1",
         "-f",
         "null",
         "-",

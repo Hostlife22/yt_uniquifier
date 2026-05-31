@@ -52,7 +52,7 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/seed_resolver.py` | `resolve_run_seed(profile, source)` + `derive_segment_seed(plan_hash, idx, run_seed)` for the `divergent` strategy |
 | `core/audio_windows.py` | `~60 s` audio windowing for `divergent` strategy — per-window seed via `derive_segment_seed(plan_hash, window_idx + 1_000_000, run_seed)` with `0.1 s` crossfade; loudnorm stays global |
 | `core/metadata.py` | `-metadata` args + title templates |
-| `core/preflight.py` | YouTube target matrix + HDR validation |
+| `core/preflight.py` | YouTube target matrix + HDR validation + dry-run filter probes (`_ffmpeg_filter_works`) for `rubberband`, `zscale`, and tonemap dependencies |
 | `core/sanitizer.py` | Opt-in second-pass libx264 re-encode (`yt-uniq run --sanitize-bitstream`) to normalize file-level encoder signature; no-op on libx264 source, refuses HEVC/HDR-keep |
 | `core/orchestrator.py` | `run_full(plan, options, on_event, cancel_token) -> RunSummary` |
 | `core/profile_loader.py` | YAML → `Profile` with pydantic validation (`extra=forbid`) |

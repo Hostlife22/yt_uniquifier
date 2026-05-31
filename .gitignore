@@ -19,6 +19,7 @@ htmlcov/
 
 # yt-uniquifier work artifacts
 .yt_uniq_work/
+.yt_uniq_calib/
 *.qa.json
 *.qa.html
 

@@ -85,6 +85,25 @@ and when to pick which.
 - `video.blend_b` requires a B-video path. Pass it via `--b-video <path>` on
   the CLI; the value is injected into the transform's params at runtime.
 
+## Performance notes
+
+- **`audio.pitch_tempo` with `method: rubberband`** (used by `cid_aware`
+  and `cid_aggressive`) is ~5–10× slower than the default
+  `asetrate+atempo` path. Rubberband preserves formants — important for
+  voice content — but on long clips the audio chain can run 10–20×
+  realtime instead of <1× realtime. The 2026-05-31 sweep measured a
+  90 s clip × `cid_aware` × `libx264` at ~18 minutes wall on an
+  8-core Mac. For batch throughput on non-voice content, prefer
+  `medium` / `aggressive` (which omit the `method: rubberband` flag and
+  fall back to the atempo path).
+- **Preflight requires `rubberband` and `zscale` filters** when the
+  profile uses them. The dry-run probe at run start fails fast (<1 s)
+  if ffmpeg lacks `librubberband` (used by rubberband pitch path) or
+  `libzimg` (used by `video.tonemap_sdr` and `keep_hdr: true`).
+  Homebrew's default ffmpeg ships neither — install with
+  `brew install ffmpeg --HEAD` or build from source with
+  `--enable-librubberband --enable-libzimg`.
+
 ## Why these defaults? — Smitelli citation
 
 The `cid_aware` and `cid_aggressive` profiles target YouTube Content ID

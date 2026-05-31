@@ -41,9 +41,22 @@ couldn't compute.
 
 | Field | Source | Range | Meaning |
 |---|---|---|---|
-| `audio_fp_similarity` | chromaprint Jaccard over uint32 sub-fingerprints | 0..1 | quick "do the fingerprint sets overlap?" check |
+| `audio_fp_similarity` | chromaprint Jaccard over uint32 sub-fingerprints | 0..1 | **strict set-equality** check; see warning below |
 | **`audio_fp_hamming_per_frame`** | chromaprint XOR + popcount, paired frames, mean | 0..32 bits | bit-level distance; **the canonical CID-divergence audio KPI** |
 | **`audio_fp_match_confidence`** | `1 - hamming_per_frame / 32` | 0..1 | normalized; lower = better for divergence |
+
+> **About `audio_fp_similarity`.** This is Jaccard
+> (`|A ∩ B| / |A ∪ B|`) over the 32-bit chromaprint sub-fingerprint
+> *sets*. Chromaprint deliberately flips bits across the entire 32-bit
+> code on small acoustic changes (≈1 dB loudnorm shift alone) so two
+> 32-bit codes are exact-equal only when the audio is byte-identical.
+> In practice **this field reads 0.0 for every yt-uniq output**, even
+> on the softest profile — the audio is perfectly recognisable, the
+> codes simply don't survive bit-exact match. Don't read it as "audio
+> destroyed". The metric that reflects perceived similarity is
+> `audio_fp_match_confidence` (Hamming-based, normalised). The
+> `_similarity` field is retained for schema compatibility with
+> downstream tools that already key on it.
 
 The two Hamming fields are the **explicit CID-divergence audio KPI**
 introduced in v0.3.3 (Spec 16). Heuristic interpretation per chromaprint
