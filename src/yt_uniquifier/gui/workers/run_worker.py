@@ -35,6 +35,10 @@ class RunWorker(WorkerBase):
     finished_ok = pyqtSignal(str, str)             # output_path, qa_html_path
     segment_progress = pyqtSignal(int, str)        # segment_idx, status
     cancelled = pyqtSignal()                       # user-initiated cancel
+    # Dedicated audio-finalize progress so the main bar can stay at 100%
+    # while loudnorm 2-pass runs visibly on its own sub-bar. fraction is
+    # audio_out_us / audio_duration_us; label carries phase context.
+    audio_progress = pyqtSignal(float, str)        # fraction, label
     # Marshal history writes back onto the GUI thread. `AppState` is a
     # QObject owned by the GUI thread; mutating its `_history` list and
     # emitting `history_changed` from the worker `run()` body would race
@@ -59,6 +63,15 @@ class RunWorker(WorkerBase):
         self.state = state
         self._total_us = max(int(plan.source.duration_sec * 1_000_000), 1)
         self._seg_us: dict[int, int] = {}
+        # Audio finalize progress tracked separately from video segments
+        # so the main bar can show "video complete" while the audio bar
+        # advances through loudnorm. `_audio_us` is the latest seen
+        # out_time_us from phase=main_audio events; if it goes backwards
+        # (ffmpeg may run analysis pass then encode pass as separate
+        # subprocess invocations) we bump `_audio_pass` to count progress
+        # cumulatively across passes.
+        self._audio_us: int = 0
+        self._audio_pass: int = 1
         # ThreadPoolExecutor inside orchestrator.process_video_segments_parallel
         # invokes on_event concurrently from worker threads when workers > 1.
         # Without this lock the dict mutation + sum() composite is a data race
@@ -159,7 +172,34 @@ class RunWorker(WorkerBase):
             return
 
         seg = ev.payload.get("segment")
+        phase = str(ev.payload.get("phase") or "")
         out_us = self._extract_out_time_us(ev)
+
+        # ---- audio finalize phase: drive the secondary bar ----------
+        # When the orchestrator stamps phase=main_audio, the event came
+        # from process_main_audio's ffmpeg run (loudnorm + encode). We
+        # bypass _seg_us so the main bar stays at its segments-derived
+        # value and dedicate audio_progress to this stream.
+        if phase == "main_audio":
+            # Detect pass boundary: ffmpeg may invoke a measurement pass
+            # then an encode pass as two separate subprocess runs, in
+            # which case out_time_us resets to 0. Cumulate across passes
+            # so the audio bar advances monotonically.
+            if out_us < self._audio_us:
+                self._audio_pass += 1
+            self._audio_us = out_us
+            cumulative_us = (self._audio_pass - 1) * self._total_us + out_us
+            # Two-pass loudnorm total work ≈ 2 × duration; clamp at 1.0
+            audio_fraction = min(cumulative_us / (2 * self._total_us), 1.0)
+            pass_label = f"loudnorm pass {self._audio_pass}/2"
+            self.audio_progress.emit(audio_fraction, pass_label)
+            # Also keep the main status meaningful instead of stale.
+            self.progress.emit(
+                min(sum(self._seg_us.values()) / self._total_us, 1.0),
+                f"100% — encoding audio ({pass_label})",
+            )
+            return
+
         with self._seg_us_lock:
             if isinstance(seg, int):
                 self._seg_us[seg] = out_us
@@ -168,12 +208,13 @@ class RunWorker(WorkerBase):
             self.segment_progress.emit(seg, "in_progress")
         fraction = min(total / self._total_us, 1.0)
         # `seg` is an int while a video segment is encoding; None for
-        # the post-segment audio chain + concat mux. Show a phase label
-        # in that tail window so the user knows the encode hasn't
-        # stalled (previously displayed "segment ?" indistinguishable
-        # from a hang).
+        # post-segment events that aren't main_audio (concat, sanitize).
         if isinstance(seg, int):
             label = f"segment {seg}"
+        elif phase in {"concat", "mux"}:
+            label = "concat + mux"
+        elif phase == "sanitize":
+            label = "sanitizing bitstream"
         elif fraction >= 0.99:
             label = "finalizing (audio + mux)"
         else:

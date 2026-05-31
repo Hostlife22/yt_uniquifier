@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -117,6 +118,14 @@ class CalibrateScreen(ScreenBase):
         controls.addStretch(1)
         layout.addLayout(controls)
 
+        # Iteration progress bar — max is set on _on_run from iter_spin.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("calib_progress")
+        self.progress_bar.setRange(0, self.iter_spin.value())
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Iteration: %v / %m")
+        layout.addWidget(self.progress_bar)
+
         # Chart
         self.chart = ChartWidget()
         self.chart.set_series([
@@ -170,6 +179,9 @@ class CalibrateScreen(ScreenBase):
         self.cancel_btn.setEnabled(True)
         self.save_btn.setEnabled(False)
         self.tuned_profile = None
+        # Reset iteration bar; max may have changed since UI build.
+        self.progress_bar.setRange(0, target.max_iterations)
+        self.progress_bar.setValue(0)
         self.log.log(f"calibrating {self.input_path.name} → target {target.max_self_match}", "info")
         self.worker.start()
 
@@ -182,6 +194,9 @@ class CalibrateScreen(ScreenBase):
         f_raw = step["intensity_factor"]
         s_raw = step["self_match"]
         i = int(i_raw) if isinstance(i_raw, (int, float)) else 0
+        # Each completed iteration advances the bar. Iteration indices
+        # are 1-based per the calibration loop, so clamp at max.
+        self.progress_bar.setValue(min(i, self.progress_bar.maximum()))
         factor = float(f_raw) if isinstance(f_raw, (int, float)) else 0.0
         self_match = float(s_raw) if isinstance(s_raw, (int, float)) else 0.0
         self.chart.add_point("intensity_factor", float(i), factor)

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -149,6 +150,14 @@ class ValidationScreen(ScreenBase):
         self.gen_btn.clicked.connect(self._on_generate)
         layout.addWidget(self.gen_btn)
 
+        # Variants-generated bar. Max is set on _on_generate from gen_n.
+        self.gen_progress_bar = QProgressBar()
+        self.gen_progress_bar.setObjectName("gen_progress")
+        self.gen_progress_bar.setRange(0, self.gen_n.value())
+        self.gen_progress_bar.setValue(0)
+        self.gen_progress_bar.setFormat("Variants: %v / %m")
+        layout.addWidget(self.gen_progress_bar)
+
         self.gen_log = LogConsole()
         layout.addWidget(self.gen_log, stretch=1)
         return w
@@ -251,6 +260,9 @@ class ValidationScreen(ScreenBase):
         self.gen_worker.finished_ok.connect(self._on_gen_finished)
         self.gen_worker.failed.connect(self._on_gen_failed)
         self.gen_btn.setEnabled(False)
+        # Reset bar; gen_n may have changed since UI build.
+        self.gen_progress_bar.setRange(0, self.gen_n.value())
+        self.gen_progress_bar.setValue(0)
         self.gen_log.log(f"generating {self.gen_n.value()} variants…", "info")
         self.gen_worker.start()
 
@@ -287,6 +299,8 @@ class ValidationScreen(ScreenBase):
         self.corr_worker = None
 
     def _on_variant_done(self, rec: dict[str, object]) -> None:
+        # Each completed variant advances the bar.
+        self.gen_progress_bar.setValue(self.gen_progress_bar.value() + 1)
         r = self.record_table.rowCount()
         self.record_table.insertRow(r)
         self.record_table.setItem(r, 0, QTableWidgetItem(str(rec.get("variant_id", ""))))

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -98,6 +99,14 @@ class BatchScreen(ScreenBase):
             QAbstractItemView.SelectionBehavior.SelectRows,
         )
         layout.addWidget(self.table, stretch=1)
+
+        # Overall progress bar (X of N files complete; updated on file_done)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("batch_progress")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Files: %v / %m (%p%)")
+        layout.addWidget(self.progress_bar)
 
         # Controls
         controls = QHBoxLayout()
@@ -192,6 +201,9 @@ class BatchScreen(ScreenBase):
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.status_label.setText("starting…")
+        # Reset overall progress: max = number of files matched in the table.
+        self.progress_bar.setRange(0, max(self.table.rowCount(), 1))
+        self.progress_bar.setValue(0)
         self.worker.start()
 
     def _on_cancel(self) -> None:
@@ -237,3 +249,6 @@ class BatchScreen(ScreenBase):
             self.table.setItem(row, 2, QTableWidgetItem(out))
         if note:
             self.table.setItem(row, 3, QTableWidgetItem(note))
+        # Each transition to a terminal status advances the overall bar.
+        if status in {"done", "failed"}:
+            self.progress_bar.setValue(self.progress_bar.value() + 1)

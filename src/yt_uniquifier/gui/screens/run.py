@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
@@ -159,6 +160,23 @@ class RunScreen(ScreenBase):
         # Timeline
         self.timeline = SegmentTimeline()
         layout.addWidget(self.timeline)
+
+        # Main overall progress (video segments)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("main_progress")
+        self.progress_bar.setRange(0, 1000)  # 0.1% resolution
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Video: %p%")
+        layout.addWidget(self.progress_bar)
+
+        # Audio finalize sub-bar (hidden until phase=main_audio fires)
+        self.audio_progress_bar = QProgressBar()
+        self.audio_progress_bar.setObjectName("audio_progress")
+        self.audio_progress_bar.setRange(0, 1000)
+        self.audio_progress_bar.setValue(0)
+        self.audio_progress_bar.setFormat("Audio: %p%")
+        self.audio_progress_bar.setVisible(False)
+        layout.addWidget(self.audio_progress_bar)
 
         # KPI pills (populated only after run finishes)
         self.kpi_pills = KpiPills()
@@ -331,6 +349,7 @@ class RunScreen(ScreenBase):
             plan, options, run_qa=True, fast_qa=False, state=self.state,
         )
         self.run_worker.progress.connect(self._on_progress)
+        self.run_worker.audio_progress.connect(self._on_audio_progress)
         self.run_worker.log.connect(lambda m: self.log.log(m, "log"))
         self.run_worker.segment_progress.connect(
             lambda idx, status: self.timeline.update_segment(idx, status),
@@ -346,6 +365,9 @@ class RunScreen(ScreenBase):
         self.qa_html_path = None
         self.open_qa_btn.setEnabled(False)
         self.kpi_pills.clear()
+        self.progress_bar.setValue(0)
+        self.audio_progress_bar.setValue(0)
+        self.audio_progress_bar.setVisible(False)
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.status_label.setText(
@@ -356,10 +378,23 @@ class RunScreen(ScreenBase):
 
     def _on_progress(self, fraction: float, message: str) -> None:
         self.status_label.setText(message)
+        self.progress_bar.setValue(int(fraction * 1000))
+
+    def _on_audio_progress(self, fraction: float, label: str) -> None:
+        # First audio event reveals the sub-bar; from that point onwards
+        # it tracks loudnorm pass progress while the main bar stays
+        # pinned to the video-segments total.
+        if not self.audio_progress_bar.isVisible():
+            self.audio_progress_bar.setVisible(True)
+        self.audio_progress_bar.setValue(int(fraction * 1000))
+        self.audio_progress_bar.setFormat(f"Audio ({label}): %p%")
 
     def _on_done(self, output: str, qa_html: str) -> None:
         self.status_label.setText(f"Done: {output}")
         self.timeline.reset()
+        self.progress_bar.setValue(1000)
+        if self.audio_progress_bar.isVisible():
+            self.audio_progress_bar.setValue(1000)
         self.run_worker = None
         self.cancel_btn.setEnabled(False)
         if qa_html:

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -131,6 +132,16 @@ class QaViewerScreen(ScreenBase):
         controls.addStretch(1)
         layout.addLayout(controls)
 
+        # Indeterminate spinner during compute — qa_worker exposes only
+        # progress text, not a fraction, so we use range=(0,0) which Qt
+        # renders as a marquee bar. Hidden until compute starts.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("qa_progress")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("Computing QA…")
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
         self.compute_log = LogConsole()
         layout.addWidget(self.compute_log, stretch=1)
         return w
@@ -186,6 +197,7 @@ class QaViewerScreen(ScreenBase):
         self.worker.finished_ok.connect(self._on_finished)
         self.compute_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self.progress_bar.setVisible(True)
         self.compute_log.log("computing QA…", "info")
         self.worker.start()
 
@@ -197,12 +209,14 @@ class QaViewerScreen(ScreenBase):
         self.compute_log.log(f"FAILED: {msg}", "error")
         self._drop_worker()
         self.cancel_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
         self._refresh_compute_btn()
 
     def _on_finished(self, _payload: object) -> None:
         self.compute_log.log("QA done.", "info")
         self._drop_worker()
         self.cancel_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
         self._refresh_compute_btn()
 
     def _drop_worker(self) -> None:

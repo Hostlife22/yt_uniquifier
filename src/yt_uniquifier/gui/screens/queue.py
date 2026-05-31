@@ -6,11 +6,13 @@ from pathlib import Path
 
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -70,6 +72,16 @@ class QueueScreen(ScreenBase):
         self.stats_label.setObjectName("status")
         layout.addWidget(self.stats_label)
 
+        # Queue drain progress bar — driven by the periodic stats poll.
+        # value = done; max = pending + in_progress + done (i.e. the
+        # total ever-seen file count for this queue layout).
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("queue_progress")
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Done: %v / %m")
+        layout.addWidget(self.progress_bar)
+
         # Tabs
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_manage_tab(), "Queue management")
@@ -116,6 +128,12 @@ class QueueScreen(ScreenBase):
         self.workers_spin.setRange(1, 16)
         self.workers_spin.setValue(2)
         cfg.addWidget(self.workers_spin)
+        self.stop_when_empty_check = QCheckBox("Exit when queue empty")
+        self.stop_when_empty_check.setToolTip(
+            "Unchecked = daemon mode (keep polling for new files).\n"
+            "Checked = one-shot drain (worker exits after the queue empties).",
+        )
+        cfg.addWidget(self.stop_when_empty_check)
         layout.addLayout(cfg)
 
         out_row = QHBoxLayout()
@@ -284,6 +302,16 @@ class QueueScreen(ScreenBase):
             f"done: {s.get('done', '?')}   "
             f"failed: {s.get('failed', '?')}",
         )
+        # Sync drain progress bar. Total = pending + in_progress + done
+        # + failed (every file the queue has ever seen). Falling back to
+        # max(1) keeps QProgressBar happy when the queue is empty.
+        pending = int(s.get("pending", 0) or 0)
+        in_progress = int(s.get("in_progress", 0) or 0)
+        done = int(s.get("done", 0) or 0)
+        failed = int(s.get("failed", 0) or 0)
+        total = max(pending + in_progress + done + failed, 1)
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(done + failed)
 
     def _start_worker(self) -> None:
         if self.queue_root is None or self.out_dir is None:
@@ -297,6 +325,7 @@ class QueueScreen(ScreenBase):
             self.queue_root, profile, self.out_dir,
             encoder_override=self.encoder_selector.currentData(),
             workers=self.workers_spin.value(),
+            stop_after_empty=self.stop_when_empty_check.isChecked(),
         )
         self.drain_worker.lease_acquired.connect(
             lambda p: self.worker_log.log(f"leased: {p}", "info"),

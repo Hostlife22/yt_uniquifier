@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -85,6 +86,17 @@ class CorpusScreen(ScreenBase):
         self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
 
+        # Indeterminate bar shown during add / refresh — corpus workers
+        # don't expose granular progress (fingerprint extract is one
+        # blocking ffmpeg call), so a marquee bar tells the user the
+        # screen isn't frozen.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("corpus_progress")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("Working…")
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
     def _refresh(self) -> None:
         """Trigger a background corpus read.
 
@@ -147,6 +159,7 @@ class CorpusScreen(ScreenBase):
         self.worker.finished_ok.connect(lambda _r: self._on_finished())
         self.add_btn.setEnabled(False)
         self.status_label.setText(f"indexing {Path(path_str).name}…")
+        self.progress_bar.setVisible(True)
         self.worker.start()
 
     def _on_remove(self) -> None:
@@ -169,11 +182,13 @@ class CorpusScreen(ScreenBase):
     def _on_failed(self, msg: str) -> None:
         self.add_btn.setEnabled(True)
         self.status_label.setText(f"FAILED: {msg}")
+        self.progress_bar.setVisible(False)
         QMessageBox.warning(self, "Corpus add failed", msg)
         self._drop_worker()
 
     def _on_finished(self) -> None:
         self.add_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
         self._drop_worker()
 
     def _drop_worker(self) -> None:
