@@ -209,7 +209,7 @@ def run_full(
                 raise PipelineError("cancelled by user")
             store.mark(seg.idx, "in_progress")
 
-        def _on_segment_done(idx: int, src: Path, out: Path) -> None:
+        def _on_segment_done(idx: int, src: Path | None, out: Path) -> None:
             # Verify the worker actually produced a non-empty output file
             # before recording it as done. If ffmpeg exited 0 but the file
             # was clobbered (or never written) we'd otherwise concat with

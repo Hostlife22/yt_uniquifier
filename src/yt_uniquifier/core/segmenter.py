@@ -23,6 +23,7 @@ from yt_uniquifier.core.pipeline import (
     build_main_audio_command,
     build_main_audio_command_windowed,
     build_video_segment_command,
+    build_video_segment_command_fused,
 )
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
@@ -253,6 +254,19 @@ def _plan_for_segment(plan: Plan, segment_idx: int) -> Plan:
     return plan.model_copy(update={"run_seed": seg_seed})
 
 
+# B3 (v0.6.0): environment-variable opt-out for the fused single-fork
+# segment encode path. Set ``YT_UNIQ_DISABLE_FUSE=1`` to fall back to the
+# legacy two-fork extract+re-encode pattern (useful for bisecting an
+# obscure PTS regression or for filesystems where ``-ss`` input seek
+# behaves unexpectedly).
+_DISABLE_FUSE_ENV = "YT_UNIQ_DISABLE_FUSE"
+
+
+def _fuse_enabled() -> bool:
+    val = os.environ.get(_DISABLE_FUSE_ENV, "").strip().lower()
+    return val not in ("1", "true", "yes", "on")
+
+
 def process_video_segment(
     segment: Segment,
     plan: Plan,
@@ -261,13 +275,35 @@ def process_video_segment(
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
     extra_env: dict[str, str] | None = None,
-) -> tuple[Path, Path]:
-    """Extract + apply video transforms. Returns (src_seg_path, out_seg_path)."""
-    src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
+) -> tuple[Path | None, Path]:
+    """Apply video transforms to one segment.
+
+    B3 (v0.6.0): default to the FUSED single-fork path —
+    ``-ss <start> -i source -t <span>`` plus filter_complex in one
+    ffmpeg invocation. The legacy two-fork path
+    (stream_copy_extract → build_video_segment_command on the extract)
+    is still available via ``YT_UNIQ_DISABLE_FUSE=1`` for emergency
+    rollback.
+
+    Returns ``(src_seg_path | None, out_seg_path)``. The fused path
+    has no ``_src.mkv`` intermediate so ``src`` is ``None``;
+    downstream callers (``CheckpointStore.mark``, cleanup) all handle
+    ``None`` already.
+    """
     out = work_dir / f"seg_{segment.idx:04d}.mkv"
-    stream_copy_extract(segment, plan.source.path, src)
     seg_plan = _plan_for_segment(plan, segment.idx)
-    cmd = build_video_segment_command(seg_plan, src, out)
+
+    if _fuse_enabled():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cmd = build_video_segment_command_fused(
+            seg_plan, segment, plan.source.path, out,
+        )
+        src: Path | None = None
+    else:
+        # Legacy two-fork path.
+        src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
+        stream_copy_extract(segment, plan.source.path, src)
+        cmd = build_video_segment_command(seg_plan, src, out)
     # Inject segment idx into every event so downstream consumers (GUI
     # progress bar, history log) can correlate ffmpeg `progress=...`
     # blocks with the segment they belong to. Without this, the GUI
@@ -320,8 +356,8 @@ def process_video_segments_parallel(
     workers: int = 1,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
-    on_segment_done: Callable[[int, Path, Path], None] | None = None,
-) -> list[tuple[int, Path, Path]]:
+    on_segment_done: Callable[[int, Path | None, Path], None] | None = None,
+) -> list[tuple[int, Path | None, Path]]:
     """Run `process_video_segment` over `pending` segments concurrently.
 
     Falls back to sequential when workers <= 1 or the encoder isn't CPU-only.
@@ -343,7 +379,7 @@ def process_video_segments_parallel(
         }))
 
     if effective <= 1:
-        results: list[tuple[int, Path, Path]] = []
+        results: list[tuple[int, Path | None, Path]] = []
         for seg in pending:
             if cancel_token and cancel_token.is_cancelled():
                 raise PipelineError("cancelled by user")
