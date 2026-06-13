@@ -132,8 +132,13 @@ class KpiPills(QWidget):
         self, label: str, value: float | None, band_key: str, fmt: str,
     ) -> QLabel:
         tokens = tokens_for(self._theme)
-        color = tokens[_pill_color_key(band_key, value)]
-        fg = tokens["kpi_fg"]
+        # R7 / WCAG-AA: per-band fg lookup so yellow / green / neutral
+        # pills carry dark text (white at 4.5:1 on those fills fails AA).
+        # Falls back to `kpi_fg` for any future band that hasn't published
+        # an explicit pair.
+        color_key = _pill_color_key(band_key, value)
+        color = tokens[color_key]
+        fg = tokens.get(f"{color_key}_fg", tokens["kpi_fg"])
         text = fmt.format(value) if value is not None else "n/a"
         pill = QLabel(f"<b>{label}</b>  {text}")
         pill.setAlignment(Qt.AlignmentFlag.AlignCenter)

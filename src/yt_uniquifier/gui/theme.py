@@ -24,16 +24,24 @@ DARK_TOKENS = {
     # Semantic tokens for status badges + KPI pills (R1/E4 — was hard-coded
     # in widgets/preflight_panel.py and widgets/kpi_pills.py, leaking across
     # theme switches). bg + fg are paired so a token swap repaints both at once.
+    # R7 / WCAG-AA: per-band fg colours so yellow / green / neutral pills
+    # use dark text (light fills can't carry white at 4.5:1).
     "badge_fail_bg":  "#a83b3b",
     "badge_fail_fg":  "#ffffff",
     "badge_warn_bg":  "#d1a93b",
     "badge_warn_fg":  "#16161e",
     "badge_ok_bg":    "#3ba85c",
-    "badge_ok_fg":    "#ffffff",
+    "badge_ok_fg":    "#16161e",
     "kpi_red":        "#a83b3b",
     "kpi_yellow":     "#d1a93b",
     "kpi_green":      "#3ba85c",
     "kpi_neutral":    "#9b9ba8",
+    "kpi_red_fg":     "#ffffff",
+    "kpi_yellow_fg":  "#16161e",
+    "kpi_green_fg":   "#16161e",
+    "kpi_neutral_fg": "#16161e",
+    # Legacy single token kept for back-compat / fallback; per-band fg
+    # is preferred by widgets/kpi_pills.py (R7 WCAG-AA fix).
     "kpi_fg":         "#ffffff",
 }
 
@@ -42,7 +50,9 @@ LIGHT_TOKENS = {
     "bg_alt":         "#ffffff",
     "bg_deep":        "#eaeaef",
     "fg":             "#1f1f2b",
-    "fg_dim":         "#6a6a78",
+    # R7 / WCAG-AA: was #6a6a78 — failed 3.93:1 on sidebar (bg_deep).
+    # Darkened to #5a5a68 → 5.09:1 on bg_deep, 5.74:1 on bg.
+    "fg_dim":         "#5a5a68",
     "accent":         "#2b5e98",
     "accent_hover":   "#3877b8",
     "accent_warm":    "#c17a2b",
@@ -52,17 +62,25 @@ LIGHT_TOKENS = {
     "warning":        "#b8902f",
     "border":         "#ccc",
     # Light-theme semantic tokens — darker fills for AA contrast against
-    # a near-white background; readable fg on each fill.
+    # a near-white background; readable fg on each fill. R7 / WCAG-AA
+    # forced dark fg on yellow + green fills (white was 4.13:1 / 3.86:1).
     "badge_fail_bg":  "#a83b3b",
     "badge_fail_fg":  "#ffffff",
     "badge_warn_bg":  "#b8902f",
-    "badge_warn_fg":  "#ffffff",
-    "badge_ok_bg":    "#2c8c4a",
+    "badge_warn_fg":  "#1f1f2b",
+    # R7 / WCAG-AA: success green was #2c8c4a (4.24:1 white, 3.85:1 dark).
+    # Darkened to #1c6e30 so white passes 6.3:1; visually still a clear
+    # "success / green" hue on a light backdrop.
+    "badge_ok_bg":    "#1c6e30",
     "badge_ok_fg":    "#ffffff",
     "kpi_red":        "#a83b3b",
     "kpi_yellow":     "#b8902f",
-    "kpi_green":      "#2c8c4a",
-    "kpi_neutral":    "#6a6a78",
+    "kpi_green":      "#1c6e30",
+    "kpi_neutral":    "#5a5a68",
+    "kpi_red_fg":     "#ffffff",
+    "kpi_yellow_fg":  "#1f1f2b",
+    "kpi_green_fg":   "#ffffff",
+    "kpi_neutral_fg": "#ffffff",
     "kpi_fg":         "#ffffff",
 }
 

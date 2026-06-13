@@ -132,24 +132,60 @@ loop.
 
 ## Keyboard shortcuts
 
+All primary CTAs and sidebar navigation are keyboard-reachable. Screen-
+reader users can rely on `setAccessibleName` + `setAccessibleDescription`
+on every interactive widget (regression test:
+`tests/unit/test_gui_accessibility.py`).
+
+### Global navigation
+
 | Shortcut | Action |
 |---|---|
-| Cmd/Ctrl+1..0 | (planned for v0.6) Switch to sidebar entry 1..10 |
-| Cmd/Ctrl+W | Close window |
-| Cmd/Ctrl+Q | Quit |
+| Cmd/Ctrl+1..0 | Switch to sidebar entry 1..10 (v0.7.0) |
+| Cmd/Ctrl+W   | Close window |
+| Cmd/Ctrl+Q   | Quit |
+
+### Run screen
+
+| Shortcut | Action |
+|---|---|
+| Cmd/Ctrl+R | **Run** — start the encode (alias: mnemonic `&Run`) |
+| Esc        | **Cancel** — stop at the next safe boundary (alias: mnemonic `&Cancel`) |
+| Space      | **Pause / Resume** — suspend the running ffmpeg subprocess and freeze segment progress; long pauses (>24h) auto-cancel (v0.7.0 R6 / F5) |
+| Cmd/Ctrl+T | **Auto-tune** — calibrate the selected profile against this input, save as `<profile>.tuned.yaml`, switch to it (v0.7.0 R4 / F7) |
+| Cmd/Ctrl+Q | **Open QA report** — open the HTML report from the most recent run |
+| Cmd/Ctrl+P | **Preflight** — re-run preflight checks against the current source |
+
+### Settings screen
+
+| Shortcut | Action |
+|---|---|
+| Cmd/Ctrl+, | **Open Settings** |
+
+### Notifications (Settings → Post-job notifications)
+
+The Settings screen carries a **Test** button per notifications channel
+(v0.7.0 R5 / F4) that synthesises a `completed` event and dispatches it
+via `core.notifications.dispatch` — handy for verifying webhook URLs +
+SMTP creds without running a full encode.
 
 ## Where data lives
 
-| Path | What |
-|---|---|
-| `~/.config/yt_uniquifier/state.json` | Theme, recents, default profile/encoder |
-| `~/.config/yt_uniquifier/history.json` | Run history (≤100 entries) |
-| `~/.cache/yt_uniquifier/encoders.json` | Encoder detection cache (resettable from Settings) |
-| `~/.cache/yt_uniquifier/work/<plan_hash>/` | Run work_dir (segments, state.json, resume) |
-| `~/.cache/yt_uniquifier/keyframes/` | Keyframe scan cache (30-day TTL) |
-| `~/.cache/yt_uniquifier/corpus/index.json` | Corpus fingerprint index |
-| `~/.cache/yt_uniquifier/batch/<plan_hash>/` | Batch worker scratch |
-| `~/.cache/yt_uniquifier/worker/<plan_hash>/` | Queue worker scratch |
+Resolved via `QStandardPaths.AppConfigLocation` + `CacheLocation` (v0.7.0
+R1 / E3) so paths follow each OS's convention. A migration helper copies
+any legacy `~/.config/yt_uniquifier/` content on first launch.
+
+| Path (typical) | OS conv. | What |
+|---|---|---|
+| `<CONFIG_DIR>/state.json`            | macOS `~/Library/Preferences/yt-uniquifier`, Linux `~/.config/yt-uniquifier`, Windows `%APPDATA%\yt-uniquifier` | Theme, recents, default profile/encoder, notifications config |
+| `<CONFIG_DIR>/history.json`          | same as above | Run history (≤100 entries) |
+| `<CONFIG_DIR>/crash.log`             | same as above | Global excepthook trace log (100 KiB rotation, v0.7.0 R2 / E6) |
+| `<CACHE_DIR>/encoders.json`          | macOS `~/Library/Caches/yt-uniquifier`, Linux `~/.cache/yt-uniquifier`, Windows `%LOCALAPPDATA%\yt-uniquifier\Cache` | Encoder detection cache (resettable from Settings) |
+| `<CACHE_DIR>/work/<plan_hash>/`      | same as above | Run work_dir (segments, state.json, resume marker) |
+| `<CACHE_DIR>/keyframes/`             | same as above | Keyframe scan cache (30-day TTL) |
+| `<CACHE_DIR>/corpus/index.json`      | same as above | Corpus fingerprint index |
+| `<CACHE_DIR>/batch/<plan_hash>/`     | same as above | Batch worker scratch |
+| `<CACHE_DIR>/worker/<plan_hash>/`    | same as above | Queue worker scratch |
 
 ## Packaging
 

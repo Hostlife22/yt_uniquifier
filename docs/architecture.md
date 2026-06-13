@@ -144,3 +144,95 @@ See `specs/03-segmenter-resume-metadata-preflight.md`. Summary:
 
 See [seed_strategy.md](./seed_strategy.md) for use cases and reproducibility
 implications.
+
+## RunEvent contract
+
+`core/runner.RunEvent` is a frozen dataclass with a `kind: EventKind`
+discriminator and a free-form `payload: dict[str, object]`. The
+`on_event` callback is the only path information leaves the core layer,
+so its surface area is part of the public contract — adding a new
+`kind` is a backwards-compatible extension; **renaming** one is a
+breaking change.
+
+| `kind`               | Producer                              | Payload keys (load-bearing) |
+|---|---|---|
+| `progress`           | `runner._run_once` (ffmpeg `-progress`) | `out_time_us` *or* `out_time_ms`, `frame`, `phase`, `segment` |
+| `log`                | orchestrator / segmenter / runner watcher | `phase` (e.g. `preflight`, `plan`, `segment`, `main_audio`, `paused`, `resumed`, `concat`, `sanitize`, `cleanup`), `message` |
+| `error`              | any layer                              | `phase`, `message`, `returncode`, `tail`, `findings` |
+| `done`               | `runner.run` (success exit)            | `duration_sec`, `output` |
+| `divergence_sample`  | `orchestrator._maybe_emit_divergence` (v0.7 R4 / F2) | `segment`, `phash_similarity` (per-segment), `running_phash` (EMA, α=0.25), `frames_sampled` |
+
+Phase invariants used by GUI consumers:
+
+- `phase=segment` carries `segment: int` so progress aggregators can
+  map ffmpeg's stream-local `out_time_us` back to the correct overall
+  bucket. The orchestrator's `_wrap` closure in `segmenter.py` injects
+  it; downstream consumers must not assume `segment` is set on every
+  event.
+- `phase=main_audio` is dedicated to the loudnorm + audio re-encode
+  pass and drives the secondary "Audio" progress bar in the GUI; the
+  main bar stays pinned to the video-segments-derived value.
+- `phase=paused` / `phase=resumed` fire exactly once per state
+  transition (v0.7 R6 / F5) — the runner watcher tracks the applied
+  SIGSTOP state and de-duplicates repeated token flips.
+
+## Cancel + Pause plumbing (v0.7 R6 / F5)
+
+The core layer offers two cooperative cancellation primitives, both
+`threading.Event`-backed so a write from any thread (GUI button →
+QThread, signal handler → main loop) is observed correctly on the
+worker thread:
+
+```
+                              ┌──────────────────────────┐
+            GUI Run screen ──►│ RunWorker (QThread)      │
+            (Esc / Space)     │                          │
+                              │  cancel_token: CancelToken
+                              │  pause_token:  PauseToken
+                              └────────────┬─────────────┘
+                                           │ run_full(plan, options,
+                                           │   on_event=…,
+                                           │   cancel_token=…,
+                                           │   pause_token=…)
+                                           v
+                              ┌──────────────────────────┐
+                              │ orchestrator             │
+                              │  ├─ pause observer thread│
+                              │  │   writes paused_at    │
+                              │  │   to state.json on    │
+                              │  │   pause/resume        │
+                              │  │   enforces 24h        │
+                              │  │   auto-cancel         │
+                              │  │                       │
+                              │  └─ process_video_segments_parallel
+                              │     ↓ pause_token forwarded
+                              └──────────────────────────┘
+                                           │
+                                           v
+                              ┌──────────────────────────┐
+                              │ runner.run / _run_once   │
+                              │  watcher thread:         │
+                              │    cancel → SIGTERM      │
+                              │    pause  → SIGSTOP via  │
+                              │      process_control     │
+                              │    resume → SIGCONT      │
+                              └────────────┬─────────────┘
+                                           v
+                                       ffmpeg
+```
+
+`PauseToken` is **idempotent** (repeated `pause()` / `resume()` calls
+are no-ops), records the wall-clock pause timestamp for
+state.json persistence, and exposes `should_auto_cancel()` —
+the orchestrator's daemon `_start_pause_observer` polls it once per
+second and fires `cancel_token.cancel()` if the pause exceeds
+`PauseToken.AUTO_CANCEL_SEC` (24 h by default).
+
+`core/process_control.py` is the cross-OS abstraction: POSIX uses
+stdlib `os.kill(pid, SIGSTOP|SIGCONT)`; Windows uses a lazy `psutil`
+import (no hard dep — pause becomes a no-op with a warning if psutil
+is absent). Both walk the process tree (psutil children, or `/proc`
+fallback on Linux) so descendant ffmpeg helper processes are
+suspended too. All operations are best-effort and never raise — a
+failed `os.kill` is logged at WARN and the return value reports the
+ack count.

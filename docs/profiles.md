@@ -28,6 +28,8 @@ and when to pick which.
 
 ## Shipped profiles
 
+### Quality / divergence family
+
 | Name | Aim | VMAF target* |
 |------|-----|--------------|
 | `soft.yaml`                 | minimal change, highest quality                                        | ~96 |
@@ -39,12 +41,38 @@ and when to pick which.
 | `cid_aggressive.yaml`       | cid_aware + stronger shifts + parametric noise overlay + reverb        | ~80 |
 | `cid_aware_hdr_to_sdr.yaml` | HDR source → SDR output, cid_aware audio/video transforms              | ~80 |
 
+### Platform-destination family (v0.7.0)
+
+Aspect-locked presets for direct upload to specific social platforms.
+Each one chains `video.fit_aspect` (target geometry + fit mode) with
+mild quality-preserving transforms and a platform-appropriate
+`audio.loudnorm` integrated target. Drop-in for cross-posting workflows
+where the source is landscape but the destination expects vertical /
+square frames — no manual ffmpeg recipe needed.
+
+| Name | Target | Mode | Resolution | LUFS | Notes |
+|------|--------|------|------------|------|-------|
+| `youtube_4k.yaml`        | 16:9 | `crop`     | 3840×2160 | -14 | YouTube 4K landscape master |
+| `youtube_1080p.yaml`     | 16:9 | `crop`     | 1920×1080 | -14 | YouTube standard upload |
+| `youtube_shorts.yaml`    | 9:16 | `crop`     | 1080×1920 | -14 | YouTube Shorts (centre-crop) |
+| `tiktok_vertical.yaml`   | 9:16 | `crop`     | 1080×1920 | -16 | TikTok loudness target stricter than YT |
+| `instagram_reels.yaml`   | 9:16 | `pad_blur` | 1080×1920 | -14 | Letterbox-blur background preserves full landscape frame |
+| `instagram_square.yaml`  | 1:1  | `pad_blur` | 1080×1080 | -14 | Square feed post with blurred sidebars |
+| `linkedin_square.yaml`   | 1:1  | `crop`     | 1080×1080 | -14 | LinkedIn timeline (no blur — professional look) |
+
 \* indicative on natural footage; synthetic test patterns score much lower.
 
-## Transform reference (18)
+⚠️ HDR + `pad_blur`: `gblur` is not HDR-aware. If the source is HDR
+(PQ/HLG) you must either tonemap to SDR first (chain after
+`video.tonemap_sdr`) or pick a `crop` / `pad_black` variant. Preflight
+flags this combination as `FAIL` so the run aborts before wasted
+encode time.
+
+## Transform reference (19)
 
 | ID | Kind | Notable params |
 |----|------|----------------|
+| `video.fit_aspect`      | video | `target_aspect` (`16:9` / `9:16` / `1:1` / `4:5` / `4:3`), `mode` (`crop` / `pad_blur` / `pad_black`), `target_width`, `target_height`, `blur_sigma` (0..80, only `pad_blur`), `pad_color` (only `pad_black`) — v0.7 R3 / F3, used by all platform-destination profiles |
 | `video.crop_resize`     | video | `max_strength` (0..0.10), `rng_seed` |
 | `video.rotate`          | video | `degrees` (-2..2), `fillcolor_sdr`, `fillcolor_pq` (HDR variant) |
 | `video.color_eq`        | video | `brightness`, `contrast`, `gamma`, `saturation` |

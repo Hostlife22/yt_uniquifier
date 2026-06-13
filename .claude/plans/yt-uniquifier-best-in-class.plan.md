@@ -239,11 +239,19 @@
 - [x] E12: `importlib.resources.files("yt_uniquifier").joinpath("profiles")` через централизованный `gui/paths.py::profiles_dir()` — PyInstaller-portable. (commit `cbf243a`)
 - [x] **F5: Pause/Resume** — `core/process_control.py` (POSIX SIGSTOP/SIGCONT + Windows lazy psutil, recursive tree), `PauseToken` в runner с 24h auto-cancel, `paused_at` marker в `state.json`, GUI `&Pause` button (Space shortcut) в Run screen. (commit `0dcdb12`)
 - [x] Все `# type: ignore` устранены (C1-C7) — `cast(ColorTransfer, ...)` в probe, тип Profile в worker/batch, `-> QWidget` annotation в history. (commit `cbf243a`)
-- [ ] Visual regression: WCAG-AA contrast test в `tests/gui/` — отложено (не критично для шипа, E4 закрыл root cause).
+- [x] Visual regression: WCAG-AA contrast test — `tests/gui/test_theme_contrast.py` (27 pairs × 2 themes) поймал 8 реальных контраст-провалов в badge/KPI токенах, токены пофикшены, все пары теперь ≥ 4.5:1. (R7)
 
-**Метрика**: 100% screen-reader compat (VoiceOver/NVDA), 7 platform-presets shipped, post-job notification → Discord/Slack/Telegram/email работают, theme switch без leak'ов, Pause/Resume cross-OS (real SIGSTOP roundtrip verified на macOS).
+**Метрика**: 100% screen-reader compat (VoiceOver/NVDA), 7 platform-presets shipped, post-job notification → Discord/Slack/Telegram/email работают, theme switch без leak'ов, Pause/Resume cross-OS (real SIGSTOP roundtrip verified на macOS), real-ffmpeg pause/resume integration test зелёный.
 
-**Cumulative session**: 7 atomic commits, ~770 unit tests + 12 a11y + 25 R5 notifications + 20 R6 pause/resume — всё зелёное, ruff All checks passed, mypy 115 files clean.
+**Cumulative session**: 8 atomic commits, ~772 unit + 27 WCAG-AA + 2 pause integration + 20 R6 unit pause = 821 tests зелёные, ruff All checks passed, mypy 115 files clean.
+
+### **v0.7.0 R7 — finishing touches** (carry-over → shipped)
+
+- [x] `docs/profiles.md` — Platform profiles section (7 YAML × geometry/mode/LUFS table) + `video.fit_aspect` ряд в transform reference + HDR + `pad_blur` warning.
+- [x] `docs/gui.md` — keyboard shortcuts cheatsheet (Run / Settings / Notifications) с Ctrl+R/Esc/Space/Ctrl+T/Ctrl+Q + per-OS QStandardPaths table.
+- [x] `docs/architecture.md` — RunEvent contract таблица (5 kinds) + cross-layer pause/cancel plumbing diagram.
+- [x] `tests/gui/test_theme_contrast.py` — pure-Python WCAG luminance + 11 pairs × 2 themes; fixed `fg_dim` light + `badge_ok` + `kpi_yellow`/`kpi_green` + per-band `kpi_*_fg` tokens в `theme.py`; `kpi_pills.py` lookup за per-band fg.
+- [x] `tests/integration/test_pause_resume_real_ffmpeg.py` — 2 cases: pause-mid-encode → resume → duration parity + `paused_at` round-trip; pause_token wired-but-unused → no-op control.
 
 ### **v0.8.0 — ML-grade QA + Plugin system (4-5 недель)**
 
