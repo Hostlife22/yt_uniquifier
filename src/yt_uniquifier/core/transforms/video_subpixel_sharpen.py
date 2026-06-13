@@ -27,6 +27,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -44,7 +45,7 @@ class SubpixelSharpenParams(BaseModel):
 def _build_subpixel_sharpen(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, SubpixelSharpenParams)
+    params = ensure_params(params, SubpixelSharpenParams)
     r = params.radius
     # ffmpeg unsharp requires odd kernel; round up if user passed even value.
     if r % 2 == 0:

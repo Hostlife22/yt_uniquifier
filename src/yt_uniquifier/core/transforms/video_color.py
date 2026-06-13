@@ -8,6 +8,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -22,7 +23,7 @@ class ColorEqParams(BaseModel):
 
 
 def _build_color_eq(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
-    assert isinstance(params, ColorEqParams)
+    params = ensure_params(params, ColorEqParams)
     out = alloc.next("v")
     filt = (
         f"eq=brightness={params.brightness}:contrast={params.contrast}:"

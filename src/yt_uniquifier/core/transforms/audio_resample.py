@@ -16,6 +16,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -30,7 +31,7 @@ class AudioResampleParams(BaseModel):
 def _build_audio_resample(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, AudioResampleParams)
+    params = ensure_params(params, AudioResampleParams)
     out = alloc.next("a")
     filt = f"aresample={params.intermediate_sr},aresample={params.target_sr}"
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)

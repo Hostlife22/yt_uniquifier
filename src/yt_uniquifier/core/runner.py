@@ -200,7 +200,15 @@ def _run_once(
     )
 
     log_lines: list[str] = []
-    assert proc.stdout is not None
+    if proc.stdout is None:
+        # A2 (v0.5.5): explicit guard in place of `assert` so a release
+        # build under PYTHONOPTIMIZE doesn't silently iterate `None`
+        # downstream. Popen above always sets stdout=PIPE so this is
+        # a contract check, not user-reachable, but make it visible.
+        raise PipelineError(
+            "ffmpeg Popen returned no stdout pipe — "
+            "subprocess.PIPE was not honoured by the OS",
+        )
 
     block: dict[str, str] = {}
     cancelled_mid_loop = False

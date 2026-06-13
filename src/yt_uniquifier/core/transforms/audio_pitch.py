@@ -20,6 +20,8 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
+    ensure_rng,
     register,
 )
 
@@ -75,12 +77,11 @@ def cascade_atempo(target: float) -> str:
 def _build_pitch_tempo(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, PitchTempoParams)
+    params = ensure_params(params, PitchTempoParams)
     out = alloc.next("a")
     pitch = params.pitch
     if params.randomize_within > 0 and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         pitch = pitch + rng.uniform(-params.randomize_within, params.randomize_within)
         # Stay within sanity bounds.
         pitch = max(0.5, min(2.0, pitch))

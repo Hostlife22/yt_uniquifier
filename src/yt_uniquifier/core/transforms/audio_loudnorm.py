@@ -24,6 +24,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_rng,
     register,
 )
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
@@ -126,8 +127,7 @@ def build_apply(
     """
     target_i = params.integrated
     if params.target_jitter_lufs > 0 and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         target_i += rng.uniform(
             -params.target_jitter_lufs, params.target_jitter_lufs,
         )

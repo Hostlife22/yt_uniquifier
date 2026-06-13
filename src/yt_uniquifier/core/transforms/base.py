@@ -14,11 +14,52 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from random import Random
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel
 
+from yt_uniquifier.core.errors import PipelineError
+
 Kind = Literal["video", "audio"]
+
+P = TypeVar("P", bound=BaseModel)
+
+
+def ensure_params(params: BaseModel, expected: type[P]) -> P:
+    """Runtime-checked downcast of a builder's ``params`` argument.
+
+    Replaces the ``assert isinstance(params, XParams)`` pattern that was
+    sprinkled across every transform builder. ``assert`` is stripped
+    under ``python -O`` / ``PYTHONOPTIMIZE=1`` (PyInstaller release
+    builds, some Docker base images), at which point a wrong-schema
+    ``BaseModel`` would silently flow through and the builder would
+    either produce a wrong filter string or ``AttributeError`` on the
+    next field access. Raise explicitly so the failure is visible and
+    typed even under ``-O``.
+    """
+    if not isinstance(params, expected):
+        raise PipelineError(
+            f"transform builder expected {expected.__name__}, "
+            f"got {type(params).__name__}",
+        )
+    return params
+
+
+def ensure_rng(rng: object) -> Random:
+    """Runtime-checked downcast of an rng kwarg to ``random.Random``.
+
+    Same motivation as :func:`ensure_params`: builders previously did
+    ``assert isinstance(rng, Random)`` which becomes a no-op under
+    ``-O``. A non-Random object that happens not to have ``.uniform``
+    would then ``AttributeError`` instead of failing with a typed
+    domain error.
+    """
+    if not isinstance(rng, Random):
+        raise PipelineError(
+            f"transform builder expected random.Random, "
+            f"got {type(rng).__name__}",
+        )
+    return rng
 
 # Builders may accept an optional `rng` keyword for per-run randomization.
 # Backward-compat: builders that don't need it ignore the keyword.

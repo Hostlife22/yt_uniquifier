@@ -8,6 +8,8 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
+    ensure_rng,
     register,
 )
 
@@ -31,12 +33,11 @@ class AudioEqParams(BaseModel):
 def _build_audio_eq(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, AudioEqParams)
+    params = ensure_params(params, AudioEqParams)
     out = alloc.next("a")
     bands = list(params.bands)
     if params.randomize_bands and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         jd = params.jitter_db
         bands = [
             (freq * rng.uniform(0.95, 1.05), gain + rng.uniform(-jd, jd))

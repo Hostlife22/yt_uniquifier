@@ -152,25 +152,31 @@ def run_full(
                 segments_done=len(segments),
                 preflight_findings=findings,
             )
-        # Output gone but state.json reports done → segments were cleaned
-        # up after a successful concat. Reset segments to pending so the
-        # run re-processes from scratch instead of failing in concat
-        # with "Impossible to open seg_0000.mkv".
-        out_paths_exist = any(
-            s.out_path and s.out_path.exists()
-            for s in segments
-        )
-        if not out_paths_exist:
+        # A3 (v0.5.5): output gone but state.json reports done →
+        # segments were cleaned up after a successful concat. We need
+        # per-segment recovery, not all-or-nothing reset. The previous
+        # `any(... .exists())` check only fired when ALL segment files
+        # were missing; under partial cleanup (e.g. NFS partial sync,
+        # an interrupted cleanup, the user manually deleting a few
+        # corrupted segments) the reset was skipped and concat then
+        # failed with "Impossible to open seg_NNNN.mkv".
+        missing = [
+            s for s in segments
+            if not (s.out_path and s.out_path.exists())
+        ]
+        if missing:
+            for s in missing:
+                store.mark(s.idx, "pending")
+            segments = store.all_segments()
             emit(RunEvent(kind="log", payload={
                 "phase": "resume",
                 "message": (
-                    "state.json reports all segments done but output and "
-                    "segment files are missing — resetting to fresh run"
+                    f"state.json reports done but {len(missing)}/"
+                    f"{len(segments)} segment files are missing — "
+                    "re-encoding the missing ones"
                 ),
+                "missing_segments": [s.idx for s in missing],
             }))
-            for s in segments:
-                store.mark(s.idx, "pending")
-            segments = store.all_segments()
 
     # Resume: if state.json carried a run_seed from an earlier run, reuse it
     # so the resumed encoding reproduces the same stochastic transforms.
@@ -267,10 +273,26 @@ def run_full(
         if main_audio is not None:
             store.set_main_audio(main_audio)
 
-    # Concat + metadata.
-    final_segments = [s.out_path for s in store.all_segments() if s.out_path]
+    # Concat + metadata. Defensive existence filter (A3 v0.5.5 belt-and-
+    # suspenders): even after the resume-recovery block above, a worker
+    # that crashed mid-finalise could leave a stale `out_path` set on
+    # the Segment while the file itself is missing. Concat would then
+    # fail with a cryptic "Impossible to open" — check upfront.
+    final_segments = [
+        s.out_path for s in store.all_segments()
+        if s.out_path and s.out_path.exists()
+    ]
     if not final_segments:
         raise PipelineError("no processed segments to concatenate")
+    missing_finals = [
+        s.idx for s in store.all_segments()
+        if s.out_path and not s.out_path.exists()
+    ]
+    if missing_finals:
+        raise PipelineError(
+            f"cannot concat: {len(missing_finals)} segment file(s) gone "
+            f"after re-encode: {missing_finals[:5]}{'…' if len(missing_finals) > 5 else ''}"
+        )
     options.output.parent.mkdir(parents=True, exist_ok=True)
     concat_segments(
         final_segments,

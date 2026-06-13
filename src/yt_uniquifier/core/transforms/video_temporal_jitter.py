@@ -29,6 +29,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -60,7 +61,7 @@ class TemporalJitterParams(BaseModel):
 def _build_temporal_jitter(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, TemporalJitterParams)
+    params = ensure_params(params, TemporalJitterParams)
     # Prefer the pipeline-supplied rng (derived from plan_hash + segment
     # idx + run_seed). Fall back to a *deterministic* seed so resumed
     # runs reproduce the same indices.

@@ -17,6 +17,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -55,7 +56,7 @@ def _build_blend_b(
     *,
     rng: object = None,
 ) -> FilterChain:
-    assert isinstance(params, BlendBParams)
+    params = ensure_params(params, BlendBParams)
     out = alloc.next("v")
     scaled = alloc.next("v")
     a_ref = alloc.next("v")

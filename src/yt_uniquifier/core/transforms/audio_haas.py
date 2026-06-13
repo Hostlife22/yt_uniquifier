@@ -21,6 +21,8 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
+    ensure_rng,
     register,
 )
 
@@ -39,11 +41,10 @@ class HaasStereoParams(BaseModel):
 def _build_haas(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, HaasStereoParams)
+    params = ensure_params(params, HaasStereoParams)
     delay = params.delay_ms
     if params.randomize_within_ms > 0 and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         delay += rng.uniform(-params.randomize_within_ms, params.randomize_within_ms)
         delay = max(1.0, min(40.0, delay))
     delay_int = int(round(delay))

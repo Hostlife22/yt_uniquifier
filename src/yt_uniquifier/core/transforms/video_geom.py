@@ -11,6 +11,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -35,7 +36,7 @@ def _build_crop_resize(
     *,
     rng: random.Random | None = None,
 ) -> FilterChain:
-    assert isinstance(params, CropResizeParams)
+    params = ensure_params(params, CropResizeParams)
     # Prefer the plan-level rng (seeded from run_seed / per-segment derived
     # seed) so resumed runs reproduce the same crop. Falling back to a
     # fresh Random(None) would re-roll non-deterministically and violate
@@ -91,7 +92,7 @@ class RotateParams(BaseModel):
 
 
 def _build_rotate(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
-    assert isinstance(params, RotateParams)
+    params = ensure_params(params, RotateParams)
     out = alloc.next("v")
     # Default to SDR fill; pipeline rewrites filter_str for HDR (see FilterGraph).
     filt = (

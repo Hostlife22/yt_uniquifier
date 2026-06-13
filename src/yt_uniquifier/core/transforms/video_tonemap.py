@@ -30,6 +30,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -47,7 +48,7 @@ class TonemapSDRParams(BaseModel):
 def _build_tonemap_sdr(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, TonemapSDRParams)
+    params = ensure_params(params, TonemapSDRParams)
     out = alloc.next("v")
     # tonemap's peak= is in linear-light units relative to npl; for an
     # `npl=1000` linearise we pass peak=10 (i.e. 1000/100). Most online

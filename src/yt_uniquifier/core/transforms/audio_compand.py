@@ -24,6 +24,8 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
+    ensure_rng,
     register,
 )
 
@@ -44,12 +46,11 @@ class CompandParams(BaseModel):
 def _build_compand(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, CompandParams)
+    params = ensure_params(params, CompandParams)
     threshold = params.threshold_db
     ratio = params.ratio
     if params.randomize_within and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         threshold += rng.uniform(-3.0, 3.0)
         ratio = max(1.0, ratio + rng.uniform(-0.5, 0.5))
         # Re-clamp threshold to schema bounds.

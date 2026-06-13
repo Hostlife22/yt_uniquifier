@@ -19,6 +19,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -47,7 +48,7 @@ _BASE_INTENSITY = 0.15
 def _build_reverb(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, ReverbParams)
+    params = ensure_params(params, ReverbParams)
     in_g, out_g, delays, base_decays = _AECHO_PRESETS[params.style]
     scale = params.intensity / _BASE_INTENSITY if _BASE_INTENSITY else 0.0
     scaled = "|".join(f"{d * scale:.3f}" for d in base_decays)

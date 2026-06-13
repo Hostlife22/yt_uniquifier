@@ -17,6 +17,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -32,7 +33,7 @@ class SpectralSmearParams(BaseModel):
 def _build_spectral_smear(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, SpectralSmearParams)
+    params = ensure_params(params, SpectralSmearParams)
     out = alloc.next("a")
     # chorus in_gain:out_gain:delays:decays:speeds:depths
     filt = (

@@ -13,6 +13,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -24,7 +25,7 @@ class SpeedParams(BaseModel):
 
 
 def _build_speed(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
-    assert isinstance(params, SpeedParams)
+    params = ensure_params(params, SpeedParams)
     out = alloc.next("v")
     # setpts=PTS/rate produces playback at `rate`x. rate>1 is faster.
     filt = f"setpts=PTS/{params.rate}"

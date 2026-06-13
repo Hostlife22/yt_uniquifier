@@ -1,0 +1,366 @@
+# План: yt-uniquifier → best-in-class production
+
+**Дата**: 2026-06-13  
+**Источник запроса**: пользовательский /ecc:plan — полный анализ vs аналогов, аудит кода, оптимизации, верификация  
+**Текущий релиз**: v0.5.4 (PyQt6 GUI + 25 фаз спек, ~10 500 LOC, 104 теста)  
+**Цель плана**: довести продукт до уровня "best-in-class в сегменте профессиональных open-source re-encoder'ов для собственного контента"  
+**Сложность**: **Large** (multi-quarter roadmap из 5 релизных эпиков)
+
+---
+
+## TL;DR (3 строки)
+
+1. Продукт уже архитектурно сильнее любого OSS-конкурента в нише: единственный с академически обоснованными порогами (Smitelli 2010, Fojcik 2025), distributed batch без Redis/БД, crash-resume на уровне сегментов, integrated QA. **Ниша обоснована и защитима.**
+2. До production-best-in-class не хватает: подписанных one-click инсталляторов, GUI live-divergence-индикатора, SSCD-эмбеддинг QA, platform-destination профилей (TikTok/YT/Reels), post-job webhook'ов. И **точечных багфиксов на критичных путях** (resume edge case, RunEvent race, cancel-broken для 4 GUI workers).
+3. **3 must-fix-before-1.0** найдены: data-race на `RunEvent.payload` в параллельной сегментации, multi-process повреждение `state.json`, resume теряет данные при частичной очистке артефактов.
+
+---
+
+## 1. Сильные стороны (что уже работает на уровне best-in-class)
+
+### Архитектура и контракты
+
+- **Чистое 3-слойное разделение** (CLI/GUI → `Plan` pydantic-контракт → `core/` → ffmpeg). Единая точка входа `core/orchestrator.py::run_full` обслуживает CLI, GUI Worker, distributed worker без дублирования логики.
+- **Crash-resume на уровне сегментов через split-process-concat**, а не keyframe-seek. Архитектурно правильное решение, которого нет у HandBrake/Shutter Encoder.
+- **Plan-hash-keyed checkpoint** с правильной кросс-OS сериализацией (`profile.model_dump(mode="json")`, `pipeline.py:807-834`).
+- **Audio никогда не нарезается** — `process_main_audio` идёт по full source. Loudnorm two-pass кэшируется в `state.json`. Решает seam-проблему, которой страдают и наивные ffmpeg-скрипты, и коммерческий 360° Uniquizer.
+- **Один `-filter_complex` на сегмент**, без bgr24 round-trip через Python stdin (как было в legacy AB).
+
+### Уникальные технические решения
+
+- **Per-segment seed divergence** (`sha256(plan_hash, seg_idx, run_seed)`, `core/seed_resolver.py`) с симметричной поддержкой `audio_windows.py` (60-сек окна + `acrossfade=d=0.1`, loudnorm остаётся global). **Ни один конкурент этого не имеет.**
+- **Multi-vendor encoder detection с real-probe** (NVENC/QSV/AMF/VideoToolbox/x264/x265) — `lavfi` null source через каждого кандидата + кэш. Конкуренты опираются на `ffmpeg -encoders` (доступность ≠ работоспособность).
+- **Distributed batch через shared-FS atomic rename** — Plex и Av1an этого не имеют. Архитектурно проще Redis/PostgreSQL у benetech/VideoDeduplication.
+- **HDR pipeline** через zscale linear-light wrap для color transforms + альтернативный путь tonemap_sdr (hable/reinhard/mobius/aces). HandBrake умеет HDR→SDR, но не делает контролируемые HDR-keep micro-transforms.
+- **Real-CID validation harness** (`tools/generate_variants.py`, v0.4.1) с Spearman-корреляцией предиктора vs реальности — методологически уникально.
+- **Calibrate loop** (`yt-uniq calibrate`) с VMAF→SSIM→pHash fallback на metric.
+- **Academic backing** — Smitelli 2010 (pitch ±5%), Fojcik & Syga 2025 (temporal jitter), EBU R128 (loudnorm). **Ни один коммерческий uniquifier не цитирует ни одной статьи**.
+
+### Качество кода
+
+- **Strict mypy + ruff + 104 теста**, CI на Ubuntu × macOS × Python 3.11/3.12.
+- **Типизированная иерархия ошибок** (`core/errors.py`).
+- **`yaml.safe_load` подтверждён** в `profile_loader.py:31` — нет десериализации произвольных объектов.
+- **Атомарная запись `state.json`** через `open → flush → fsync → os.replace` (`checkpoint.py`).
+- **`extra=forbid` на профильном входе** (Profile/TransformConfig) — нет тихого проглатывания опечаток в YAML.
+
+---
+
+## 2. Слабые / устаревшие стороны (production gaps)
+
+### A. Production-критичные баги (must fix перед 1.0)
+
+| # | Severity | Файл:строка | Проблема | Эффект |
+|---|---|---|---|---|
+| **A1** | 🔴 CRITICAL | `core/segmenter.py:265-272` | `RunEvent.payload` (dict внутри `frozen=True` dataclass) мутируется in-place из параллельных `ThreadPoolExecutor` worker'ов: `ev.payload["segment"] = segment.idx`. Frozen защищает только rebinding ссылки. | Data race. На больших workloads `payload["segment"]` может оказаться от соседнего сегмента → GUI рисует прогресс не там. Лог-агрегация коррумпируется. |
+| **A2** | 🔴 CRITICAL | `core/pipeline.py:266-267, 574, 712` + 17 transform builder'ов | `assert isinstance(params, XxxParams)` использован как runtime guard. Под `python -O` / `PYTHONOPTIMIZE=1` / PyInstaller со `strip --optimize=2` все `assert` no-op. | Тихое прохождение `BaseModel` неправильного подкласса → wrong filter string или `AttributeError` на `.model_dump()`. Bомба на production-сборках. |
+| **A3** | 🔴 CRITICAL | `core/orchestrator.py:158-163` + `:271` | Reset-to-pending включается только когда **все** seg-файлы пропали (`any(...exists()) == False`). При частичной очистке (5 из 10) reset не срабатывает, потом `final_segments = [s.out_path for s in ... if s.out_path]` фильтрует только truthy Path-объект, **не** проверяя `.exists()`. Concat падает с "Impossible to open seg_NNNN.mkv". | Resume теряет данные. Реальный сценарий: NFS partial sync, прерванный cleanup. |
+| **A4** | 🔴 HIGH | `core/checkpoint.py:160-192` | Cross-process safety не реализована: два `yt-uniq batch` процесса на одном `work_dir` (одинаковый `plan_hash`) race на `state.json`. PID-suffix защищает от torn-write, но read-modify-write не атомарен → last-writer-wins, прогресс другого процесса теряется. | Тихое повреждение state. Документировано как "должен быть per-input work_dir", но контракт не enforced. |
+| **A5** | 🔴 HIGH | `core/runner.py:208-264` | Cancel срабатывает только между stdout-строчками прогресса ffmpeg. Зависшая NVENC-сессия (нет прогресса) уважает cancel только при истечении 3600-сек `communicate()` timeout. | Cancel-button во время реального hang ничего не делает 1 час. |
+| **A6** | 🔴 HIGH | `core/calibration/loop.py:110-118` + `gui/workers/calibrate_worker.py` (весь файл) | `_calibrate` НЕ принимает `cancel_token`. `CalibrateWorker.request_cancel()` тихо игнорируется. Внутри loop'а `except Exception: factor *= 1.5; continue` глотает `PipelineError("cancelled by user")`, превращая cancel в "попробуй сильнее". | Cancel в Calibrate-экране ломан. То же для QaWorker, CorrelateWorker, EncoderDetectWorker. |
+| **A7** | 🟡 HIGH | `core/queue/leasing.py:104-119` (нет проверки `is_symlink`) | На multi-tenant shared FS враждебный процесс кладёт в `pending/` symlink на `/etc/shadow`. `os.rename` переносит symlink, потом `ffprobe -i leased` следует по нему. | Confidentiality leak в логах. На trusted single-tenant — N/A. |
+| **A8** | 🟡 HIGH | `core/queue/leasing.py:164-199` reaper race | Между `alive.stat().st_mtime` check и `iterdir() → rename` reaper'а — окно, в которое worker может ожить и работать с теми же файлами. | Двойная обработка / "file disappeared" ошибки. |
+| **A9** | 🟡 HIGH | `pyproject.toml` Pillow pin `~=10.3` | Допускает Pillow 10.3.0 с CVE-2024-28219 (heap buffer overflow в `_imagingcms`). Используется через `imagehash`. | Уязвимая зависимость в свежей установке. Fix: `Pillow>=10.3.1,<11`. |
+| **A10** | 🟡 HIGH | Все `*Params` модели (17 файлов в `transforms/`) | Нет `model_config = ConfigDict(extra="forbid")`. Сегодня инъекция не достижима через типизированные числовые поля, но YAML с лишним ключом тихо проглатывается → опечатки маскируются. | Скрытые баги конфигурации. |
+
+### B. Performance gaps (упорядочены по impact × effort)
+
+| # | Файл:строка | Проблема | Ожидаемый выигрыш |
+|---|---|---|---|
+| **B1** | `core/segmenter.py:114-116` (`md5_file(source)`) | Full-file MD5 как ключ keyframe-cache. На 180 GB 4K HDR это 60–360 сек cold-start I/O до первого encode. | **Замена на `os.stat()` ((size, mtime_ns) кортеж)** → 60-360 сек → ~1 мс. Effort: S. |
+| **B2** | `core/transforms/audio_loudnorm.py::measure` | Pass-1 loudnorm читает аудио на native sample rate (48 kHz × 2 channels × 4ч = 2.2 GB PCM). EBU R128 работает на 400ms gating blocks — 16 kHz mono достаточно. | **Prepend `-ar 16000 -ac 1` перед `loudnorm`** → ~6× быстрее (144s → 24s на 4h source). Effort: S. |
+| **B3** | `core/segmenter.py::process_video_segment` (две ffmpeg-форк подряд) | Per-segment: stream-copy extract в `_src.mkv` + filter_complex re-encode. На HDD это +600 MB write+read per segment до начала кодирования. | **Fuse в один `-ss start -i source -t span -filter_complex …`** → 15-25% wall-time на HDD, 5-10% на NVMe, 50% peak disk usage. Effort: M (нужны тесты CRIT-2 edit-list). |
+| **B4** | `core/checkpoint.py:160-192` (`_flush` на каждый `mark()`) | На 1000-сегментном плане × 4 workers = ~2000 fsync. На SSD: 1-4 сек, на HDD: 10-40 сек чистого I/O. | **Debounce: flush раз в 250ms или N marks** + явный flush на phase boundary → 10-20× меньше fsync. Effort: M. |
+| **B5** | `core/qa/vmaf.py:40-107` (default `subsample=1`) | VMAF на 4ч 24fps = 345k frames. libvmaf ~50fps → 4-11 часов compute. | **Auto `subsample=6` для source > 30 мин** → 6× быстрее, потеря точности < 0.5 VMAF. Effort: S. |
+| **B6** | `core/encoder.py:73-87` cold-start detection | 10 серийных ffmpeg-проб по 0.5с = 5.5с минимум. | **`ThreadPoolExecutor(max_workers=10)`** → ~0.6с. Effort: S. |
+| **B7** | `core/encoder.py:138-166` `_nvenc_max_parallel` читает только "first GPU" | Multi-GPU host получает cap одного GPU, не сумму. | Сумма сессий по GPU. Effort: S. |
+| **B8** | `core/queue/leasing.py:130` `sorted(pending.iterdir())` каждый poll | На NFSv4 noac × 100 jobs × 10ms RTT = 100ms на lease call. | Локальный cursor через отсортированный список → ×2 меньше metadata traffic. Effort: S. |
+
+### C. Code quality gaps (top-15 для best-in-class)
+
+Из python-reviewer'а, отсортировано по приоритету:
+
+1. `core/pipeline.py:184-185` — `getattr(params, "fillcolor_sdr", "black")` обходит typed model. Replace с `isinstance(params, RotateParams)`.
+2. `core/cli/cmd_worker.py:138`, `cmd_batch.py:107` — `# type: ignore[arg-type]` на `build_plan(leased, profile, …)` → mypy --strict not actually clean. Затянуть `_process_one(profile: Profile)`.
+3. `core/transforms/hdr_wrap.py:90-101` — `getattr(tc, "enabled", True)` под предлогом "circular import". Цикл на самом деле отсутствует. Импортировать `TransformConfig`, убрать duck-typing.
+4. `core/probe.py:257,262,267,272` — `# type: ignore[return-value]` в `_coerce_*` функциях. Использовать `cast(ColorTransfer, value)` или `frozenset(get_args(Literal))`.
+5. `core/calibration/intensity.py:52` (`_scale_params`) — длинный if/elif без `else`. Неизвестный transform_id → `NameError` на `scaled`. Добавить fallback.
+6. `core/calibration/intensity.py:176-181` (`_clamp_to_schema`) — `getattr(m, "ge", None)` на pydantic v2 FieldInfo metadata — undocumented private API. Использовать `annotated_types.GroupedMetadata` или `field.metadata`.
+7. `gui/screens/history.py:101` — `def _build_actions(self, entry)` без return-аннотации + `# type: ignore[no-untyped-def]`. Strict-mypy не покрывает.
+8. `core/checkpoint.py:174` — `json.dumps(..., default=str)` тихо съедает несериализуемые объекты. Убрать `default=str` или предварительно валидировать.
+9. `core/cli/cmd_worker.py:125-127` — `contextlib.suppress(Exception)` на `heartbeat()` → потеря lease без логов. Добавить WARNING.
+10. `core/orchestrator.py:62-70` — `RunOptions.__post_init__` бросает `ValueError`, а не `YtUniquifierError`. Внешние `except YtUniquifierError` не ловят. Добавить `ConfigError(YtUniquifierError)`.
+11. `core/runner.py:133` — `import os as _os` внутри hot-path функции. Move to top.
+12. `core/runner.py:140-143` — на retry OLD `log_lines` теряются. Concatenate.
+13. `core/encoder.py:35-37` — `import sys as _sys` внутри `_cache_path`. Заменить test hook на `set_cache_path`.
+14. `core/pipeline.py:197-208` — `BuiltCommand.args: list[str]` frozen=True, но list мутируемый. Сменить на `tuple[str, ...]`.
+15. `core/transforms/__init__.py:1-22` — все import side-effects без guard. Один битый transform валит весь tool. Wrap в try/except + log + плагин-discovery через `importlib.metadata.entry_points()`.
+
+### D. Тесты — критичные пробелы
+
+Из qa-expert audit'а:
+
+1. **🔴 ZERO snapshot tests** для `video_color` и `video_noise` — два самых частых transform'а в дефолтных профилях.
+2. **🔴 NO SIGKILL-mid-segment resume test** — fault-injection не тестируется.
+3. **🔴 `calibration/intensity.py` имеет ZERO покрытия** — load-bearing для calibrate loop.
+4. **🟡 Queue leasing race** — `test_two_workers_no_double_lease` использует threads, не процессы. Реальная NFS-race не проверяется.
+5. **🟡 `audio_loudnorm` two-pass caching** — пути `_parse_measurement` тестируются, но full cache hit/miss path на resume — нет.
+6. **🟡 `utils/ffmpeg_paths.py` ZERO тестов** — но это #1 user-support failure mode.
+7. **🟡 Visual baselines** имеют `_actual_*.png` файлы в git → ложные diffs.
+8. **🟡 CI matrix без Windows** — `plan_hash` cross-OS portability fix никогда не проверяется.
+9. **🟡 GPU encoders** не тестируются в CI (нужны runners с NVENC/QSV).
+10. **🟡 Cancel mid-segment** — нет теста, проверяющего отсутствие zombie subprocess + clean state.json.
+
+### E. GUI gaps
+
+Из GUI audit:
+
+1. **🔴 Accessibility ≈ ZERO**. Ноль `setAccessibleName`, `setAccessibleDescription`, `setTabOrder`, `setShortcut`. Биг-блок для shipping.
+2. **🔴 Cancel сломан** для CalibrateWorker, QaWorker, CorrelateWorker, EncoderDetectWorker. UI показывает кнопку Cancel, но работа продолжается.
+3. **🟡 Hardcoded `Path.home() / ".config" / "yt_uniquifier"`** — игнорирует `XDG_CONFIG_HOME` и macOS/Windows конвенции. Использовать `QStandardPaths.AppConfigLocation`.
+4. **🟡 Theme switch leaks**: `widgets/preflight_panel.py:75` и `widgets/kpi_pills.py:107` хардкодят цвета, не пересчитываются на `state.theme_changed`.
+5. **🟡 `theme.py:48` system → silent dark fallback**, но в Settings combo показан как функциональный → mismatch.
+6. **🟡 Нет global `sys.excepthook`** — unhandled exception в Qt-slot вызывает `qFatal` и убивает app тихо.
+7. **🟡 No "Copy details" button** на critical-диалогах — bug reports = "оно крашнулось".
+8. **🟡 `BatchWorker` reports только `(i+1)/total`** — per-file прогресс выкинут.
+9. **🟡 `QaWorker.progress(float, msg)`** есть, но GUI рисует indeterminate marquee bar — теряется доступная информация.
+10. **🟡 `qa_viewer.py:140` `setRange(0,0)`** discards available fractions.
+11. **🟡 `correlate_worker.py:35-58`** запускает `python tools/...` script вместо `core/` функции (layering violation; auditor 1 это тоже нашёл).
+12. **🟡 PyInstaller fragile `Path(__file__).parents[2]`** в screens/. Заменить на `importlib.resources.files("yt_uniquifier") / "profiles"`.
+
+---
+
+## 3. Сравнение с конкурентами (матрица)
+
+| Capability | yt-uniquifier | 360° Uniquizer | GiliSoft UniReel | Av1an | HandBrake | Shutter Encoder | videoduplicatefinder |
+|---|---|---|---|---|---|---|---|
+| Open source | ✅ MIT | ❌ paid | ❌ paid | ✅ | ✅ | ✅ | ✅ |
+| Cross-platform | ✅ Linux+macOS, Win partial | ❌ Win | ❌ Win | ✅ | ✅ | ✅ | ✅ |
+| Signed installer | ❌ pip install | ✅ MSI | ✅ MSI | ❌ | ✅ DMG/MSI/Flatpak | ✅ | ✅ |
+| Crash-resumable pipeline | ✅ segment-level | ❌ | ❌ | ✅ encode-only | ❌ | ❌ | n/a |
+| Per-segment seed divergence | ✅ unique | ❌ black box | ❌ black box | ❌ | ❌ | ❌ | n/a |
+| Audio never split | ✅ | ❌ split | ❌ split | n/a | ✅ | ✅ | n/a |
+| HDR-aware transforms | ✅ zscale wrap | ❌ | ❌ | ✅ encode | ✅ tonemap | ❌ | n/a |
+| HDR→SDR pipeline | ✅ 4 алгоритма | ❌ | ❌ | ❌ | ✅ | ❌ | n/a |
+| Multi-vendor GPU real-probe | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | n/a |
+| Academic citations | ✅ Smitelli, Fojcik | ❌ none | ❌ none | ❌ | ❌ | ❌ | ❌ |
+| Calibration loop (auto-tune) | ✅ CLI | ✅ GUI live | ✅ AI black box | ❌ | ❌ | ❌ | n/a |
+| Distributed batch shared-FS | ✅ no Redis | ❌ | ❌ | ❌ local only | ❌ | ❌ | ❌ |
+| Integrated QA report | ✅ HTML+JSON | partial | ❌ | partial VMAF | ❌ | ❌ | n/a |
+| Embedding-based copy detection (SSCD) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Platform-destination profiles (TikTok/YT/Reels) | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | n/a |
+| GUI live divergence indicator | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | n/a |
+| Post-job webhook/email | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ FTP+email | ✅ |
+| Pause/resume in-progress | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | n/a |
+| Preset import/export marketplace | ❌ (YAML, ручной) | ❌ | ❌ | ❌ | ✅ JSON | ✅ | n/a |
+| Vulkan AV1 encoder (FFmpeg 8.0) | ❌ | ❌ | ❌ | планируется | планируется | ❌ | n/a |
+
+**Резюме**: yt-uniquifier архитектурно лидирует в 8 категориях (resume, seed divergence, audio integrity, HDR, GPU probe, academic backing, distributed batch, QA). **Проигрывает в дистрибуции / UX-удобстве / platform-presets / live indicators / webhook'ах.**
+
+---
+
+## 4. Категория-определяющие фичи (что добавить, чтобы быть best-in-class)
+
+Приоритизация: impact × (1/effort):
+
+| # | Фича | Impact | Effort | Откуда взято |
+|---|---|---|---|---|
+| **F1** | Подписанные one-click инсталляторы: macOS .dmg notarized + Windows MSI/EXE InstallForge + Linux AppImage. Bundled ffmpeg. CI artifact pipeline. | 🟢🟢🟢 высочайший | 🟡 M (2-3 недели + first-time notarization дебаг) | HandBrake, Shutter Encoder, FFmpeg Batch AV. |
+| **F2** | GUI live divergence indicator — pHash + chromaprint Jaccard стримятся через `RunEvent` во время encode, рисуются как KPI pill per segment + сводный score внизу экрана. | 🟢🟢🟢 | 🟢 S (метрики уже считаются, только стриминг + рендер) | 360° Uniquizer (главная UX-фишка). |
+| **F3** | Platform-destination профили: `youtube_4k.yaml`, `tiktok_vertical.yaml`, `instagram_reels.yaml`, `linkedin_square.yaml`, `shorts.yaml`. Crop+aspect+loudnorm peak per-platform. | 🟢🟢 | 🟢 S (YAML, нет кода) | HandBrake, Shutter Encoder, DaVinci Resolve. |
+| **F4** | Post-job webhook + email + Discord/Slack/Telegram. Configurable в Settings. `on_event(kind="completed")` → HTTP POST или SMTP. | 🟢🟢 | 🟢 S (1 день) | Shutter Encoder. |
+| **F5** | Pause / Resume in-progress. SIGTSTP handler в CLI + GUI Pause button → wait → SIGCONT. State.json уже резюмируем; нужно gracefully suspend ffmpeg. | 🟢🟢 | 🟡 M (signal handling + GUI wiring) | HandBrake, FFmpeg Batch AV. |
+| **F6** | SSCD-based copy detection как опциональная QA-метрика (`pip install yt-uniquifier[ml]`). Frame grid + ResNet50 embedding + cosine vs source. | 🟢🟢🟢 (PR + academic credibility) | 🟡 M (TorchScript model + opt dep) | Meta SSCD, VSC2022. **Маркетинг: "the only OSS uniquifier whose QA is backed by the model used by Meta to dedup LLaMA 3 training data".** |
+| **F7** | Auto-calibrate в GUI: единая кнопка "Auto-tune for this source" в Run-экране — запускает calibrate, обновляет профиль, потом encode. Сейчас calibrate только CLI. | 🟢🟢 | 🟢 S (GUI wiring) | 360° Uniquizer auto-diversity loop. |
+| **F8** | Vulkan AV1 encoder detection (`av1_vulkan` candidate) — FFmpeg 8.0 фича, AMD/Intel GPU. Добавить в `_CANDIDATES` в `core/encoder.py`. | 🟢🟢 | 🟢 S | FFmpeg 8.0 Huffman release. |
+| **F9** | Profile marketplace: GitHub repo `yt-uniquifier-profiles/` + GUI "Import from URL/community" кнопка. | 🟢 | 🟡 M | HandBrake preset sharing pattern. |
+| **F10** | SQLite-backed corpus index (replace flat JSON scan). Эмбеддинги + scalar metadata. Scale до 50k+ reference videos. | 🟢 | 🟡 M | benetech/VideoDeduplication (PostgreSQL). Не повторять зависимостный overhead — sqlite3 встроен. |
+| **F11** | Per-segment VMAF target-quality mode (Av1an-style). Если segment scores < target, перекодировать с пониженным CRF. | 🟢🟢 | 🟠 L (требует feedback loop в core/segmenter.py) | Av1an. |
+| **F12** | PySceneDetect интеграция как альтернативный segment-boundary детектор (адаптивный по контенту, не только keyframe-aligned). Опционально. | 🟢 | 🟡 M | PySceneDetect v0.6.6. |
+| **F13** | Docker-image + headless Web UI для NAS-сценария. `yt-uniquifier-web` отдельный extras. | 🟢 (новая аудитория) | 🟠 L | videoduplicatefinder Docker. |
+| **F14** | Whisper-based subtitle generation (ffmpeg 8.0 native Whisper filter) + burn-in. Соцсетевые форматы требуют subtitles. | 🟢 | 🟡 M | GiliSoft UniReel "creative suite" positioning. |
+
+---
+
+## 5. Roadmap до best-in-class (5 релизов)
+
+### **v0.5.5 — Hotfix Sprint (1-2 недели)** — production-критичные баги
+
+**Цель**: устранить data races, broken cancel, security pin. Никаких новых фич.
+
+- [ ] A1: фикс мутации `RunEvent.payload` в `segmenter.py:265-272` — создавать новый dict.
+- [ ] A2: замена `assert isinstance` → `if not isinstance: raise PipelineError(...)` во всех 17 transform builder'ах + `pipeline.py`.
+- [ ] A3: фикс resume edge case в `orchestrator.py:158-163` (`any` → `all`) ИЛИ фильтрация `final_segments` по `.exists()`.
+- [ ] A4: `fcntl.flock` на `state.json` в `checkpoint.py` ИЛИ assert one-work-dir-per-input в orchestrator.
+- [ ] A6: плумбинг `cancel_token` через `core.calibration.loop.calibrate`, `core.qa.report.build_report`, `core.encoder.detect_encoders`; subprocess.Popen + terminate в `correlate_worker.py`.
+- [ ] A9: Pillow pin `Pillow>=10.3.1,<11`.
+- [ ] A10: `model_config = ConfigDict(extra="forbid")` во всех `*Params`.
+- [ ] Тесты регрессии для A1, A3, A6.
+
+**Метрика**: `make test` зелёный + новый `tests/integration/test_resume_after_partial_cleanup.py` + `tests/integration/test_cancel_during_calibrate.py`.
+
+### **v0.6.0 — Performance + Distribution (3-4 недели)** — best-in-class baseline
+
+**Цель**: топовые perf-оптимизации + кросс-платформенная дистрибуция.
+
+- [ ] B1: keyframe-cache key → `(size, mtime_ns)`. Удалить `md5_file` в hot path.
+- [ ] B2: loudnorm pass-1 → `-ar 16000 -ac 1`.
+- [ ] B3: fuse stream-copy extract в single-fork ffmpeg на сегмент (с rollback flag).
+- [ ] B4: debounced checkpoint flush.
+- [ ] B5: auto `vmaf_subsample` для source > 30 мин.
+- [ ] B6: параллельный encoder probe.
+- [ ] A5: Popen-side watcher thread для cancel.
+- [ ] **F1: signed installers** — macOS notarized DMG + Win MSI + Linux AppImage. GitHub Releases pipeline. Bundled ffmpeg static-link.
+- [ ] **F8: av1_vulkan** detection.
+- [ ] CI: добавить windows-latest runner. CI matrix Ubuntu × macOS × Windows × Py3.11/3.12. Add nightly job с реальным ffmpeg from source.
+
+**Метрика**: 2h 1080p run time -25% на HDD baseline. macOS DMG проходит notarization. Windows MSI install + run без admin prompts.
+
+### **v0.7.0 — GUI maturity + Platform profiles (3-4 недели)**
+
+**Цель**: визуально и accessibility on par с HandBrake, market reach.
+
+- [ ] **F2: live divergence indicator** в Run и Batch screens.
+- [ ] **F3: platform-destination profiles** (5 шипуемых).
+- [ ] **F4: post-job webhook + SMTP**.
+- [ ] **F7: Auto-calibrate button** в Run screen.
+- [ ] E1: accessibility sweep — `setAccessibleName`, `setTabOrder`, `setShortcut` (Cmd+R/Esc), мнемоники в кнопках.
+- [ ] E3: `QStandardPaths.AppConfigLocation` + `CacheLocation` везде. Migration helper для существующих `~/.config/yt_uniquifier/`.
+- [ ] E4: фикс theme leaks в `kpi_pills` и `preflight_panel`.
+- [ ] E6: global `sys.excepthook` с QMessageBox + "Copy details" button.
+- [ ] E12: `importlib.resources.files()` в PyInstaller-fragile путях.
+- [ ] **F5: Pause/Resume** — SIGTSTP + GUI button + state.json marker.
+- [ ] Все 17 typed `# type: ignore` устранить (C1-C7).
+- [ ] Visual regression: WCAG-AA contrast test в `tests/gui/`.
+
+**Метрика**: 100% screen-reader compat (VoiceOver/NVDA), 5 platform-presets shipped, post-job notification → Discord/email/Slack работают, theme switch без leak'ов.
+
+### **v0.8.0 — ML-grade QA + Plugin system (4-5 недель)**
+
+**Цель**: research-grade backing + extensibility.
+
+- [ ] **F6: SSCD-based copy detection** через `[ml]` extras. Frame-grid + ResNet50 эмбеддинг + cosine сходство. HTML-report показывает SSCD distribution.
+- [ ] **F10: SQLite-backed corpus** (scale > 10k references).
+- [ ] **F11: per-segment VMAF target-quality** (Av1an-style feedback loop).
+- [ ] **F12: PySceneDetect** segment boundary mode (opt-in).
+- [ ] Transform plugin system через `importlib.metadata.entry_points()` — community может писать transforms без форка.
+- [ ] Calibrate loop: bisect по SSCD similarity вместо chromaprint Jaccard как опция.
+
+**Метрика**: `yt-uniq qa <in> <out> --sscd` работает offline, scale до 50k corpus references без замедления, plugin система задокументирована + 1 third-party example.
+
+### **v0.9.0 — Community + Web (4-6 недель)**
+
+**Цель**: extend audience.
+
+- [ ] **F9: profile marketplace** — GitHub repo + GUI "Import community profile".
+- [ ] **F13: Docker headless** + `yt-uniquifier-web` (Flask/FastAPI + small SPA) для NAS use-case.
+- [ ] **F14: Whisper subtitle** transform (FFmpeg 8.0 native filter).
+- [ ] Telemetry opt-in (anonymous + transparent + local-only export) — для benchmarking against community profiles.
+- [ ] Documentation site (mkdocs-material) с video walkthroughs.
+- [ ] Localization: en + ru (как минимум) через QTranslator.
+
+**Метрика**: Docker image на Docker Hub, web UI работает на Synology/QNAP, в маркетплейсе 10+ community profiles, документация переведена.
+
+### **v1.0.0 — Stable release** (после ~2-3 месяцев тестирования v0.9)
+
+**Цель**: production-ready manifest.
+
+- [ ] API stability guarantees: `Plan`, `Profile`, `RunEvent` контракты заморожены.
+- [ ] SemVer контракт + RFC процесс для breaking changes.
+- [ ] Performance regression suite (benchmark.py с трекингом по релизам).
+- [ ] Полное `tests/` покрытие > 85%.
+- [ ] Code signing certificates для всех платформ.
+- [ ] Bug bounty / security disclosure policy.
+
+---
+
+## 6. Files to Change (ключевые точки приложения сил)
+
+Только для v0.5.5 hotfix (остальные релизы детализируются отдельно):
+
+| Файл | Действие | Причина |
+|---|---|---|
+| `src/yt_uniquifier/core/segmenter.py:265-272` | EDIT | A1: `RunEvent(payload={**ev.payload, "segment": segment.idx})` вместо мутации |
+| `src/yt_uniquifier/core/pipeline.py:266-267, 574, 712` | EDIT | A2: `assert` → `raise PipelineError` |
+| `src/yt_uniquifier/core/transforms/{audio_*,video_*}.py` (17 files) | EDIT | A2: то же самое для builder-ов |
+| `src/yt_uniquifier/core/orchestrator.py:158-180` | EDIT | A3: фикс resume edge case |
+| `src/yt_uniquifier/core/checkpoint.py:160-192` | EDIT | A4: добавить `fcntl.flock` (или enforce per-input work_dir в orchestrator) |
+| `src/yt_uniquifier/core/runner.py:200-280` | EDIT | A5: watcher thread для cancel |
+| `src/yt_uniquifier/core/calibration/loop.py:72-150` | EDIT | A6: добавить `cancel_token` параметр + check'и |
+| `src/yt_uniquifier/gui/workers/calibrate_worker.py` | EDIT | A6: pass cancel_token, request_cancel honored |
+| `src/yt_uniquifier/gui/workers/qa_worker.py`, `correlate_worker.py`, `encoder_detect_worker.py` | EDIT | A6: cancel infrastructure |
+| `src/yt_uniquifier/core/queue/leasing.py:104-145` | EDIT | A7: `is_symlink()` reject + A8: tighten reaper check |
+| `pyproject.toml` | EDIT | A9: Pillow pin |
+| `src/yt_uniquifier/core/transforms/*Params*` (17 модулей) | EDIT | A10: `extra=forbid` |
+| `tests/integration/test_resume_after_partial_cleanup.py` | CREATE | Regression for A3 |
+| `tests/integration/test_cancel_during_calibrate.py` | CREATE | Regression for A6 |
+| `tests/integration/test_state_json_concurrent_writes.py` | CREATE | Regression for A4 |
+| `tests/unit/test_runevent_no_mutation.py` | CREATE | Regression for A1 |
+| `tests/unit/test_assert_under_pythonoptimize.py` | CREATE | Regression for A2 |
+
+---
+
+## 7. Validation commands (после v0.5.5)
+
+```bash
+make check                              # ruff + mypy + full pytest
+make test-integration                   # full ffmpeg-based suite
+PYTHONOPTIMIZE=2 make test              # A2 regression: assert-less behaviour
+pytest tests/integration/test_resume_after_partial_cleanup.py -v
+pytest tests/integration/test_cancel_during_calibrate.py -v
+pytest tests/integration/test_state_json_concurrent_writes.py -v
+yt-uniq run <real_4k> --workers 8 --new-variant  # smoke: no data race in logs
+```
+
+---
+
+## 8. Risks
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| A2 fix ломает hot path производительности (Python `if` vs stripped assert) | Низкая | Branchless микро-bench перед merge; в hot loops инлайнить вручную если нужно |
+| A4 `fcntl.flock` ломает Windows | Высокая | Использовать `msvcrt.locking` через abstraction layer ИЛИ enforce one-work-dir-per-input как контракт + verbose error |
+| F1 macOS notarization регрессии с Xcode 16+ | Средняя | Использовать GitHub Actions с pinned xcode 15.x; следить PyInstaller issue #7937 |
+| F6 SSCD model size (200+ MB) делает release tarball thick | Высокая | Lazy-download при первом запуске + cache в `~/.cache/yt_uniquifier/models/` |
+| F11 per-segment VMAF feedback loop конфликтует с distributed batch | Средняя | Изначально only single-host; для distributed остаётся файловый QA |
+| F5 SIGTSTP+ffmpeg на Windows = N/A (no SIGTSTP) | Высокая | На Windows использовать `proc.suspend()` через win32api ИЛИ deferred-only-on-segment-boundary паузу |
+| GUI redesign под accessibility ломает существующих power users | Низкая | Все изменения накопительные, keyboard shortcuts добавляются — не меняются |
+
+---
+
+## 9. Что НЕ входит в план (намеренно отложено)
+
+| Идея | Почему deferred |
+|---|---|
+| Mobile app (iOS/Android) | Off-target — это desktop/headless tool |
+| Cloud SaaS | Противоречит OSS позиционированию + регуляторные риски |
+| Auto-upload в YouTube/TikTok | TOS risk; v0.5.4 спецификация уже это отвергла |
+| Real-time CID API integration | Нет публичного CID API |
+| Adversarial gradient attacks | Требует CID surrogate model + GPU dataset (research-scale) |
+| Plugin system для UI (custom screens) | Plugin для transforms — да, но GUI extensibility — overengineering |
+| Watermarking with steganography | Out of scope (не uniquification) |
+
+---
+
+## 10. Acceptance — что значит "best-in-class" для v1.0
+
+- [ ] Все 7 must-fix-before-1.0 (CRITICAL + HIGH из секций A) закрыты, регрессионные тесты в CI.
+- [ ] **Signed installers** для 3 платформ доступны в GitHub Releases.
+- [ ] **Win runner** в CI.
+- [ ] **Live divergence indicator** в GUI, замеренный TTV (time-to-value) для нового пользователя ≤ 60 сек.
+- [ ] **5+ platform-destination профилей** шипятся.
+- [ ] **Post-job webhook** работает с Discord, Slack, email.
+- [ ] **SSCD QA** опционально доступен, документация показывает correlation с реальным CID.
+- [ ] **80%+ coverage** на core/, 100% на новых модулях.
+- [ ] **Performance baseline**: 2h 1080p run на референсном HDD-стенде ≤ 1.2× libx264 baseline (vs 1.5× сейчас).
+- [ ] **Accessibility**: WCAG 2.1 AA для всех 10 экранов.
+- [ ] **Documentation site** с видео-туториалами.
+- [ ] **Profile marketplace** с ≥ 10 community profiles.
+
+---
+
+**WAITING FOR CONFIRMATION**: Готов начать с v0.5.5 hotfix sprint? Подтверждение варианты:
+- "yes" / "proceed v0.5.5" — старт hotfix-спринта (A1-A10)
+- "v0.6 first" — начать с performance + signed installers
+- "modify: …" — изменить приоритеты / scope
+- "expand <раздел>" — расписать детали по конкретному пункту перед стартом

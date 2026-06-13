@@ -8,6 +8,7 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
     register,
 )
 
@@ -19,7 +20,7 @@ class NoiseParams(BaseModel):
 
 
 def _build_noise(params: BaseModel, alloc: LabelAllocator, in_lbl: str) -> FilterChain:
-    assert isinstance(params, NoiseParams)
+    params = ensure_params(params, NoiseParams)
     out = alloc.next("v")
     filt = f"noise=alls={params.strength}:allf=t+u"
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)

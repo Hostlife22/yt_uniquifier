@@ -31,6 +31,8 @@ from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
     TransformSpec,
+    ensure_params,
+    ensure_rng,
     register,
 )
 
@@ -52,11 +54,10 @@ class NoiseOverlayParams(BaseModel):
 def _build_noise_overlay(
     params: BaseModel, alloc: LabelAllocator, in_lbl: str, *, rng: object = None
 ) -> FilterChain:
-    assert isinstance(params, NoiseOverlayParams)
+    params = ensure_params(params, NoiseOverlayParams)
     noise_db = params.noise_db
     if params.randomize_within_db > 0 and rng is not None:
-        from random import Random as _Random
-        assert isinstance(rng, _Random)
+        rng = ensure_rng(rng)
         noise_db += rng.uniform(-params.randomize_within_db, params.randomize_within_db)
         noise_db = max(-40.0, min(-3.0, noise_db))
 

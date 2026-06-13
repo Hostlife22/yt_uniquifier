@@ -263,8 +263,19 @@ class FilterGraph:
                 spec = get(tc.id)
                 params = spec.schema.model_validate({**spec.defaults, **tc.params})
                 if tc.id == LOUDNORM_ID:
-                    assert isinstance(params, LoudnormParams)
-                    assert self._loudnorm_measurement is not None
+                    # A2 (v0.5.5): explicit raises in place of `assert` so
+                    # PYTHONOPTIMIZE=1 / PyInstaller -O builds still catch
+                    # a wrong-schema params or a forgotten measure() pass.
+                    if not isinstance(params, LoudnormParams):
+                        raise PipelineError(
+                            f"loudnorm: expected LoudnormParams, "
+                            f"got {type(params).__name__}",
+                        )
+                    if self._loudnorm_measurement is None:
+                        raise PipelineError(
+                            "loudnorm: measurement missing — "
+                            "pass-1 scan was skipped before build()",
+                        )
                     chain = build_apply(
                         params, self._loudnorm_measurement, self.alloc,
                         a_label, rng=rng,
@@ -571,7 +582,11 @@ def build_main_audio_command(
         params = spec.schema.model_validate({**spec.defaults, **tc.params})
         if tc.id == LOUDNORM_ID:
             ln_params = LoudnormParams.model_validate({**spec.defaults, **tc.params})
-            assert measurement is not None
+            if measurement is None:
+                raise PipelineError(
+                    "loudnorm: measurement missing — pass-1 scan "
+                    "was skipped before build_main_audio_command()",
+                )
             chain = build_apply(ln_params, measurement, alloc, a_label, rng=rng)
         else:
             chain = call_build(spec, params, alloc, a_label, rng=rng)
@@ -709,7 +724,11 @@ def build_main_audio_command_windowed(
         ln_defaults = get(LOUDNORM_ID).defaults
         ln_from_profile = _loudnorm_params_from(audio_transforms_all).model_dump()
         ln_params = LoudnormParams.model_validate({**ln_defaults, **ln_from_profile})
-        assert measurement is not None
+        if measurement is None:
+            raise PipelineError(
+                "loudnorm: measurement missing — pass-1 scan was "
+                "skipped before build_main_audio_command_windowed()",
+            )
         # Derive a dedicated seed for the loudnorm jitter so each run/file
         # under the `divergent` strategy gets a unique target jitter value.
         # Using `plan.run_seed` raw made the per-call jitter constant
