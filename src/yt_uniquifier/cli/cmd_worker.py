@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.queue.leasing import FileQueue
@@ -128,14 +129,14 @@ def _heartbeat_loop(q: FileQueue, stop: threading.Event,
 
 
 def _process_one(
-    leased: Path, profile: object, out_dir: Path,
+    leased: Path, profile: Profile, out_dir: Path,
     encoder_override: str | None, work_root: Path,
     workers: int, keep_segments: bool,
     *,
     cancel_token: CancelToken | None = None,
 ) -> None:
     out = out_dir / (leased.stem + ".uniq.mp4")
-    plan = build_plan(leased, profile, encoder_override)  # type: ignore[arg-type]
+    plan = build_plan(leased, profile, encoder_override)
     options = RunOptions(
         work_dir=work_root / plan.plan_hash,
         output=out,

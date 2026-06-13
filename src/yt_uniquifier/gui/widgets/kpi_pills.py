@@ -5,10 +5,12 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+from yt_uniquifier.gui.theme import tokens_for
+
 # Threshold bands per KPI: (green_max, yellow_max). Beyond → red.
 # Values use the "lower is better" convention where applicable
 # (pHash, cid_predict). For "higher is better" KPIs (VMAF, Hamming)
-# we flip the comparison in _pill_color.
+# we flip the comparison in _pill_color_key.
 _KPI_BANDS = {
     "phash_worst":   ("lower", 0.75, 0.85),
     "vmaf_mean":     ("higher", 85.0, 75.0),
@@ -17,22 +19,28 @@ _KPI_BANDS = {
 }
 
 
-def _pill_color(name: str, value: float | None) -> str:
+def _pill_color_key(name: str, value: float | None) -> str:
+    """Return the token key (`kpi_red`/`kpi_yellow`/`kpi_green`/`kpi_neutral`).
+
+    Decoupled from the actual color string so the same logic resolves
+    differently per theme (R1/E4 — was returning hex codes directly,
+    which leaked dark-theme palette into light-theme renders).
+    """
     if value is None:
-        return "#9b9ba8"
+        return "kpi_neutral"
     direction, green_thr, yellow_thr = _KPI_BANDS.get(name, ("lower", 0.5, 0.8))
     if direction == "lower":
         if value < green_thr:
-            return "#3ba85c"   # green
+            return "kpi_green"
         if value < yellow_thr:
-            return "#d1a93b"   # yellow
-        return "#a83b3b"       # red
+            return "kpi_yellow"
+        return "kpi_red"
     # higher
     if value >= green_thr:
-        return "#3ba85c"
+        return "kpi_green"
     if value >= yellow_thr:
-        return "#d1a93b"
-    return "#a83b3b"
+        return "kpi_yellow"
+    return "kpi_red"
 
 
 class KpiPills(QWidget):
@@ -40,17 +48,39 @@ class KpiPills(QWidget):
 
     Empty when no qa.json is set. Renders 4 pills:
     pHash worst chunk, VMAF, Audio FP Hamming, CID predicted.
+
+    Pass `state` to subscribe to `theme_changed` so the pills repaint
+    on theme switch. Construction without `state` keeps the widget
+    usable in tests; pills will use the dark theme until
+    `set_theme()` is called explicitly.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, state: object | None = None) -> None:
         super().__init__()
+        self._theme: str = "dark"
+        self._last_qa: dict[str, object] | None = None
         self._build_ui()
+        if state is not None:
+            theme = getattr(state, "theme", None)
+            if isinstance(theme, str):
+                self._theme = theme
+            sig = getattr(state, "theme_changed", None)
+            if sig is not None:
+                sig.connect(self.set_theme)
 
     def _build_ui(self) -> None:
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 4, 0, 4)
         self._layout.setSpacing(8)
         self._layout.addStretch(1)
+
+    def set_theme(self, theme: str) -> None:
+        """Repaint pills with the new theme's tokens. Idempotent."""
+        if theme == self._theme:
+            return
+        self._theme = theme
+        if self._last_qa is not None:
+            self.set_qa(self._last_qa)
 
     def clear(self) -> None:
         while self._layout.count() > 1:  # keep stretch at the tail
@@ -63,6 +93,7 @@ class KpiPills(QWidget):
 
     def set_qa(self, qa: dict[str, object]) -> None:
         """Populate from a QA dict (decoded qa.json)."""
+        self._last_qa = qa
         self.clear()
 
         # Compute worst chunk pHash.
@@ -100,12 +131,14 @@ class KpiPills(QWidget):
     def _pill(
         self, label: str, value: float | None, band_key: str, fmt: str,
     ) -> QLabel:
-        color = _pill_color(band_key, value)
+        tokens = tokens_for(self._theme)
+        color = tokens[_pill_color_key(band_key, value)]
+        fg = tokens["kpi_fg"]
         text = fmt.format(value) if value is not None else "n/a"
         pill = QLabel(f"<b>{label}</b>  {text}")
         pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pill.setStyleSheet(
-            f"background: {color}; color: white; "
+            f"background: {color}; color: {fg}; "
             f"padding: 6px 12px; border-radius: 12px; font-weight: 600;"
         )
         return pill

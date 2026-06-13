@@ -1,8 +1,14 @@
 """Single source of truth for GUI selections, recents, history.
 
-Persisted to:
-  ~/.config/yt_uniquifier/state.json   — current paths + prefs + recents
-  ~/.config/yt_uniquifier/history.json — past runs (capped at HISTORY_CAP)
+Persisted under the platform's standard app-config directory
+(`QStandardPaths.AppConfigLocation`):
+
+  macOS:   ~/Library/Application Support/yt_uniquifier/
+  Windows: %APPDATA%\\yt_uniquifier\\
+  Linux:   $XDG_CONFIG_HOME/yt_uniquifier/  (or ~/.config/yt_uniquifier/)
+
+A one-time migration helper copies a legacy `~/.config/yt_uniquifier/`
+directory into the new location if the new location is still empty.
 
 Screens subscribe to changes via Qt signals.
 """
@@ -12,11 +18,12 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import shutil
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QStandardPaths, pyqtSignal
 
 _log = logging.getLogger(__name__)
 
@@ -32,7 +39,48 @@ def _archive_corrupt(path: Path) -> None:
         path.rename(archived)
         _log.warning("archived corrupt %s -> %s", path.name, archived.name)
 
-CONFIG_DIR = Path.home() / ".config" / "yt_uniquifier"
+
+def _resolve_config_dir() -> Path:
+    """Return the GUI's persisted-state directory, honouring platform conventions.
+
+    Uses `QStandardPaths.AppConfigLocation` so macOS gets `~/Library/...`,
+    Windows gets `%APPDATA%\\...`, and Linux gets `$XDG_CONFIG_HOME` (or
+    `~/.config` when unset). The hardcoded `~/.config/yt_uniquifier`
+    path used in v0.5.x is preserved as a fallback when the QApplication
+    isn't set up yet (`AppConfigLocation` returns "" without QCoreApplication).
+    """
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppConfigLocation,
+    )
+    if base:
+        return Path(base) / "yt_uniquifier"
+    return Path.home() / ".config" / "yt_uniquifier"
+
+
+def _migrate_from_legacy(new_dir: Path) -> None:
+    """Best-effort one-time copy from the v0.5.x `~/.config/yt_uniquifier/` path.
+
+    Runs only when the new directory does not exist (or has neither
+    state.json nor history.json) AND the legacy path does. Uses
+    `copytree` (not `move`) so the legacy directory remains as a
+    backup. Failures are logged but do not block startup.
+    """
+    legacy = Path.home() / ".config" / "yt_uniquifier"
+    if legacy == new_dir or not legacy.is_dir():
+        return
+    has_data = (new_dir / "state.json").exists() or (new_dir / "history.json").exists()
+    if has_data:
+        return
+    try:
+        new_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(legacy, new_dir, dirs_exist_ok=True)
+        _log.info("migrated GUI state %s -> %s (legacy preserved)", legacy, new_dir)
+    except OSError as exc:
+        _log.warning("legacy state migration failed: %s", exc)
+
+
+CONFIG_DIR = _resolve_config_dir()
+_migrate_from_legacy(CONFIG_DIR)
 STATE_PATH = CONFIG_DIR / "state.json"
 HISTORY_PATH = CONFIG_DIR / "history.json"
 

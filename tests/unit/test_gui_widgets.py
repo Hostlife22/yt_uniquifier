@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication
 from yt_uniquifier.core.preflight import PreflightFinding
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.file_picker import FilePickerRow
-from yt_uniquifier.gui.widgets.kpi_pills import KpiPills, _pill_color
+from yt_uniquifier.gui.widgets.kpi_pills import KpiPills, _pill_color_key
 from yt_uniquifier.gui.widgets.log_console import LogConsole
 from yt_uniquifier.gui.widgets.preflight_panel import PreflightPanel
 from yt_uniquifier.gui.widgets.segment_timeline import SegmentTimeline
@@ -124,18 +124,21 @@ def test_log_console_filter_hides_other_levels(app: QApplication) -> None:
 
 
 # ---- KpiPills ----
+# v0.7 R1/E4: `_pill_color` (returning hex) was replaced by `_pill_color_key`
+# (returning a theme-token key). Tests now assert on the semantic key so they
+# remain valid across theme palette tweaks.
 def test_kpi_pill_color_phash_green() -> None:
-    assert _pill_color("phash_worst", 0.70) == "#3ba85c"
+    assert _pill_color_key("phash_worst", 0.70) == "kpi_green"
 
 
 def test_kpi_pill_color_phash_red() -> None:
-    assert _pill_color("phash_worst", 0.90) == "#a83b3b"
+    assert _pill_color_key("phash_worst", 0.90) == "kpi_red"
 
 
 def test_kpi_pill_color_vmaf_higher_better() -> None:
     """VMAF uses 'higher' direction → 87 should be green."""
-    assert _pill_color("vmaf_mean", 87.0) == "#3ba85c"
-    assert _pill_color("vmaf_mean", 70.0) == "#a83b3b"
+    assert _pill_color_key("vmaf_mean", 87.0) == "kpi_green"
+    assert _pill_color_key("vmaf_mean", 70.0) == "kpi_red"
 
 
 def test_kpi_pills_set_qa_populates_pills(app: QApplication) -> None:

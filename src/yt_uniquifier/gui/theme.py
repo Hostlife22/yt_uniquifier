@@ -21,6 +21,20 @@ DARK_TOKENS = {
     "success":        "#3ba85c",
     "warning":        "#d1a93b",
     "border":         "#444",
+    # Semantic tokens for status badges + KPI pills (R1/E4 — was hard-coded
+    # in widgets/preflight_panel.py and widgets/kpi_pills.py, leaking across
+    # theme switches). bg + fg are paired so a token swap repaints both at once.
+    "badge_fail_bg":  "#a83b3b",
+    "badge_fail_fg":  "#ffffff",
+    "badge_warn_bg":  "#d1a93b",
+    "badge_warn_fg":  "#16161e",
+    "badge_ok_bg":    "#3ba85c",
+    "badge_ok_fg":    "#ffffff",
+    "kpi_red":        "#a83b3b",
+    "kpi_yellow":     "#d1a93b",
+    "kpi_green":      "#3ba85c",
+    "kpi_neutral":    "#9b9ba8",
+    "kpi_fg":         "#ffffff",
 }
 
 LIGHT_TOKENS = {
@@ -37,16 +51,40 @@ LIGHT_TOKENS = {
     "success":        "#2c8c4a",
     "warning":        "#b8902f",
     "border":         "#ccc",
+    # Light-theme semantic tokens — darker fills for AA contrast against
+    # a near-white background; readable fg on each fill.
+    "badge_fail_bg":  "#a83b3b",
+    "badge_fail_fg":  "#ffffff",
+    "badge_warn_bg":  "#b8902f",
+    "badge_warn_fg":  "#ffffff",
+    "badge_ok_bg":    "#2c8c4a",
+    "badge_ok_fg":    "#ffffff",
+    "kpi_red":        "#a83b3b",
+    "kpi_yellow":     "#b8902f",
+    "kpi_green":      "#2c8c4a",
+    "kpi_neutral":    "#6a6a78",
+    "kpi_fg":         "#ffffff",
 }
 
 
-def qss_for(theme: ThemeName) -> str:
+def tokens_for(theme: str) -> dict[str, str]:
+    """Return the token dict for the given theme name.
+
+    Accepts a plain `str` (not just `ThemeName`) so widgets that hold
+    `self._theme: str` from `AppState.theme()` can call this without
+    casting. Any non-"light" value resolves to dark — same fallback as
+    `qss_for`, matching the v0.5 behaviour until explicit OS detection
+    lands in v0.6.
+    """
+    return LIGHT_TOKENS if theme == "light" else DARK_TOKENS
+
+
+def qss_for(theme: str) -> str:
     """Return the full QSS stylesheet for the given theme.
 
     `system` falls back to dark (MVP — explicit OS detection is v0.6).
     """
-    tokens = LIGHT_TOKENS if theme == "light" else DARK_TOKENS
-    return _QSS_TEMPLATE.format(**tokens)
+    return _QSS_TEMPLATE.format(**tokens_for(theme))
 
 
 _QSS_TEMPLATE = """

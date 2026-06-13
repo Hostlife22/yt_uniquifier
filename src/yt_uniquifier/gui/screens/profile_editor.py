@@ -26,10 +26,11 @@ from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
 from yt_uniquifier.core.transforms import all_ids
+from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 
-PROFILES_DIR = Path(__file__).parents[2] / "profiles"
+PROFILES_DIR = profiles_dir()
 
 
 class ProfileEditorScreen(ScreenBase):

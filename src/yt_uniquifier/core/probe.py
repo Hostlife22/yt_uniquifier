@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from yt_uniquifier.core.errors import ProbeError
 from yt_uniquifier.core.models import (
@@ -254,22 +254,22 @@ def _coerce_transfer(value: str) -> ColorTransfer:
         "iec61966-2-1",
         "unknown",
     }
-    return value if value in allowed else "unknown"  # type: ignore[return-value]
+    return cast(ColorTransfer, value) if value in allowed else "unknown"
 
 
 def _coerce_primaries(value: str) -> ColorPrimaries:
     allowed: set[str] = {"bt709", "bt2020", "bt470bg", "smpte170m", "smpte432", "unknown"}
-    return value if value in allowed else "unknown"  # type: ignore[return-value]
+    return cast(ColorPrimaries, value) if value in allowed else "unknown"
 
 
 def _coerce_space(value: str) -> ColorSpace:
     allowed: set[str] = {"bt709", "bt2020nc", "bt2020c", "bt470bg", "smpte170m", "unknown"}
-    return value if value in allowed else "unknown"  # type: ignore[return-value]
+    return cast(ColorSpace, value) if value in allowed else "unknown"
 
 
 def _coerce_range(value: str) -> ColorRange:
     allowed: set[str] = {"tv", "pc", "unknown"}
-    return value if value in allowed else "unknown"  # type: ignore[return-value]
+    return cast(ColorRange, value) if value in allowed else "unknown"
 
 
 def _normalize_container(format_name: str) -> str:

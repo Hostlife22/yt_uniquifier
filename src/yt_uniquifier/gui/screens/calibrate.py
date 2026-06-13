@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from yt_uniquifier.core.calibration.loop import CalibrationTarget
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
+from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.chart_widget import ChartWidget, Series
@@ -27,7 +28,7 @@ from yt_uniquifier.gui.widgets.file_picker import FilePickerRow
 from yt_uniquifier.gui.widgets.log_console import LogConsole
 from yt_uniquifier.gui.workers.calibrate_worker import CalibrateWorker
 
-PROFILES_DIR = Path(__file__).parents[2] / "profiles"
+PROFILES_DIR = profiles_dir()
 
 
 class CalibrateScreen(ScreenBase):

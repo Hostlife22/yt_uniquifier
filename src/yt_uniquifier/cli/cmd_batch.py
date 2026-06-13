@@ -10,6 +10,7 @@ from rich.console import Console
 
 from yt_uniquifier.cli.progress_view import make_batch_progress
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.qa.report import build_report, render_html, write_json
@@ -93,7 +94,7 @@ def batch_cmd(
 
 def _process_one(
     src: Path,
-    profile: object,
+    profile: Profile,
     output_dir: Path,
     encoder_override: str | None,
     work_root: Path,
@@ -104,7 +105,7 @@ def _process_one(
 ) -> _BatchResult:
     out = output_dir / (src.stem + ".uniq.mp4")
     try:
-        plan = build_plan(src, profile, encoder_override)  # type: ignore[arg-type]
+        plan = build_plan(src, profile, encoder_override)
     except YtUniquifierError as exc:
         return _BatchResult(input=src, output=None, ok=False, note=str(exc))
 

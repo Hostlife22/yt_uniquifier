@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from yt_uniquifier.gui.screens.base import ScreenBase
@@ -98,8 +99,7 @@ class HistoryScreen(ScreenBase):
         actions_widget = self._build_actions(entry)
         self.table.setCellWidget(r, 6, actions_widget)
 
-    def _build_actions(self, entry: HistoryEntry):  # type: ignore[no-untyped-def]
-        from PyQt6.QtWidgets import QWidget
+    def _build_actions(self, entry: HistoryEntry) -> QWidget:
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(4, 0, 4, 0)

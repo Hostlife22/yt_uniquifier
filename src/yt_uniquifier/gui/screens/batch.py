@@ -22,12 +22,13 @@ from PyQt6.QtWidgets import (
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 from yt_uniquifier.gui.workers.batch_worker import BatchWorker
 
-PROFILES_DIR = Path(__file__).parents[2] / "profiles"
+PROFILES_DIR = profiles_dir()
 
 
 class BatchScreen(ScreenBase):

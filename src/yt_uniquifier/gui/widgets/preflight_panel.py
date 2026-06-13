@@ -12,12 +12,23 @@ from PyQt6.QtWidgets import (
 )
 
 from yt_uniquifier.core.preflight import PreflightFinding
+from yt_uniquifier.gui.theme import tokens_for
 
-_SEVERITY_STYLE = {
-    "fail":   "background: #a83b3b; color: white;",
-    "warn":   "background: #d1a93b; color: #16161e;",
-    "ok":     "background: #3ba85c; color: white;",
-}
+
+def _badge_style(theme: str, severity: str) -> str:
+    """Compose the inline stylesheet for a severity badge.
+
+    Reads bg/fg pairs from the current theme tokens instead of
+    hard-coding — prevents the dark-only colors from leaking after a
+    `state.theme_changed` signal switches to the light theme.
+    """
+    tokens = tokens_for(theme)
+    bg = tokens.get(f"badge_{severity}_bg", tokens["badge_warn_bg"])
+    fg = tokens.get(f"badge_{severity}_fg", tokens["badge_warn_fg"])
+    return (
+        f"padding: 2px 6px; border-radius: 3px; font-weight: 600; "
+        f"background: {bg}; color: {fg};"
+    )
 
 
 class PreflightPanel(QWidget):
@@ -25,21 +36,44 @@ class PreflightPanel(QWidget):
 
     Hidden when there are no findings. Shows a compact one-line per
     finding: severity-tinted code + message + suggestion (if any).
+
+    Pass `state` to subscribe to `theme_changed` so the badges repaint
+    on theme switch. Construction without `state` keeps the widget
+    usable in tests and isolated contexts; the badges will use the
+    dark theme until `set_theme()` is called explicitly.
     """
 
     has_fail = pyqtSignal(bool)
 
-    def __init__(self) -> None:
+    def __init__(self, state: object | None = None) -> None:
         super().__init__()
+        self._theme: str = "dark"
+        self._findings: list[PreflightFinding] = []
         self._build_ui()
         self.hide()
+        if state is not None:
+            theme = getattr(state, "theme", None)
+            if isinstance(theme, str):
+                self._theme = theme
+            sig = getattr(state, "theme_changed", None)
+            if sig is not None:
+                sig.connect(self.set_theme)
 
     def _build_ui(self) -> None:
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(4, 4, 4, 4)
         self._layout.setSpacing(4)
 
+    def set_theme(self, theme: str) -> None:
+        """Repaint badges with the new theme's tokens. Idempotent."""
+        if theme == self._theme:
+            return
+        self._theme = theme
+        if self._findings:
+            self.set_findings(self._findings)
+
     def set_findings(self, findings: list[PreflightFinding]) -> None:
+        self._findings = list(findings)
         # Clear existing rows.
         while self._layout.count():
             item = self._layout.takeAt(0)
@@ -72,10 +106,7 @@ class PreflightPanel(QWidget):
         badge = QLabel(f.severity.upper())
         badge.setFixedWidth(56)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(
-            "padding: 2px 6px; border-radius: 3px; font-weight: 600; "
-            + _SEVERITY_STYLE.get(f.severity, ""),
-        )
+        badge.setStyleSheet(_badge_style(self._theme, f.severity))
         h.addWidget(badge)
 
         text = QLabel(f"<b>{f.code}</b> — {f.message}")

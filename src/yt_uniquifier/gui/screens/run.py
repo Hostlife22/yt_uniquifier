@@ -23,6 +23,7 @@ from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan
 from yt_uniquifier.core.preflight import has_fail
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
@@ -35,7 +36,7 @@ from yt_uniquifier.gui.workers.preflight_worker import PreflightWorker
 from yt_uniquifier.gui.workers.probe_worker import ProbeWorker
 from yt_uniquifier.gui.workers.run_worker import RunWorker
 
-PROFILES_DIR = Path(__file__).parents[2] / "profiles"
+PROFILES_DIR = profiles_dir()
 
 
 @dataclass(frozen=True)
@@ -128,7 +129,7 @@ class RunScreen(ScreenBase):
         layout.addLayout(opts)
 
         # Preflight panel
-        self.preflight_panel = PreflightPanel()
+        self.preflight_panel = PreflightPanel(self.state)
         self.preflight_panel.has_fail.connect(self._on_has_fail)
         layout.addWidget(self.preflight_panel)
 
@@ -179,7 +180,7 @@ class RunScreen(ScreenBase):
         layout.addWidget(self.audio_progress_bar)
 
         # KPI pills (populated only after run finishes)
-        self.kpi_pills = KpiPills()
+        self.kpi_pills = KpiPills(self.state)
         layout.addWidget(self.kpi_pills)
 
         # Status + log
