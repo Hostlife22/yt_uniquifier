@@ -59,7 +59,12 @@ def pause_test_clip(tmp_path: Path) -> Path:
         "-shortest",
         str(out),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    # Hard 60s cap on the fixture itself — generating a 6 s testsrc2
+    # clip takes <2 s on every supported runner. If ffmpeg ever hangs
+    # here (sandbox quirk, signal mishandling) the entire integration
+    # matrix would otherwise wait forever; subprocess.run without
+    # ``timeout=`` is the classic CI-hang trap.
+    subprocess.run(cmd, check=True, capture_output=True, timeout=60)
     return out
 
 
