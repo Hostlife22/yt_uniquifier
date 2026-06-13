@@ -17,8 +17,11 @@ All writes are atomic (write tmp, fsync, os.replace).
 
 from __future__ import annotations
 
+import atexit
 import json
+import logging
 import os
+import socket
 import threading
 import time
 from pathlib import Path
@@ -29,6 +32,31 @@ from yt_uniquifier.core.models import Plan, Segment
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 
 SCHEMA_VERSION = 1
+LOCK_FILENAME = ".lock.json"
+
+_log = logging.getLogger(__name__)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform live-PID probe (POSIX + Windows).
+
+    ``os.kill(pid, 0)`` is the canonical liveness check on POSIX: it
+    delivers no signal but raises ``ProcessLookupError`` for dead PIDs.
+    On Windows the same call raises ``OSError`` with errno ESRCH for
+    a dead PID and ``PermissionError`` for a live foreign-owned PID.
+    """
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        # Conservative: don't steal the lock when uncertain.
+        return True
+    return True
 
 
 class CheckpointStore:
@@ -44,8 +72,20 @@ class CheckpointStore:
         self.plan = plan
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.state_path = work_dir / "state.json"
+        self.lock_path = work_dir / LOCK_FILENAME
         self._state: dict[str, Any] = {}
         self._lock = threading.RLock()
+        # A4 (v0.5.5): cross-process work_dir lock. Two `yt-uniq batch`
+        # processes that accidentally share a work_dir would otherwise
+        # race on the read-modify-write of state.json — the PID-suffixed
+        # tmp prevents torn writes but not last-writer-wins on file
+        # content. We acquire a lockfile keyed by (PID, hostname) and
+        # raise if another live process already owns it.
+        self._owns_lock = False
+        self._acquire_process_lock()
+        # Register cleanup so the lock is released on normal exit even
+        # if the caller forgets to call .close().
+        atexit.register(self._release_process_lock)
 
     # ---- lifecycle ----
 
@@ -154,6 +194,110 @@ class CheckpointStore:
         with self._lock:
             self._state["main_audio_path"] = str(path)
             self._flush()
+
+    # ---- internals ----
+
+    # ---- A4 cross-process lock ----
+
+    def _acquire_process_lock(self) -> None:
+        """Take ownership of the work_dir for this process.
+
+        Raises ``CheckpointError`` if another live process already owns
+        the lock; transparently reclaims an orphaned lock (owner PID is
+        dead) and logs a warning so operators see why their work_dir
+        was suddenly stolen.
+        """
+        my_pid = os.getpid()
+        my_host = socket.gethostname()
+        if self.lock_path.exists():
+            try:
+                raw = json.loads(self.lock_path.read_text(encoding="utf-8"))
+                owner_pid = int(raw.get("pid", 0))
+                owner_host = str(raw.get("hostname", ""))
+            except (OSError, ValueError, json.JSONDecodeError):
+                # Corrupt lock — treat as orphaned and overwrite.
+                owner_pid, owner_host = 0, ""
+
+            same_host = owner_host == my_host
+            same_pid = owner_pid == my_pid
+            if same_pid and same_host:
+                # Re-entry from the same process (e.g. resumed run, test
+                # fixture re-creating the store) — fine, keep the lock.
+                self._owns_lock = True
+                return
+            if same_host and _pid_alive(owner_pid):
+                raise CheckpointError(
+                    f"work_dir {self.work_dir} is already in use by "
+                    f"PID {owner_pid} on {owner_host}. Two processes "
+                    "cannot share a work_dir for the same plan — last-"
+                    "writer-wins on state.json would silently lose "
+                    "segment progress. Use a distinct --work-dir per "
+                    "input (the typical pattern is work_dir/<plan_hash>).",
+                )
+            # Either cross-host (we cannot safely verify liveness across
+            # hosts via os.kill) or dead-PID-on-same-host. The
+            # distributed batch (`yt-uniq worker`) coordinates via the
+            # queue, not via shared work_dirs, so this should not happen
+            # in practice — but we surface a warning so an operator
+            # notices if it does.
+            _log.warning(
+                "checkpoint: reclaiming stale lock at %s "
+                "(prev owner: pid=%s host=%s)",
+                self.lock_path, owner_pid, owner_host,
+            )
+
+        # Atomic-write the new lock.
+        tmp = self.lock_path.with_suffix(f".json.{my_pid}.tmp")
+        payload = json.dumps({
+            "pid": my_pid,
+            "hostname": my_host,
+            "plan_hash": self.plan.plan_hash,
+            "acquired_at": time.time(),
+        })
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, self.lock_path)
+        self._owns_lock = True
+
+    def _release_process_lock(self) -> None:
+        """Best-effort lock release.
+
+        Idempotent — atexit may fire after an explicit close(); the
+        ``_owns_lock`` flag guards against double-release. We only
+        unlink the lock if we still own it AND no one else has stolen
+        it in the meantime.
+        """
+        if not self._owns_lock:
+            return
+        self._owns_lock = False
+        try:
+            if not self.lock_path.exists():
+                return
+            raw = json.loads(self.lock_path.read_text(encoding="utf-8"))
+            if int(raw.get("pid", 0)) == os.getpid():
+                self.lock_path.unlink(missing_ok=True)
+        except (OSError, ValueError, json.JSONDecodeError):
+            # If we cannot parse / stat the lock, leave it alone; a
+            # future process will reclaim it via the dead-PID path.
+            pass
+
+    def close(self) -> None:
+        """Release the cross-process lock explicitly.
+
+        ``atexit`` will eventually release it anyway, but tests and
+        long-running daemons that create many CheckpointStore instances
+        should call this to free the lock as soon as work completes.
+        """
+        self._release_process_lock()
+
+    def __enter__(self) -> "CheckpointStore":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # ---- internals ----
 

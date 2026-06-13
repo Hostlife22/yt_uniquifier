@@ -90,12 +90,31 @@ def _verify_atomic_rename(root: Path) -> None:
     dst.unlink(missing_ok=True)
 
 
+_MAX_HOST_LEN = 64
+
+
+def _safe_host_name(raw: str) -> str:
+    """Sanitise a hostname against shared-FS path traversal.
+
+    5.2 (v0.5.5): the queue concatenates ``self.host`` into in_progress/
+    and failed/ paths and into the ``<host>.alive`` filename. POSIX
+    hostnames per RFC 952/1123 must not contain ``/`` or ``..``, but
+    ``socket.gethostname()`` returns whatever the kernel reports and a
+    deliberately-set hostname (or a user-supplied ``host=`` kwarg)
+    could escape the queue layout. Trim length, neutralise separators,
+    fall back to ``"unknown"`` on empty input.
+    """
+    cleaned = raw.replace("/", "_").replace("\\", "_").replace("..", "__")
+    cleaned = cleaned.strip(" .").replace("\x00", "_")
+    return cleaned[:_MAX_HOST_LEN] or "unknown"
+
+
 class FileQueue:
     """Producer/consumer file queue backed by a shared filesystem."""
 
     def __init__(self, root: Path, *, host: str | None = None) -> None:
         self.layout = queue_layout(root)
-        self.host = host or socket.gethostname()
+        self.host = _safe_host_name(host or socket.gethostname())
         self.host_dir = self.layout.in_progress / self.host
         self.host_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +145,14 @@ class FileQueue:
         Returns the new path, or None if the queue is empty. POSIX `rename`
         is the synchronisation point: between concurrent workers, exactly
         one wins each candidate.
+
+        A7 (v0.5.5): symlinks in ``pending/`` are rejected after rename.
+        On a multi-tenant shared FS an adversarial process could drop a
+        symlink in ``pending/`` pointing to ``/etc/shadow`` or any
+        readable file outside the queue root. ``os.rename`` moves the
+        symlink itself (not the target), but downstream ``ffprobe -i
+        <leased>`` follows it and the contents reach the worker's log
+        files. We delete the symlink and continue to the next candidate.
         """
         for candidate in sorted(self.layout.pending.iterdir()):
             if candidate.name.startswith("."):
@@ -135,6 +162,24 @@ class FileQueue:
                 os.rename(candidate, dest)
             except (OSError, FileNotFoundError):
                 # Another worker beat us to this file.
+                continue
+            if dest.is_symlink():
+                # Hostile or accidental symlink. Drop it, do NOT return
+                # it to pending (an attacker could re-place it). Log via
+                # the side-channel ``.rejected_symlinks`` marker so an
+                # operator can audit.
+                try:
+                    dest.unlink()
+                except OSError:
+                    pass
+                marker = self.layout.in_progress / ".rejected_symlinks.log"
+                try:
+                    with marker.open("a", encoding="utf-8") as fh:
+                        fh.write(
+                            f"{time.time():.0f} {self.host} {candidate.name}\n"
+                        )
+                except OSError:
+                    pass
                 continue
             return dest
         return None
@@ -168,6 +213,19 @@ class FileQueue:
         stale_sec. Returns the count of files relocated. Safe to call from
         any worker — losing race conditions reduce to "the file was already
         relocated", which the next lease iteration handles.
+
+        A8 (v0.5.5): narrow the reaper race window. Previously the alive
+        mtime was checked once at top-of-loop; between that check and
+        the per-file ``os.rename`` the original host could resume,
+        touch its heartbeat, and start a fresh lease — only to have its
+        input file moved away mid-operation. We re-check the heartbeat
+        AFTER snapshotting the candidate list and bail out if the host
+        is now liveness-positive.
+
+        Note we deliberately do NOT add a per-file mtime grace window:
+        ``os.rename`` preserves a file's content mtime, so a freshly-
+        leased input would still appear "old" if it was an old archive
+        clip — file mtime is a poor proxy for lease liveness.
         """
         now = time.time()
         count = 0
@@ -175,7 +233,8 @@ class FileQueue:
             if not host_dir.is_dir():
                 continue
             alive = self.layout.in_progress / f"{host_dir.name}.alive"
-            if alive.exists():
+            alive_existed = alive.exists()
+            if alive_existed:
                 if now - alive.stat().st_mtime <= stale_sec:
                     continue
             else:
@@ -189,7 +248,18 @@ class FileQueue:
                     continue
                 if not mtimes or now - min(mtimes) <= stale_sec:
                     continue
-            for f in list(host_dir.iterdir()):
+            candidates = list(host_dir.iterdir())
+            # A8 re-check: if the host touched .alive between the
+            # top-of-loop check and now, bail out — they are recovering
+            # and we should not move their files.
+            if alive_existed:
+                try:
+                    refreshed = alive.stat().st_mtime
+                except FileNotFoundError:
+                    refreshed = 0.0
+                if time.time() - refreshed <= stale_sec:
+                    continue
+            for f in candidates:
                 try:
                     os.rename(f, self.layout.pending / f.name)
                     count += 1
