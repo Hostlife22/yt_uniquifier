@@ -19,6 +19,7 @@ must be sanitised before being concatenated into queue paths and the
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -28,6 +29,17 @@ from yt_uniquifier.core.queue.leasing import (
     FileQueue,
     _safe_host_name,
     init_queue,
+)
+
+# os.symlink on Windows requires admin OR Developer Mode privilege; GitHub
+# Actions windows-latest runners run as a standard user without either.
+# Skip the symlink-creating tests there. The production guard
+# (FileQueue.lease rejecting symlinks) is exercised at the code level
+# regardless — the runtime check still fires; we just can't fabricate
+# the adversarial input on Windows CI.
+needs_symlink = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.symlink requires admin/Developer Mode on Windows",
 )
 
 
@@ -40,6 +52,7 @@ def queue_root(tmp_path: Path) -> Path:
 
 # -------------------------------------------------------------------- A7
 
+@needs_symlink
 def test_lease_rejects_symlink_in_pending(
     queue_root: Path, tmp_path: Path,
 ) -> None:
@@ -72,6 +85,7 @@ def test_lease_rejects_symlink_in_pending(
     assert "bad_input.mp4" in marker.read_text(encoding="utf-8")
 
 
+@needs_symlink
 def test_lease_does_not_follow_symlink_to_corrupt_host_dir(
     queue_root: Path, tmp_path: Path,
 ) -> None:
