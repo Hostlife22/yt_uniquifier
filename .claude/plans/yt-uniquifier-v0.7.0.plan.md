@@ -280,9 +280,26 @@ R2 разбит на R2.1 (framework + Run + Settings + E6) и R2.2/R2.3 (ост
 
 Validate: ✅ `ruff check .` All checks passed. ✅ `mypy src/` 110 files no issues. ✅ 678 unit + 4 GUI pass, 10 skipped (8 R2 pending, 1 PyQt6.QtCharts, 1 GUI imports). Только known pre-existing flake `test_force_bypasses_cache` (v0.6.0 B6).
 
-**R2.2 carry-over** (отдельный commit): а11y sweep оставшихся 8 screens (Batch, Calibrate, QA Viewer, Profile Editor, History, Corpus, Queue, Validation). Pending-list в `tests/unit/test_gui_accessibility.py::_R2_PENDING` фильтрует один screen за commit.
+**R2.2 (this commit) — DONE**: a11y sweep on remaining 8 screens. `_R2_PENDING` is empty.
 
-**Files (R2.1)**: 9 modified (`app_pyqt.py`, `screens/run.py`, `screens/settings.py`, `widgets/{file_picker,encoder_selector,log_console}.py`, plus 2 plan-update), 3 created (`a11y.py`, `tests/unit/test_gui_accessibility.py`, `tests/unit/test_gui_excepthook.py`).
+- [x] **Corpus** — add/remove/refresh buttons marked; мнемоники &Add/&Remove/Re&fresh.
+- [x] **QA Viewer** — browse, compute (Ctrl+R), cancel (Esc), open-in-browser marked.
+- [x] **Profile Editor** — profile_combo, save (Ctrl+S), save-as (Ctrl+Shift+S), reload-list, seed_combo marked.
+- [x] **Batch** — both browse buttons, pattern_edit, profile_combo, continue_check, run (Ctrl+R), cancel (Esc) marked.
+- [x] **Calibrate** — profile_combo, 2 DoubleSpinBox (target / quality), 2 SpinBox (iterations / clip), run (Ctrl+R), cancel (Esc), save (Ctrl+S) marked.
+- [x] **Queue** — root browse, init, add-files, reset-stale, profile_combo, workers spin, stop-when-empty check, output browse, start (Ctrl+R), stop (Esc) marked.
+- [x] **Validation** — back/next nav, profile, variant count spin, output browse, generate (Ctrl+R), save-csv (Ctrl+S), correlation analysis (Ctrl+R) marked.
+- [x] **History** — filter line-edit, clear-all button, per-row "Open output" + "QA" buttons marked with source-name context for screen reader.
+
+**Test hardening**:
+- New `_stop_background_workers(screen)` helper in test_gui_accessibility.py joins every QThread on the screen before parametrized teardown. Without it, CorpusListWorker and QueueStatusWorker (which auto-start in `__init__`) leaked C++ threads past test boundaries → Qt aborts with "QThread destroyed while running".
+- `qa_viewer.py` now skips the `QtWebEngineWidgets` import entirely under `QT_QPA_PLATFORM=offscreen`. PyQt6 6.11.x QtWebEngineCore state went inconsistent after multiple QApplication recreations, aborting the test suite. TYPE_CHECKING + assert pattern keeps mypy happy without runtime cost.
+
+Validate: ✅ ruff All checks passed. ✅ mypy 110 files no issues. ✅ 686 unit + smoke pass, 2 skip, 1 pre-existing flake (test_force_bypasses_cache, v0.6.0 B6). ✅ All 12 a11y tests green across 10 screens.
+
+**Files (R2 cumulative)**: R2.1 + R2.2 = 9 screens, 3 widgets, app shell, 3 test files. R2.2 adds: 8 screens × ~6 marks each ≈ 50 mark() calls, 1 test-fixture helper, qa_viewer offscreen guard.
+
+**R2 is closed.** Round 3 (F3 platform profiles + new `video.fit_aspect` transform) is next.
 
 ### Round 3 — Platform profiles (F3)
 

@@ -26,6 +26,7 @@ from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
 from yt_uniquifier.core.transforms import all_ids
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -62,18 +63,28 @@ class ProfileEditorScreen(ScreenBase):
         bar.addWidget(QLabel("Profile:"))
         self.profile_combo = QComboBox()
         self.profile_combo.currentIndexChanged.connect(self._on_profile_select)
+        mark(self.profile_combo, "Profile to edit",
+             "Choose which YAML profile to load into the editor.")
         bar.addWidget(self.profile_combo, stretch=1)
 
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("&Save")
         self.save_btn.clicked.connect(self._on_save)
+        mark(self.save_btn, "Save profile",
+             "Overwrite the loaded YAML file with the current edits (creates .bak backup).",
+             shortcut="Ctrl+S")
         bar.addWidget(self.save_btn)
 
-        self.save_as_btn = QPushButton("Save as…")
+        self.save_as_btn = QPushButton("Save &as…")
         self.save_as_btn.clicked.connect(self._on_save_as)
+        mark(self.save_as_btn, "Save profile as",
+             "Save the current edits as a new YAML file.",
+             shortcut="Ctrl+Shift+S")
         bar.addWidget(self.save_as_btn)
 
-        self.reload_btn = QPushButton("Reload list")
+        self.reload_btn = QPushButton("&Reload list")
         self.reload_btn.clicked.connect(self._populate_profile_combo)
+        mark(self.reload_btn, "Reload profile list",
+             "Rescan the profiles directory and refresh the dropdown.")
         bar.addWidget(self.reload_btn)
         layout.addLayout(bar)
 
@@ -101,6 +112,9 @@ class ProfileEditorScreen(ScreenBase):
         bottom.addWidget(QLabel("seed_strategy:"))
         self.seed_combo = QComboBox()
         self.seed_combo.addItems(["fixed", "per_run", "per_file", "divergent"])
+        mark(self.seed_combo, "Seed strategy",
+             "Controls how per-segment RNG seeds are derived "
+             "(fixed reproducibility ↔ divergent uniqueness).")
         bottom.addWidget(self.seed_combo)
         bottom.addStretch(1)
         layout.addLayout(bottom)

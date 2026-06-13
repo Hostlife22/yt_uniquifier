@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from yt_uniquifier.core.calibration.loop import CalibrationTarget
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -66,6 +67,8 @@ class CalibrateScreen(ScreenBase):
         idx = self.profile_combo.findText("cid_aware")
         if idx >= 0:
             self.profile_combo.setCurrentIndex(idx)
+        mark(self.profile_combo, "Base profile",
+             "Starting profile whose intensity gets bisected toward the target.")
         row_p.addWidget(self.profile_combo, stretch=1)
         layout.addLayout(row_p)
 
@@ -76,6 +79,8 @@ class CalibrateScreen(ScreenBase):
         self.target_spin.setRange(0.05, 0.8)
         self.target_spin.setSingleStep(0.05)
         self.target_spin.setValue(0.2)
+        mark(self.target_spin, "Target self-match (max)",
+             "Upper bound on fingerprint similarity that calibration aims for.")
         knobs.addWidget(self.target_spin)
 
         knobs.addWidget(QLabel("Min quality (0..100):"))
@@ -83,18 +88,24 @@ class CalibrateScreen(ScreenBase):
         self.quality_spin.setRange(60.0, 100.0)
         self.quality_spin.setSingleStep(1.0)
         self.quality_spin.setValue(88.0)
+        mark(self.quality_spin, "Minimum quality",
+             "Hard floor on VMAF / SSIM — calibration backs off if quality drops below this.")
         knobs.addWidget(self.quality_spin)
 
         knobs.addWidget(QLabel("Iterations:"))
         self.iter_spin = QSpinBox()
         self.iter_spin.setRange(1, 15)
         self.iter_spin.setValue(5)
+        mark(self.iter_spin, "Iterations",
+             "Maximum number of bisection steps before stopping with the best-so-far profile.")
         knobs.addWidget(self.iter_spin)
 
         knobs.addWidget(QLabel("Test clip (s):"))
         self.clip_spin = QSpinBox()
         self.clip_spin.setRange(10, 600)
         self.clip_spin.setValue(60)
+        mark(self.clip_spin, "Test clip duration",
+             "Seconds of the source used as the calibration probe (shorter = faster).")
         knobs.addWidget(self.clip_spin)
 
         knobs.addStretch(1)
@@ -102,19 +113,27 @@ class CalibrateScreen(ScreenBase):
 
         # Controls
         controls = QHBoxLayout()
-        self.run_btn = QPushButton("▶ Calibrate")
+        self.run_btn = QPushButton("▶ &Calibrate")
         self.run_btn.setObjectName("run")
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._on_run)
+        mark(self.run_btn, "Run calibration",
+             "Start the bisection loop that tunes intensity toward the target self-match.",
+             shortcut="Ctrl+R")
         controls.addWidget(self.run_btn)
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Cance&l")
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._on_cancel)
+        mark(self.cancel_btn, "Cancel calibration",
+             "Abort the bisection at the next iteration boundary.", shortcut="Esc")
         controls.addWidget(self.cancel_btn)
-        self.save_btn = QPushButton("Save tuned profile as…")
+        self.save_btn = QPushButton("&Save tuned profile as…")
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._on_save)
+        mark(self.save_btn, "Save tuned profile",
+             "Persist the calibrated profile to a new YAML file.",
+             shortcut="Ctrl+S")
         controls.addWidget(self.save_btn)
         controls.addStretch(1)
         layout.addLayout(controls)

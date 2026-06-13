@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from yt_uniquifier.core.qa.corpus import Corpus
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.workers.corpus_list_worker import CorpusListWorker
@@ -70,14 +71,20 @@ class CorpusScreen(ScreenBase):
 
         # Actions
         controls = QHBoxLayout()
-        self.add_btn = QPushButton("Add file…")
+        self.add_btn = QPushButton("&Add file…")
         self.add_btn.clicked.connect(self._on_add)
+        mark(self.add_btn, "Add file to corpus",
+             "Pick a video and add its fingerprint to the reference corpus.")
         controls.addWidget(self.add_btn)
-        self.remove_btn = QPushButton("Remove selected")
+        self.remove_btn = QPushButton("&Remove selected")
         self.remove_btn.clicked.connect(self._on_remove)
+        mark(self.remove_btn, "Remove selected entry",
+             "Delete the highlighted corpus entry after confirmation.")
         controls.addWidget(self.remove_btn)
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = QPushButton("Re&fresh")
         self.refresh_btn.clicked.connect(self._refresh)
+        mark(self.refresh_btn, "Refresh corpus list",
+             "Reload entries from disk.")
         controls.addWidget(self.refresh_btn)
         controls.addStretch(1)
         layout.addLayout(controls)

@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -59,12 +60,16 @@ class QueueScreen(ScreenBase):
         self.root_label = QLabel("(none)")
         self.root_label.setObjectName("path")
         row.addWidget(self.root_label, stretch=1)
-        self.pick_root_btn = QPushButton("Browse…")
+        self.pick_root_btn = QPushButton("&Browse…")
         self.pick_root_btn.clicked.connect(self._pick_root)
+        mark(self.pick_root_btn, "Browse queue root",
+             "Pick the shared-filesystem directory used as the queue layout root.")
         row.addWidget(self.pick_root_btn)
-        self.init_btn = QPushButton("Init queue here")
+        self.init_btn = QPushButton("&Init queue here")
         self.init_btn.setEnabled(False)
         self.init_btn.clicked.connect(self._init_queue)
+        mark(self.init_btn, "Init queue layout",
+             "Create the pending / leased / done / failed bucket directories.")
         row.addWidget(self.init_btn)
         layout.addLayout(row)
 
@@ -93,13 +98,17 @@ class QueueScreen(ScreenBase):
         w = QWidget()
         layout = QVBoxLayout(w)
         actions = QHBoxLayout()
-        self.add_files_btn = QPushButton("Add files…")
+        self.add_files_btn = QPushButton("&Add files…")
         self.add_files_btn.setEnabled(False)
         self.add_files_btn.clicked.connect(self._add_files)
+        mark(self.add_files_btn, "Add files to queue",
+             "Copy one or more videos into the pending bucket.")
         actions.addWidget(self.add_files_btn)
-        self.reset_stale_btn = QPushButton("Reset stale (>5 min)")
+        self.reset_stale_btn = QPushButton("&Reset stale (>5 min)")
         self.reset_stale_btn.setEnabled(False)
         self.reset_stale_btn.clicked.connect(self._reset_stale)
+        mark(self.reset_stale_btn, "Reset stale leases",
+             "Reclaim leased files whose heartbeat hasn't updated in 5 minutes.")
         actions.addWidget(self.reset_stale_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
@@ -120,6 +129,8 @@ class QueueScreen(ScreenBase):
         self.profile_combo = QComboBox()
         for p in sorted(PROFILES_DIR.glob("*.yaml")):
             self.profile_combo.addItem(p.stem, str(p))
+        mark(self.profile_combo, "Profile",
+             "Transform profile applied by this worker to every leased file.")
         cfg.addWidget(self.profile_combo, stretch=1)
         cfg.addWidget(QLabel("Encoder:"))
         self.encoder_selector = EncoderSelector(self.state)
@@ -128,12 +139,16 @@ class QueueScreen(ScreenBase):
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 16)
         self.workers_spin.setValue(2)
+        mark(self.workers_spin, "Parallel workers",
+             "Number of segments encoded in parallel inside this worker process.")
         cfg.addWidget(self.workers_spin)
-        self.stop_when_empty_check = QCheckBox("Exit when queue empty")
+        self.stop_when_empty_check = QCheckBox("E&xit when queue empty")
         self.stop_when_empty_check.setToolTip(
             "Unchecked = daemon mode (keep polling for new files).\n"
             "Checked = one-shot drain (worker exits after the queue empties).",
         )
+        mark(self.stop_when_empty_check, "Exit when queue empty",
+             "Daemon vs one-shot mode for the drainer process.")
         cfg.addWidget(self.stop_when_empty_check)
         layout.addLayout(cfg)
 
@@ -142,21 +157,29 @@ class QueueScreen(ScreenBase):
         self.out_label = QLabel("(none)")
         self.out_label.setObjectName("path")
         out_row.addWidget(self.out_label, stretch=1)
-        b = QPushButton("Browse…")
+        b = QPushButton("Bro&wse…")
         b.clicked.connect(self._pick_out)
+        mark(b, "Browse output directory",
+             "Pick where the worker should write completed outputs.")
         out_row.addWidget(b)
         layout.addLayout(out_row)
 
         controls = QHBoxLayout()
-        self.start_btn = QPushButton("▶ Start worker")
+        self.start_btn = QPushButton("▶ &Start worker")
         self.start_btn.setObjectName("run")
         self.start_btn.setEnabled(False)
         self.start_btn.clicked.connect(self._start_worker)
+        mark(self.start_btn, "Start worker",
+             "Begin draining the pending bucket of the configured queue.",
+             shortcut="Ctrl+R")
         controls.addWidget(self.start_btn)
-        self.stop_btn = QPushButton("Stop")
+        self.stop_btn = QPushButton("Sto&p")
         self.stop_btn.setObjectName("cancel")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._stop_worker)
+        mark(self.stop_btn, "Stop worker",
+             "Signal the drainer to finish the current file and exit.",
+             shortcut="Esc")
         controls.addWidget(self.stop_btn)
         controls.addStretch(1)
         layout.addLayout(controls)

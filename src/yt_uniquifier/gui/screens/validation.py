@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -93,13 +94,17 @@ class ValidationScreen(ScreenBase):
         layout.addWidget(self.stack, stretch=1)
 
         nav = QHBoxLayout()
-        self.back_btn = QPushButton("← Back")
+        self.back_btn = QPushButton("← &Back")
         self.back_btn.setEnabled(False)
         self.back_btn.clicked.connect(self._go_back)
+        mark(self.back_btn, "Previous step",
+             "Go back to the previous validation wizard step.")
         nav.addWidget(self.back_btn)
         nav.addStretch(1)
-        self.next_btn = QPushButton("Next →")
+        self.next_btn = QPushButton("&Next →")
         self.next_btn.clicked.connect(self._go_next)
+        mark(self.next_btn, "Next step",
+             "Advance to the next validation wizard step.")
         nav.addWidget(self.next_btn)
         layout.addLayout(nav)
 
@@ -124,6 +129,8 @@ class ValidationScreen(ScreenBase):
         idx = self.gen_profile.findText("cid_aware")
         if idx >= 0:
             self.gen_profile.setCurrentIndex(idx)
+        mark(self.gen_profile, "Variants profile",
+             "Profile used to generate the validation variants.")
         row.addWidget(self.gen_profile, stretch=1)
         row.addWidget(QLabel("Encoder:"))
         self.gen_encoder = EncoderSelector(self.state)
@@ -132,6 +139,8 @@ class ValidationScreen(ScreenBase):
         self.gen_n = QSpinBox()
         self.gen_n.setRange(1, 50)
         self.gen_n.setValue(5)
+        mark(self.gen_n, "Variant count",
+             "How many variants to generate from this source.")
         row.addWidget(self.gen_n)
         layout.addLayout(row)
 
@@ -140,15 +149,20 @@ class ValidationScreen(ScreenBase):
         self.gen_out_label = QLabel("(none)")
         self.gen_out_label.setObjectName("path")
         out_row.addWidget(self.gen_out_label, stretch=1)
-        b = QPushButton("Browse…")
+        b = QPushButton("&Browse…")
         b.clicked.connect(self._pick_gen_out)
+        mark(b, "Browse output directory",
+             "Pick where generated variants should be written.")
         out_row.addWidget(b)
         layout.addLayout(out_row)
 
-        self.gen_btn = QPushButton("▶ Generate")
+        self.gen_btn = QPushButton("▶ &Generate")
         self.gen_btn.setObjectName("run")
         self.gen_btn.setEnabled(False)
         self.gen_btn.clicked.connect(self._on_generate)
+        mark(self.gen_btn, "Generate variants",
+             "Start generating N variants from the selected source + profile.",
+             shortcut="Ctrl+R")
         layout.addWidget(self.gen_btn)
 
         # Variants-generated bar. Max is set on _on_generate from gen_n.
@@ -179,8 +193,11 @@ class ValidationScreen(ScreenBase):
         layout.addWidget(self.record_table)
         save_row = QHBoxLayout()
         save_row.addStretch(1)
-        self.save_csv_btn = QPushButton("Save to validation_log.csv")
+        self.save_csv_btn = QPushButton("&Save to validation_log.csv")
         self.save_csv_btn.clicked.connect(self._save_csv)
+        mark(self.save_csv_btn, "Save recorded outcomes",
+             "Persist the recorded match outcomes to the validation log CSV.",
+             shortcut="Ctrl+S")
         save_row.addWidget(self.save_csv_btn)
         layout.addLayout(save_row)
         return w
@@ -190,9 +207,12 @@ class ValidationScreen(ScreenBase):
         w = QWidget()
         layout = QVBoxLayout(w)
         layout.addWidget(QLabel(f"CSV path: <code>{DEFAULT_CSV}</code>"))
-        self.run_corr_btn = QPushButton("▶ Run correlation analysis")
+        self.run_corr_btn = QPushButton("▶ Run &correlation analysis")
         self.run_corr_btn.setObjectName("run")
         self.run_corr_btn.clicked.connect(self._on_correlate)
+        mark(self.run_corr_btn, "Run correlation analysis",
+             "Compute Spearman correlation between predicted and observed CID outcomes.",
+             shortcut="Ctrl+R")
         layout.addWidget(self.run_corr_btn)
         self.corr_output = QPlainTextEdit()
         self.corr_output.setReadOnly(True)

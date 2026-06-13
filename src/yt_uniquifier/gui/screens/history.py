@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState, HistoryEntry
 
@@ -46,9 +47,13 @@ class HistoryScreen(ScreenBase):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("filename / profile / encoder / status")
         self.filter_edit.textChanged.connect(self._refresh)
+        mark(self.filter_edit, "History filter",
+             "Substring filter applied to source, profile, encoder, and status columns.")
         row.addWidget(self.filter_edit)
-        self.clear_btn = QPushButton("Clear all")
+        self.clear_btn = QPushButton("&Clear all")
         self.clear_btn.clicked.connect(self._clear_history)
+        mark(self.clear_btn, "Clear history",
+             "Remove every entry from the run history after confirmation.")
         row.addWidget(self.clear_btn)
         layout.addLayout(row)
 
@@ -108,12 +113,17 @@ class HistoryScreen(ScreenBase):
         btn_out.clicked.connect(
             lambda: self._open_path(entry.output_path),
         )
+        source_name = Path(entry.source_path).name
+        mark(btn_out, f"Open output for {source_name}",
+             f"Open the output file produced from {source_name} in the system viewer.")
         h.addWidget(btn_out)
         if entry.qa_html_path:
             btn_qa = QPushButton("QA")
             btn_qa.clicked.connect(
                 lambda: self._open_path(entry.qa_html_path),
             )
+            mark(btn_qa, f"Open QA report for {source_name}",
+                 f"Open the QA HTML report for {source_name} in the browser.")
             h.addWidget(btn_qa)
         return w
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (
@@ -19,22 +20,35 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-    HAS_WEBENGINE = True
-except ImportError:
-    HAS_WEBENGINE = False
+if TYPE_CHECKING:
+    # mypy always sees the real class so isinstance-narrowing + .load()
+    # type-check, even though the runtime path may set QWebEngineView=None.
+    from PyQt6.QtWebEngineWidgets import QWebEngineView as _QWebEngineViewT
 
-# Offscreen Qt platform crashes when QWebEngineView is instantiated.
-# Force the label fallback when running headless (tests / CI).
-if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
-    HAS_WEBENGINE = False
-
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.widgets.file_picker import FilePickerRow
 from yt_uniquifier.gui.widgets.log_console import LogConsole
 from yt_uniquifier.gui.workers.qa_worker import QaWorker
+
+# Offscreen Qt platform crashes when QWebEngineView is even *imported*
+# alongside other tests that tear down and rebuild QApplication
+# instances (PyQt6 6.11.x QtWebEngineCore process state goes
+# inconsistent after QApplication recreation). Skip the import
+# entirely under offscreen — the fallback QLabel path covers tests.
+QWebEngineView: type | None
+if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+    QWebEngineView = None
+    HAS_WEBENGINE = False
+else:
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView as _QWebEngineView  # noqa: E402
+        QWebEngineView = _QWebEngineView
+        HAS_WEBENGINE = True
+    except ImportError:
+        QWebEngineView = None
+        HAS_WEBENGINE = False
 
 
 class QaViewerScreen(ScreenBase):
@@ -62,7 +76,7 @@ class QaViewerScreen(ScreenBase):
         layout.addWidget(self.tabs)
 
         # Viewer
-        if HAS_WEBENGINE:
+        if HAS_WEBENGINE and QWebEngineView is not None:
             self.viewer: QWidget = QWebEngineView()
         else:
             fallback = QLabel(
@@ -76,9 +90,11 @@ class QaViewerScreen(ScreenBase):
 
         # Footer
         footer = QHBoxLayout()
-        self.open_browser_btn = QPushButton("Open in browser")
+        self.open_browser_btn = QPushButton("Open in &browser")
         self.open_browser_btn.setEnabled(False)
         self.open_browser_btn.clicked.connect(self._open_in_browser)
+        mark(self.open_browser_btn, "Open QA report in browser",
+             "Open the loaded .qa.html file in the system default browser.")
         footer.addWidget(self.open_browser_btn)
         footer.addStretch(1)
         layout.addLayout(footer)
@@ -91,8 +107,10 @@ class QaViewerScreen(ScreenBase):
         self.existing_label = QLabel("(none)")
         self.existing_label.setObjectName("path")
         row.addWidget(self.existing_label, stretch=1)
-        b = QPushButton("Browse…")
+        b = QPushButton("&Browse…")
         b.clicked.connect(self._pick_existing)
+        mark(b, "Browse for QA report",
+             "Pick an existing .qa.html file from disk.")
         row.addWidget(b)
         layout.addLayout(row)
         layout.addStretch(1)
@@ -119,15 +137,20 @@ class QaViewerScreen(ScreenBase):
         layout.addWidget(self.compute_output)
 
         controls = QHBoxLayout()
-        self.compute_btn = QPushButton("Compute QA")
+        self.compute_btn = QPushButton("&Compute QA")
         self.compute_btn.setObjectName("run")
         self.compute_btn.setEnabled(False)
         self.compute_btn.clicked.connect(self._on_compute)
+        mark(self.compute_btn, "Compute QA report",
+             "Run the QA pipeline on the selected input/output pair.",
+             shortcut="Ctrl+R")
         controls.addWidget(self.compute_btn)
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Cance&l")
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._on_cancel)
+        mark(self.cancel_btn, "Cancel QA compute",
+             "Abort the QA computation in progress.", shortcut="Esc")
         controls.addWidget(self.cancel_btn)
         controls.addStretch(1)
         layout.addLayout(controls)
@@ -178,8 +201,11 @@ class QaViewerScreen(ScreenBase):
         self.qa_html_path = path
         self.existing_label.setText(str(path))
         self.open_browser_btn.setEnabled(True)
-        if HAS_WEBENGINE and isinstance(self.viewer, QWebEngineView):
-            self.viewer.load(QUrl.fromLocalFile(str(path)))
+        if HAS_WEBENGINE and QWebEngineView is not None:
+            viewer = self.viewer
+            if TYPE_CHECKING:
+                assert isinstance(viewer, _QWebEngineViewT)
+            viewer.load(QUrl.fromLocalFile(str(path)))
 
     def _on_compute(self) -> None:
         if self.input_path is None or self.output_path is None:
