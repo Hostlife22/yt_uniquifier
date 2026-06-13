@@ -169,6 +169,8 @@ def test_suspend_and_resume_against_real_child() -> None:
     that silently no-op'd would otherwise pass unit tests but fail
     in production.
     """
+    import contextlib
+
     from yt_uniquifier.core.process_control import (
         resume_process_tree,
         suspend_process_tree,
@@ -181,11 +183,22 @@ def test_suspend_and_resume_against_real_child() -> None:
         # The process is alive but stopped; SIGCONT must wake it.
         assert resume_process_tree(proc.pid) >= 1
     finally:
+        # Belt + braces: always SIGCONT before terminate. A stopped
+        # process queues SIGTERM and ``proc.wait(timeout)`` hangs the
+        # full timeout window even after we send it. Resuming first
+        # guarantees SIGTERM lands within milliseconds.
+        with contextlib.suppress(Exception):
+            resume_process_tree(proc.pid)
         proc.terminate()
         try:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
+            # SIGKILL can't be blocked but proc.kill() doesn't reap;
+            # one more wait so the zombie doesn't leak across the
+            # parametrized test matrix.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=2)
 
 
 # ---- runner.run watcher: SIGSTOP / SIGCONT on transitions -----------------

@@ -132,6 +132,18 @@ def test_pause_resume_produces_valid_output(
     cancel_token = CancelToken()
     state_path = work_dir / "state.json"
 
+    # Watchdog: if anything goes sideways (SIGSTOP delivered but SIGCONT
+    # lost on a constrained CI runner, observer thread stuck, etc.) the
+    # underlying ``proc.communicate(timeout=3600)`` would otherwise hang
+    # for an hour. Hard-cap the whole test at 60 s by firing
+    # ``cancel_token.cancel()`` from a daemon thread.
+    def _watchdog() -> None:
+        time.sleep(60.0)
+        if not cancel_token.is_cancelled():
+            cancel_token.cancel()
+
+    threading.Thread(target=_watchdog, daemon=True).start()
+
     # Capture log events so we can confirm the runner actually emitted
     # `phase=paused` / `phase=resumed` markers (the on-disk paused_at
     # is the orchestrator observer's responsibility; the runner's
@@ -257,6 +269,13 @@ def test_pause_with_no_pause_call_is_indistinguishable_from_control(
     plan, options = _build_plan_and_options(pause_test_clip, work_dir, output)
     pause_token = PauseToken()
     cancel_token = CancelToken()
+
+    def _watchdog() -> None:
+        time.sleep(60.0)
+        if not cancel_token.is_cancelled():
+            cancel_token.cancel()
+
+    threading.Thread(target=_watchdog, daemon=True).start()
 
     summary = run_full(
         plan, options,

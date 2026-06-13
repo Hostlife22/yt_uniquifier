@@ -18,7 +18,7 @@ from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.metadata import build_metadata_args
-from yt_uniquifier.core.models import Plan, Profile
+from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.notifications import (
     NotificationConfig,
     NotificationContext,
@@ -186,10 +186,38 @@ def _run_full_impl(
     # transitions and (a) persists `paused_at` to state.json so a crash
     # mid-pause leaves an audit trail and (b) enforces the 24-hour
     # auto-cancel safety net so a forgotten pause never strands work.
-    # The thread is daemon=True so process shutdown doesn't block on it.
+    # The thread is daemon=True so process shutdown doesn't block on it,
+    # but we still drop the stop event in a try/finally so per-test
+    # observer threads don't accumulate across the long pytest run.
+    # Without this, an exception (preflight fail, cancel, segment error)
+    # would leak one daemon thread per call — CI matrices that run the
+    # full suite then OOM / time out on thread limits.
     _pause_stop_event = _start_pause_observer(
         pause_token, cancel_token, store, emit,
     )
+    try:
+        return _run_full_body(
+            plan, options, emit, cancel_token, pause_token,
+            store, segments, findings,
+        )
+    finally:
+        _pause_stop_event.set()
+
+
+def _run_full_body(
+    plan: Plan,
+    options: RunOptions,
+    emit: Callable[[RunEvent], None],
+    cancel_token: CancelToken | None,
+    pause_token: PauseToken | None,
+    store: CheckpointStore,
+    segments: list[Segment],
+    findings: list[PreflightFinding],
+) -> RunSummary:
+    """The hot-loop half of ``_run_full_impl`` — extracted so the pause
+    observer cleanup in the caller's ``finally`` always fires, even on
+    cancel / segment failure / preflight late-raise.
+    """
 
     # Idempotent re-run over a previously-completed work-dir
     # (HIGH-4 from 2026-05-30 v2 test report). If state.json says every
@@ -397,11 +425,6 @@ def _run_full_impl(
 
     if not options.keep_segments:
         _cleanup_artifacts(store, main_audio, emit)
-
-    # Stop the pause observer thread cleanly before returning so it
-    # doesn't outlive the RunSummary (would leak a daemon thread across
-    # back-to-back batch entries).
-    _pause_stop_event.set()
 
     return RunSummary(
         output=options.output,
