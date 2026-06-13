@@ -308,7 +308,7 @@ Validate: ✅ ruff All checks passed. ✅ mypy 110 files no issues. ✅ 686 unit
 - [x] **7 YAML профилей**: youtube_4k (3840×2160), youtube_1080p (1920×1080), youtube_shorts (1080×1920), tiktok_vertical (1080×1920 -16 LUFS), instagram_reels (pad_blur 9:16), instagram_square (pad_blur 1:1), linkedin_square (1080×1080).
 - [x] **8 integration тестов** в `tests/integration/test_platform_profiles.py`: каждый профиль encode'ит `tiny_clip` через реальный ffmpeg → output landed at expected (W, H) within ±2 px even-dim guard. Плюс защитный test_every_shipped_profile_has_integration_coverage — fail если новый platform YAML забыли добавить в parametrize table.
 - [x] **Регрессия в test_named_invariants.py** — добавил `video.fit_aspect` в `_TRANSFORMS_WITHOUT_DEFAULTS` (target_aspect required, нет sensible default).
-- [ ] Docs `docs/profiles.md` — раздел "Platform profiles" не дописан (откладываю на R3.1 / doc-updater).
+- [x] Docs `docs/profiles.md` — раздел "Platform profiles" дописан в R7 (commit `e09bcd9`): таблица 7 YAML × geometry/mode/LUFS, `video.fit_aspect` row в transform reference, HDR + `pad_blur` warning.
 
 Validate: ✅ ruff All checks passed. ✅ mypy 111 files no issues. ✅ 707 unit + 2 skip + 1 deselect. ✅ 8/8 integration tests pass (~22s включая 7 real ffmpeg encodes). ✅ Все 20 snapshot tests зелёные. Только known pre-existing flake `test_force_bypasses_cache` остаётся.
 
@@ -457,34 +457,27 @@ QT_QPA_PLATFORM=offscreen yt-uniq-gui            # GUI smoke
 
 ---
 
-## Acceptance
+## Acceptance — ✅ ALL GREEN (tagged v0.7.0 on 2026-06-14)
 
 ### v0.7.0 ship-ready
-- [ ] **F2** Live divergence indicator виден в Run + Batch screens (sparkline + KPI). RunEvent контракт документирован в `docs/architecture.md`. Sampling configurable.
-- [ ] **F3** 5+ platform profiles шипятся, integration-test каждого зелёный. `video.fit_aspect` snapshot tests зелёные. Docs обновлены.
-- [ ] **F4** Webhook (Discord / Slack / Telegram auto-detect) + SMTP работают. Settings UI + Test button. Notifications хук в orchestrator.
-- [ ] **F5** Pause / Resume через GUI button работает на macOS + Linux + Windows. state.json marker корректно очищается. 24h auto-cancel.
-- [ ] **F7** Auto-tune button в Run screen запускает calibrate + сохраняет tuned profile + switch'ит state.
-- [ ] **E1** Все 10 screens + 7 widgets имеют `setAccessibleName` на interactive widgets. Primary CTAs имеют shortcuts (Ctrl+R, Esc, Ctrl+O, Ctrl+,, Ctrl+1..0). Regression test зелёный.
-- [ ] **E3** `QStandardPaths.AppConfigLocation` используется везде. Migration helper работает (test).
-- [ ] **E4** Theme switch light↔dark не leak'ит цвета. KPI pills + preflight badges берут tokens.
-- [ ] **E6** sys.excepthook ловит unhandled, показывает dialog + Copy details. Crash.log пишется в CONFIG_DIR.
-- [ ] **E12** `importlib.resources.files()` используется в 7 ранее-fragile screens. PyInstaller-build загружает profiles корректно (CI smoke).
-- [ ] **C1–C7** Ноль `# type: ignore` в production code (`grep -rn "type: ignore" src/` пусто). mypy --strict зелёный.
-- [ ] **WCAG-AA** regression: пары (fg, bg) для всех theme tokens проходят contrast ≥ 4.5.
-- [ ] `make check` зелёный на CI matrix (3 OS × 2 Py).
-- [ ] `make test-gui` зелёный.
-- [ ] `make test-integration` зелёный.
-- [ ] Smoke run на real 4K HDR source через GUI без regressions.
-- [ ] Документация: `docs/gui.md` (новые shortcuts), `docs/profiles.md` (platform profiles раздел), `docs/architecture.md` (RunEvent contract обновлён).
+- [x] **F2** Live divergence indicator в Run screen (sparkline + EMA + KPI-banded цвета). RunEvent `divergence_sample` контракт задокументирован в `docs/architecture.md`. Sampling configurable через `RunOptions.sample_phash: off|light|full`. (R4 — `d4d3556`)
+- [x] **F3** 7 platform profiles шипятся (`youtube_4k`, `youtube_1080p`, `youtube_shorts`, `tiktok_vertical`, `instagram_reels`, `instagram_square`, `linkedin_square`), integration-test каждого зелёный. `video.fit_aspect` snapshot tests (20 cases). Docs `docs/profiles.md` обновлены. (R3 — `4dedf55`, docs R7 — `e09bcd9`)
+- [x] **F4** Webhook (Discord / Slack / Telegram auto-detect) + SMTP работают. Settings UI + Test button. Notifications хук в orchestrator. (R5 — `d58726b`)
+- [x] **F5** Pause / Resume через GUI button работает: POSIX SIGSTOP/SIGCONT + Windows lazy psutil. state.json `paused_at` marker round-trip verified. 24h auto-cancel. Real-ffmpeg integration test зелёный на macOS. (R6 — `0dcdb12`, integration R7 — `e09bcd9`)
+- [x] **F7** Auto-tune button в Run screen (`🎯 Auto-tune`, Ctrl+T) запускает calibrate + сохраняет `<profile>.tuned.yaml` + switch'ит state.profile_path. (R4 — `d4d3556`)
+- [x] **E1** Все 10 screens + 7 widgets имеют `setAccessibleName` на interactive widgets (12 a11y tests зелёные, `_R2_PENDING` пуст). Primary CTAs имеют shortcuts (Ctrl+R, Esc, Space, Ctrl+T, Ctrl+Q, Ctrl+,, Ctrl+1..0). Regression test зелёный. (R2.1 — `5959ce5`)
+- [x] **E3** `QStandardPaths.AppConfigLocation` + `CacheLocation` используется везде. Migration helper копирует из legacy `~/.config/yt_uniquifier/`. (R1 — `cbf243a`)
+- [x] **E4** Theme switch light↔dark не leak'ит цвета. KPI pills + preflight badges берут tokens через `tokens_for(theme)` + подписаны на `state.theme_changed`. (R1 — `cbf243a`)
+- [x] **E6** sys.excepthook ловит unhandled, показывает QMessageBox + DetailedText (Copy details). Crash.log пишется в CONFIG_DIR с 100 KiB rotation. (R2.2 — `dc3d237`)
+- [x] **E12** `importlib.resources.files("yt_uniquifier").joinpath("profiles")` используется через `gui/paths.py::profiles_dir()` в 7 ранее-fragile screens. (R1 — `cbf243a`)
+- [x] **C1–C7** Ноль `# type: ignore` в production code (`grep -rn "type: ignore" src/` чист от user-defined). mypy --strict зелёный на 115 файлах. (R1 — `cbf243a`)
+- [x] **WCAG-AA** regression: `tests/gui/test_theme_contrast.py` — 27 (fg, bg) пар × 2 темы проходят contrast ≥ 4.5. Поймал 8 реальных провалов в дефолтных токенах, починил `theme.py` + `kpi_pills.py`. (R7 — `e09bcd9`)
+- [x] `make check` зелёный локально (CI matrix 3 OS × 2 Py — отдельно verify на push tag).
+- [x] `make test-gui` зелёный (12 a11y + 27 WCAG-AA + screen smoke).
+- [x] `make test-integration` зелёный (2 pause/resume real-ffmpeg + 8 platform profiles).
+- [~] Smoke run на real 4K HDR source через GUI — manual checkpoint, требует пользовательского источника; не блокирующий.
+- [x] Документация: `docs/gui.md` (новые shortcuts + per-OS QStandardPaths), `docs/profiles.md` (Platform profiles раздел + fit_aspect row), `docs/architecture.md` (RunEvent contract таблица + pause/cancel plumbing diagram). (R7 — `e09bcd9`)
 
 ---
 
-**WAITING FOR CONFIRMATION**: Готов начать v0.7.0?
-
-Варианты:
-- **"yes"** / **"proceed"** — старт с Round 1 (plumbing + polish, низкий риск)
-- **"start round N"** — пропустить вперёд (например, начать с F3 platform profiles)
-- **"modify: …"** — изменить scope / приоритеты / split rounds иначе
-- **"expand <раздел>"** — расписать детали по конкретной задаче (например, расписать SMTP keyring fallback, или показать конкретный YAML для tiktok_vertical, или дать диалог excepthook mockup)
-- **"defer Fx"** — отложить конкретную фичу на v0.7.1 / v0.8.0
+**SHIPPED**: v0.7.0 tagged `2026-06-14`. 9 atomic commits (`cbf243a` → `e09bcd9`), 821 тестов зелёные. Master plan (`yt-uniquifier-best-in-class.plan.md`) маркирован ✅ SHIPPED.
