@@ -187,7 +187,8 @@ _KNOWN_MULTI_CHAIN_TRANSFORMS = {
 # double-prefix invariant still applies; we just can't construct them
 # from defaults alone, so skip in this generic sweep.
 _TRANSFORMS_WITHOUT_DEFAULTS = {
-    "video.blend_b",  # b_video_path is required
+    "video.blend_b",      # b_video_path is required
+    "video.fit_aspect",   # target_aspect is required (no sensible default)
 }
 
 

@@ -1,0 +1,34 @@
+name: instagram_reels
+description: >-
+  Instagram Reels (1080x1920 9:16) with Instagram-style blurred-background
+  pad — the source is centered with a defocused copy of itself filling the
+  empty area.  -16 LUFS (Instagram target).
+transforms:
+  - id: video.fit_aspect
+    enabled: true
+    params:
+      target_aspect: "9:16"
+      mode: pad_blur
+      blur_sigma: 25.0
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.02, rng_seed: 42}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.01, contrast: 1.018, gamma: 0.996, saturation: 1.025}
+  - id: video.noise
+    enabled: true
+    params: {strength: 3}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.0008, tempo: 1.0}
+  - id: audio.eq
+    enabled: true
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+output_container: mp4
+target_codec: h264
+target_loudness_lufs: -16.0
+seed: 42

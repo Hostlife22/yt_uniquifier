@@ -1,0 +1,32 @@
+name: youtube_shorts
+description: >-
+  YouTube Shorts (1080x1920 9:16) — crop-center.  -14 LUFS (YouTube spec).
+  Right for vertical talking-head and centered-subject content.
+transforms:
+  - id: video.fit_aspect
+    enabled: true
+    params:
+      target_aspect: "9:16"
+      mode: crop
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.02, rng_seed: 42}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.008, contrast: 1.015, gamma: 0.997, saturation: 1.02}
+  - id: video.noise
+    enabled: true
+    params: {strength: 3}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.0006, tempo: 1.0}
+  - id: audio.eq
+    enabled: true
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+output_container: mp4
+target_codec: h264
+target_loudness_lufs: -14.0
+seed: 42
