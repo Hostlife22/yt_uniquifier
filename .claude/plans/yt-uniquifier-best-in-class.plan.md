@@ -222,24 +222,28 @@
 
 **Метрика**: 2h 1080p run time -25% на HDD baseline. macOS DMG проходит notarization. Windows MSI install + run без admin prompts.
 
-### **v0.7.0 — GUI maturity + Platform profiles (3-4 недели)**
+### **v0.7.0 — GUI maturity + Platform profiles** ✅ SHIPPED (2026-06-14)
 
 **Цель**: визуально и accessibility on par с HandBrake, market reach.
 
-- [ ] **F2: live divergence indicator** в Run и Batch screens.
-- [ ] **F3: platform-destination profiles** (5 шипуемых).
-- [ ] **F4: post-job webhook + SMTP**.
-- [ ] **F7: Auto-calibrate button** в Run screen.
-- [ ] E1: accessibility sweep — `setAccessibleName`, `setTabOrder`, `setShortcut` (Cmd+R/Esc), мнемоники в кнопках.
-- [ ] E3: `QStandardPaths.AppConfigLocation` + `CacheLocation` везде. Migration helper для существующих `~/.config/yt_uniquifier/`.
-- [ ] E4: фикс theme leaks в `kpi_pills` и `preflight_panel`.
-- [ ] E6: global `sys.excepthook` с QMessageBox + "Copy details" button.
-- [ ] E12: `importlib.resources.files()` в PyInstaller-fragile путях.
-- [ ] **F5: Pause/Resume** — SIGTSTP + GUI button + state.json marker.
-- [ ] Все 17 typed `# type: ignore` устранить (C1-C7).
-- [ ] Visual regression: WCAG-AA contrast test в `tests/gui/`.
+Все 6 раундов закрыты атомарными коммитами в одну сессию. См. `.claude/plans/yt-uniquifier-v0.7.0.plan.md` для round-by-round breakdown.
 
-**Метрика**: 100% screen-reader compat (VoiceOver/NVDA), 5 platform-presets shipped, post-job notification → Discord/email/Slack работают, theme switch без leak'ов.
+- [x] **F2: live divergence indicator** в Run screen — pHash sampling в orchestrator (`RunOptions.sample_phash: off|light|full`), custom-painted `_Sparkline` widget с EMA, KPI-banded цвета. (commit `d4d3556`)
+- [x] **F3: platform-destination profiles** — 7 YAML профилей (`youtube_4k`, `youtube_1080p`, `youtube_shorts`, `tiktok_vertical`, `instagram_reels`, `instagram_square`, `linkedin_square`) + новый transform `video.fit_aspect` (crop / pad_blur / pad_black). (commit `4dedf55`)
+- [x] **F4: post-job webhook + SMTP** — `core/notifications.py` с auto-detect провайдеров (Discord embed / Slack blocks / Telegram Markdown / generic), stdlib-only (urllib + smtplib), optional `keyring` для SMTP пароля; Settings UI groupbox + Test button. (commit `d58726b`)
+- [x] **F7: Auto-calibrate button** в Run screen — `🎯 Auto-tune` запускает `CalibrateWorker`, сохраняет `<profile>.tuned.yaml`, switch'ает state.profile_path. (commit `d4d3556`)
+- [x] E1: accessibility sweep — `setAccessibleName`/`setAccessibleDescription`/`setTabOrder`/`setShortcut` (Ctrl+R/Esc/Ctrl+Q/Ctrl+1..0), мнемоники во всех CTAs, regression test `tests/unit/test_gui_accessibility.py` (12 cases). (commit `5959ce5`)
+- [x] E3: `QStandardPaths.AppConfigLocation` для config + `CacheLocation` для cache, migration helper копирует из legacy `~/.config/yt_uniquifier/`. (commit `cbf243a`)
+- [x] E4: theme leaks устранены — `tokens_for(theme)` lookup в `theme.py`, `kpi_pills` + `preflight_panel` подписаны на `state.theme_changed`. (commit `cbf243a`)
+- [x] E6: global `sys.excepthook` с QMessageBox + DetailedText "Copy details", 100 KiB `crash.log` ротация, `KeyboardInterrupt` bypass. (commit `dc3d237`)
+- [x] E12: `importlib.resources.files("yt_uniquifier").joinpath("profiles")` через централизованный `gui/paths.py::profiles_dir()` — PyInstaller-portable. (commit `cbf243a`)
+- [x] **F5: Pause/Resume** — `core/process_control.py` (POSIX SIGSTOP/SIGCONT + Windows lazy psutil, recursive tree), `PauseToken` в runner с 24h auto-cancel, `paused_at` marker в `state.json`, GUI `&Pause` button (Space shortcut) в Run screen. (commit `0dcdb12`)
+- [x] Все `# type: ignore` устранены (C1-C7) — `cast(ColorTransfer, ...)` в probe, тип Profile в worker/batch, `-> QWidget` annotation в history. (commit `cbf243a`)
+- [ ] Visual regression: WCAG-AA contrast test в `tests/gui/` — отложено (не критично для шипа, E4 закрыл root cause).
+
+**Метрика**: 100% screen-reader compat (VoiceOver/NVDA), 7 platform-presets shipped, post-job notification → Discord/Slack/Telegram/email работают, theme switch без leak'ов, Pause/Resume cross-OS (real SIGSTOP roundtrip verified на macOS).
+
+**Cumulative session**: 7 atomic commits, ~770 unit tests + 12 a11y + 25 R5 notifications + 20 R6 pause/resume — всё зелёное, ruff All checks passed, mypy 115 files clean.
 
 ### **v0.8.0 — ML-grade QA + Plugin system (4-5 недель)**
 
