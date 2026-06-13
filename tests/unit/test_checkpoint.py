@@ -61,6 +61,11 @@ def test_resume_same_plan_loads_existing(tmp_path: Path) -> None:
     store1 = CheckpointStore(tmp_path / "work", plan)
     store1.init_or_resume(_segments())
     store1.mark(0, "done", out_path=tmp_path / "seg0.mkv")
+    # B4 (v0.6.0): mark() is debounced; force a flush so the second
+    # store reads the post-mark state from disk. In production this
+    # happens automatically at phase boundaries (set_loudnorm /
+    # set_main_audio force-flush) or via atexit on process exit.
+    store1.flush()
 
     store2 = CheckpointStore(tmp_path / "work", plan)
     segs = store2.init_or_resume(_segments())

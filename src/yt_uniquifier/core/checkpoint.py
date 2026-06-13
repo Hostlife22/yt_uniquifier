@@ -34,6 +34,16 @@ from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 SCHEMA_VERSION = 1
 LOCK_FILENAME = ".lock.json"
 
+# B4 (v0.6.0): debounced flush thresholds. ``mark()`` writes to state
+# but only forces a disk fsync when one of these is exceeded. The
+# trade-off: up to ``DEBOUNCE_MAX_MARKS`` segments may revert from
+# ``done`` → ``pending`` on a crash within the debounce window, which
+# only costs a re-encode (resume invariant is preserved). On a
+# 1000-segment plan with 4 workers this drops ~3990 fsync calls
+# (1-4 s on SSD, 10-40 s on HDD) to ~100.
+DEBOUNCE_MAX_MARKS = 10
+DEBOUNCE_MAX_SEC = 0.25
+
 _log = logging.getLogger(__name__)
 
 
@@ -75,6 +85,11 @@ class CheckpointStore:
         self.lock_path = work_dir / LOCK_FILENAME
         self._state: dict[str, Any] = {}
         self._lock = threading.RLock()
+        # B4 (v0.6.0): debounced flush counters. ``_flush_maybe`` honours
+        # both — flush when EITHER N marks accumulated OR T seconds
+        # elapsed since the last flush. Reset on every real flush.
+        self._marks_since_flush = 0
+        self._last_flush_at = time.monotonic()
         # A4 (v0.5.5): cross-process work_dir lock. Two `yt-uniq batch`
         # processes that accidentally share a work_dir would otherwise
         # race on the read-modify-write of state.json — the PID-suffixed
@@ -147,6 +162,20 @@ class CheckpointStore:
                 s["src_path"] = str(src_path)
             if out_path is not None:
                 s["out_path"] = str(out_path)
+            # B4 (v0.6.0): debounce — most callers (the parallel segment
+            # workers) hit this hot path; coalesce fsyncs over a short
+            # window. terminal statuses (done/failed) get the full mark
+            # accounting; pending / in_progress transitions are also
+            # safely debounced because resume just re-marks them.
+            self._marks_since_flush += 1
+            self._flush_maybe()
+
+    def flush(self) -> None:
+        """Force-flush any pending state changes. Public API for the
+        orchestrator to call at phase boundaries (segment loop done,
+        main_audio done, before concat).
+        """
+        with self._lock:
             self._flush()
 
     def all_segments(self) -> list[Segment]:
@@ -181,6 +210,7 @@ class CheckpointStore:
     def set_loudnorm(self, m: LoudnormMeasurement) -> None:
         with self._lock:
             self._state["loudnorm_measurement"] = m.model_dump(mode="json")
+            # Phase-boundary write: force-flush instead of debouncing.
             self._flush()
 
     # ---- main audio cache ----
@@ -193,6 +223,7 @@ class CheckpointStore:
     def set_main_audio(self, path: Path) -> None:
         with self._lock:
             self._state["main_audio_path"] = str(path)
+            # Phase-boundary write: force-flush instead of debouncing.
             self._flush()
 
     # ---- internals ----
@@ -285,12 +316,18 @@ class CheckpointStore:
             pass
 
     def close(self) -> None:
-        """Release the cross-process lock explicitly.
+        """Release the cross-process lock and flush any pending state.
 
-        ``atexit`` will eventually release it anyway, but tests and
-        long-running daemons that create many CheckpointStore instances
-        should call this to free the lock as soon as work completes.
+        ``atexit`` will eventually release the lock anyway, but tests
+        and long-running daemons that create many CheckpointStore
+        instances should call this to free the lock as soon as work
+        completes. We also force-flush any debounced state changes so
+        the post-close ``state.json`` reflects every recorded mark.
         """
+        with self._lock:
+            if self._marks_since_flush > 0:
+                # B4: ensure no debounced marks are dropped on close.
+                self._flush()
         self._release_process_lock()
 
     def __enter__(self) -> CheckpointStore:
@@ -300,6 +337,23 @@ class CheckpointStore:
         self.close()
 
     # ---- internals ----
+
+    def _flush_maybe(self) -> None:
+        """B4 (v0.6.0): flush only when debounce thresholds are exceeded.
+
+        Caller must hold ``self._lock``. Honours both the count
+        (``DEBOUNCE_MAX_MARKS``) and the time (``DEBOUNCE_MAX_SEC``)
+        thresholds — whichever trips first forces a real fsync.
+        Resume safety: a crash within the window means up to
+        ``DEBOUNCE_MAX_MARKS`` segments revert to ``pending`` on the
+        next run, which costs a re-encode but never produces a torn
+        ``state.json`` (atomic-replace contract is unchanged).
+        """
+        if self._marks_since_flush >= DEBOUNCE_MAX_MARKS:
+            self._flush()
+            return
+        if time.monotonic() - self._last_flush_at >= DEBOUNCE_MAX_SEC:
+            self._flush()
 
     def _flush(self) -> None:
         # Lock is RLock; reentrant when called from a public method that
@@ -334,6 +388,11 @@ class CheckpointStore:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, self.state_path)
+            # B4 (v0.6.0): reset debounce accounting after the real
+            # write. Callers that bypass _flush_maybe (set_loudnorm,
+            # set_main_audio, explicit flush()) still drop the counter.
+            self._marks_since_flush = 0
+            self._last_flush_at = time.monotonic()
 
 
 def _tool_version() -> str:

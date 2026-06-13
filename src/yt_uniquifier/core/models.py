@@ -37,8 +37,10 @@ ColorSpace = Literal[
     "unknown",
 ]
 ColorRange = Literal["tv", "pc", "unknown"]
-EncoderKind = Literal["h264", "hevc"]
-EncoderVendor = Literal["nvenc", "qsv", "amf", "videotoolbox", "x264", "x265"]
+EncoderKind = Literal["h264", "hevc", "av1"]
+EncoderVendor = Literal[
+    "nvenc", "qsv", "amf", "videotoolbox", "vulkan", "x264", "x265",
+]
 Container = Literal["mp4", "mov", "mkv"]
 AudioTracksOpt = Literal["first", "all"]
 SeedStrategy = Literal["fixed", "per_run", "per_file", "divergent"]

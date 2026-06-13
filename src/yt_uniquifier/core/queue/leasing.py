@@ -117,6 +117,11 @@ class FileQueue:
         self.host = _safe_host_name(host or socket.gethostname())
         self.host_dir = self.layout.in_progress / self.host
         self.host_dir.mkdir(parents=True, exist_ok=True)
+        # B8 (v0.6.0): cached sorted candidate name list so lease() does
+        # not re-list pending/ on every call. On NFSv4 noac a fresh
+        # ``iterdir`` round-trips to the server (10-100 ms on a busy
+        # queue); the cursor halves that traffic for typical drain runs.
+        self._lease_cursor: list[str] = []
 
     # ---- producer ---------------------------------------------------------
 
@@ -153,15 +158,30 @@ class FileQueue:
         symlink itself (not the target), but downstream ``ffprobe -i
         <leased>`` follows it and the contents reach the worker's log
         files. We delete the symlink and continue to the next candidate.
+
+        B8 (v0.6.0): the candidate list is cached in ``_lease_cursor``
+        and refreshed only when exhausted. A single drain run that
+        pulls N files now needs ⌈N / batch⌉ ``iterdir`` calls instead
+        of N. We re-list (not differential) so stale entries that lost
+        races with other workers are dropped naturally; ``os.rename``
+        on an already-leased file raises FileNotFoundError and we
+        fall through to the next candidate.
         """
-        for candidate in sorted(self.layout.pending.iterdir()):
-            if candidate.name.startswith("."):
+        if not self._lease_cursor:
+            self._refresh_lease_cursor()
+        while self._lease_cursor:
+            name = self._lease_cursor.pop(0)
+            # Dotfiles are filtered at refresh time, but keep a defensive
+            # skip here in case a future code path injects names directly.
+            if name.startswith("."):
                 continue
-            dest = self.host_dir / candidate.name
+            candidate = self.layout.pending / name
+            dest = self.host_dir / name
             try:
                 os.rename(candidate, dest)
             except (OSError, FileNotFoundError):
-                # Another worker beat us to this file.
+                # Another worker beat us to this file. Cursor moves
+                # on; refresh happens when the cursor exhausts.
                 continue
             if dest.is_symlink():
                 # Hostile or accidental symlink. Drop it, do NOT return
@@ -180,7 +200,36 @@ class FileQueue:
                     )
                 continue
             return dest
-        return None
+        # Cursor exhausted without a successful lease — try one more
+        # refresh in case workers added new files concurrently. If still
+        # empty, the queue is genuinely drained.
+        self._refresh_lease_cursor()
+        if not self._lease_cursor:
+            return None
+        # Recursive single-step retry; bounded depth because the second
+        # call sees the refreshed cursor and either leases or returns
+        # None at the empty-after-refresh check above.
+        return self.lease()
+
+    def _refresh_lease_cursor(self) -> None:
+        """B8 (v0.6.0): re-list pending/ into the cursor.
+
+        Called when the cursor exhausts. Centralising the listing here
+        makes the polling cadence on shared FS explicit and easy to
+        change in one place (e.g. adding a TTL on long-running drains).
+        """
+        try:
+            entries = list(self.layout.pending.iterdir())
+        except OSError:
+            self._lease_cursor = []
+            return
+        # Filter dotfiles at refresh time, not in the lease loop —
+        # otherwise a queue containing only dotfiles would refresh
+        # forever (lease pops dot, no rename, falls through, refreshes,
+        # gets the same dots back).
+        self._lease_cursor = sorted(
+            p.name for p in entries if not p.name.startswith(".")
+        )
 
     def heartbeat(self) -> None:
         """Touch <host>.alive so the reaper knows we're still working."""

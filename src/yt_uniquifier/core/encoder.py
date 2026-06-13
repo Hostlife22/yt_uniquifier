@@ -51,6 +51,9 @@ _VENDOR_DEFAULT_PARALLEL: dict[str, int] = {
     "qsv": 2,
     "amf": 2,
     "videotoolbox": 2,
+    # F8 (v0.6.0): Vulkan AV1 encoder shipped in FFmpeg 8.0 (Aug 2025).
+    # No published per-driver session cap yet; treat as moderate.
+    "vulkan": 2,
     "x264": 0,           # 0 = compute from cpu_count() // 2
     "x265": 0,
 }
@@ -68,6 +71,11 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
     ("hevc_videotoolbox", "videotoolbox", "hevc"),
     ("h264_amf", "amf", "h264"),
     ("hevc_amf", "amf", "hevc"),
+    # F8 (v0.6.0): Vulkan AV1 (FFmpeg 8.0 "Huffman"). Cross-vendor —
+    # works on AMD, Intel, and recent NVIDIA without vendor-specific
+    # NVENC/QSV/AMF paths. The probe is the same lavfi null-source
+    # test as the others; pick_encoder still respects user `prefer`.
+    ("av1_vulkan", "vulkan", "av1"),
     ("libx264", "x264", "h264"),
     ("libx265", "x265", "hevc"),
 )

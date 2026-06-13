@@ -66,7 +66,9 @@ def test_keyframe_cache_key_is_path_independent(tmp_path: Path) -> None:
 # ============================================================== B2
 
 
-def test_loudnorm_measure_command_downsamples_to_16k_mono() -> None:
+def test_loudnorm_measure_command_downsamples_to_16k_mono(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """B2: measure() must prepend aresample=16000,aformat=mono.
 
     Pre-fix the loudnorm filter ran at native 48 kHz stereo which
@@ -74,7 +76,6 @@ def test_loudnorm_measure_command_downsamples_to_16k_mono() -> None:
     aresample=16000,aformat=channel_layouts=mono,loudnorm=… — ~6× less
     decode work without affecting EBU R128 integrated value.
     """
-    # Test by calling measure with a stubbed subprocess; capture the cmd.
     import yt_uniquifier.core.transforms.audio_loudnorm as ln_mod
     from yt_uniquifier.core.transforms.audio_loudnorm import (
         LoudnormParams,
@@ -95,15 +96,12 @@ def test_loudnorm_measure_command_downsamples_to_16k_mono() -> None:
             "stdout": "",
         })
 
-    ln_mod.subprocess.run = fake_run  # type: ignore[assignment]
-    try:
-        measure(Path("dummy.wav"), LoudnormParams())
-    finally:
-        # Restore — fixture-style cleanup without depending on monkeypatch
-        # because we want to exercise the un-patched module-level subprocess
-        # in other tests.
-        import subprocess as real_subproc
-        ln_mod.subprocess.run = real_subproc.run  # type: ignore[assignment]
+    # Use monkeypatch (auto-reverted after this test) instead of direct
+    # module mutation — `subprocess` is a singleton, so reassigning
+    # `ln_mod.subprocess.run` leaks across tests if the cleanup writes
+    # back the already-patched reference.
+    monkeypatch.setattr(ln_mod.subprocess, "run", fake_run)
+    measure(Path("dummy.wav"), LoudnormParams())
 
     cmd = captured["cmd"]
     af_idx = cmd.index("-af")
