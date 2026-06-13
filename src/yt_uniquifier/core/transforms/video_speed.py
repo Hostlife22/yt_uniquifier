@@ -7,7 +7,7 @@ declare both consistently.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -18,6 +18,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class SpeedParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rate: float = Field(default=1.0, ge=0.5, le=2.0)
 
 

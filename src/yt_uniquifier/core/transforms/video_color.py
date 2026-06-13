@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -13,6 +13,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class ColorEqParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     brightness: float = Field(default=0.01, ge=-0.2, le=0.2)
     contrast: float = Field(default=1.02, ge=0.5, le=2.0)
     gamma: float = Field(default=0.99, ge=0.5, le=2.0)

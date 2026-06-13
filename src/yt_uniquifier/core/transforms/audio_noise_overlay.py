@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -38,6 +38,8 @@ NoiseColor = Literal["white", "pink", "brown"]
 
 
 class NoiseOverlayParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Noise level in dB relative to original. -10 dB ≈ 30 % amplitude;
     # -6 dB ≈ 50 % (destructive — Smitelli's threshold for breaking CID).
     # Default is conservative — -12 dB ≈ 25 % mix.

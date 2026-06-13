@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -13,6 +13,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class NoiseParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     strength: int = Field(default=4, ge=0, le=100)
 
 

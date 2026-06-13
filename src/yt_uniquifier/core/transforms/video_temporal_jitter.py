@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import random as _random
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -39,6 +39,8 @@ WINDOW_FRAMES = 60 * 24
 
 
 class TemporalJitterParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Probability per frame of being blacked out. Defaults are conservative —
     # 0.033 ≈ blackout 48 of 1440 frames per minute.
     # Fojcik's reference attack used 1/10; that's visible, so we stay lower.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -22,6 +22,8 @@ _SAFE_COLOR_RE = re.compile(r"^(?:#|0x)?[A-Za-z0-9]{1,16}$")
 
 
 class CropResizeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     max_strength: float = Field(default=0.03, ge=0.0, le=0.10)
     rng_seed: int | None = None
 
@@ -63,6 +65,8 @@ register(
 
 
 class RotateParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     degrees: float = Field(default=0.15, ge=-2.0, le=2.0)
     # For SDR sources black=0,0,0 is fine. For HDR (PQ/HLG) pure 0 is below
     # legal video range and gets clipped by the encoder; near-black 16,16,16
@@ -115,6 +119,8 @@ class MirrorParams(BaseModel):
     lateralized framing. Default-disabled in shipped CID profiles; the user
     opts in by adding `video.mirror` explicitly to their profile.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
 
 def _build_mirror(

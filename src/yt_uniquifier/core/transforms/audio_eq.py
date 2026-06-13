@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -13,6 +13,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class AudioEqParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     bands: list[tuple[float, float]] = Field(
         default_factory=lambda: [(120.0, -0.6), (4500.0, 0.4)]
     )

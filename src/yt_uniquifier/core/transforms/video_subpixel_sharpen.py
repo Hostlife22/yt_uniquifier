@@ -21,7 +21,7 @@ produces color fringing on edges.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -32,6 +32,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class SubpixelSharpenParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # unsharp luma amount. ≤0.1 = sub-visible-threshold; 0.3+ is visibly sharp.
     luma_amount: float = Field(default=0.05, ge=0.0, le=0.3)
     # Kernel size for the local-mean subtraction. 5×5 standard.

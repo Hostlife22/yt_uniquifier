@@ -18,7 +18,7 @@ Filter shape (compand):
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -29,6 +29,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class CompandParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     attack: float = Field(default=0.05, ge=0.001, le=1.0)
     decay: float = Field(default=0.5, ge=0.01, le=2.0)
     # Threshold in dBFS where compression kicks in (e.g. -20 = signals over

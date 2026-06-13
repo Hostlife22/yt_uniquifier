@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -30,6 +30,8 @@ IN_PLACEHOLDER = "__IN__"
 
 
 class BlendBParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     b_video_path: Path
     opacity: float = Field(default=0.03, ge=0.01, le=0.15)
 

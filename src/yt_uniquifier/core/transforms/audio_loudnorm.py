@@ -17,7 +17,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.transforms.base import (
@@ -33,6 +33,11 @@ DEFAULT_TARGET_I = -14.0
 
 
 class LoudnormParams(BaseModel):
+    # NB: extra="forbid" only on user-facing config Params.
+    # LoudnormMeasurement is parsed from ffmpeg's JSON output and
+    # intentionally tolerates extra fields across ffmpeg versions.
+    model_config = ConfigDict(extra="forbid")
+
     integrated: float = Field(default=DEFAULT_TARGET_I, ge=-70.0, le=-5.0)
     true_peak: float = Field(default=-1.5, ge=-9.0, le=0.0)
     lra: float = Field(default=11.0, ge=1.0, le=20.0)

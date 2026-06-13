@@ -10,7 +10,7 @@ bin boundaries chromaprint hashes against.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -21,6 +21,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class AudioResampleParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     intermediate_sr: int = Field(default=47999, ge=8000, le=192000)
     target_sr: int = Field(default=48000, ge=8000, le=192000)
 

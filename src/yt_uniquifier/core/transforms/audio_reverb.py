@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -26,6 +26,8 @@ ReverbStyle = Literal["small_room", "medium_room", "hall", "plate"]
 
 
 class ReverbParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # 0 = effectively disabled; 0.15 = subtle "lift"; 0.30 = noticeable room.
     intensity: float = Field(default=0.15, ge=0.0, le=0.5)
     style: ReverbStyle = "small_room"

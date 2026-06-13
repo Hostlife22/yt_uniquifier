@@ -11,7 +11,7 @@ safe on speech and most pop / film soundtracks.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -22,6 +22,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class SpectralSmearParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     intensity: float = Field(default=0.02, ge=0.0, le=0.10)
     delay_ms: float = Field(default=5.0, ge=1.0, le=50.0)
     speed: float = Field(default=0.3, ge=0.05, le=2.0)

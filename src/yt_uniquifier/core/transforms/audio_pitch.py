@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -30,6 +30,8 @@ PitchMethod = Literal["asetrate", "rubberband"]
 
 
 class PitchTempoParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # v0.2 default bumped 1.005 → 1.012 (~21 cents); v0.3.1 introduces
     # method='rubberband' which preserves formants and lets cid_aware push
     # pitch to 1.04 without the "chipmunk" effect.

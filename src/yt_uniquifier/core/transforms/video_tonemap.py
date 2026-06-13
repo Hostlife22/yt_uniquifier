@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -37,6 +37,8 @@ TonemapAlgo = Literal["hable", "reinhard", "mobius", "aces"]
 
 
 class TonemapSDRParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     algorithm: TonemapAlgo = "hable"
     peak: float = Field(default=1000.0, ge=100.0, le=10000.0)
     desat: float = Field(default=0.0, ge=0.0, le=1.0)

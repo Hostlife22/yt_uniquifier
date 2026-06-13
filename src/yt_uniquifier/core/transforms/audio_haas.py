@@ -15,7 +15,7 @@ Source: Scott Smitelli, "Fun with YouTube's Audio Content ID System" (2010).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
@@ -26,6 +26,8 @@ from yt_uniquifier.core.transforms.base import (
 
 
 class HaasStereoParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Right-channel delay in milliseconds. Within 5–30 ms the perceptual
     # system fuses the two channels as one source ("precedence effect");
     # above ~40 ms it starts to sound like a discrete echo.

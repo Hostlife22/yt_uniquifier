@@ -20,7 +20,11 @@ dependencies = [
     "rich~=13.7",
     "pyyaml~=6.0",
     "imagehash~=4.3",
-    "Pillow~=10.3",
+    # A9 (v0.5.5): bump above CVE-2024-28219 (heap buffer overflow in
+    # _imagingcms) which affected Pillow 10.3.0. We only use Pillow via
+    # imagehash for perceptual hashing, but the pin should not allow the
+    # vulnerable point release on fresh installs.
+    "Pillow>=10.3.1,<11",
     "structlog~=24.1",
     "jinja2~=3.1",
 ]

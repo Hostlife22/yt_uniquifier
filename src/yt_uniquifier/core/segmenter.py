@@ -264,8 +264,16 @@ def process_video_segment(
         _on_event = on_event
 
         def _wrap(ev: RunEvent) -> None:
+            # A1 (v0.5.5): do NOT mutate the input event's payload —
+            # RunEvent is `frozen=True` but `payload: dict[str, object]` is
+            # only shallowly frozen, so in-place mutation leaks back to
+            # any holder of the reference (Qt queued connections, log
+            # buffers, retry-replay loops). Construct a new event.
             if "segment" not in ev.payload:
-                ev.payload["segment"] = segment.idx
+                ev = RunEvent(
+                    kind=ev.kind,
+                    payload={**ev.payload, "segment": segment.idx},
+                )
             _on_event(ev)
         forwarded_on_event: Callable[[RunEvent], None] | None = _wrap
     else:
