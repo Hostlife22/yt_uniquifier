@@ -76,7 +76,7 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
 def detect_encoders(
     force: bool = False,
     *,
-    cancel_token: "CancelToken | None" = None,
+    cancel_token: CancelToken | None = None,
 ) -> list[EncoderCandidate]:
     """Return list of encoder candidates with works=True/False.
 

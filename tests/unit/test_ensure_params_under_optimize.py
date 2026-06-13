@@ -26,8 +26,8 @@ import sys
 import pytest
 
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.transforms.audio_eq import AudioEqParams
 from yt_uniquifier.core.transforms.audio_compand import CompandParams
+from yt_uniquifier.core.transforms.audio_eq import AudioEqParams
 from yt_uniquifier.core.transforms.base import ensure_params, ensure_rng
 
 

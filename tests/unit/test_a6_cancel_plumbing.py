@@ -31,7 +31,6 @@ from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.runner import CancelToken
 
-
 # -------------------------------------------------------- calibrate
 
 def test_calibrate_raises_on_pre_iteration_cancel(

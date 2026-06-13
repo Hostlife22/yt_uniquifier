@@ -168,18 +168,16 @@ class FileQueue:
                 # it to pending (an attacker could re-place it). Log via
                 # the side-channel ``.rejected_symlinks`` marker so an
                 # operator can audit.
-                try:
+                import contextlib
+                with contextlib.suppress(OSError):
                     dest.unlink()
-                except OSError:
-                    pass
                 marker = self.layout.in_progress / ".rejected_symlinks.log"
-                try:
-                    with marker.open("a", encoding="utf-8") as fh:
-                        fh.write(
-                            f"{time.time():.0f} {self.host} {candidate.name}\n"
-                        )
-                except OSError:
-                    pass
+                with contextlib.suppress(OSError), marker.open(
+                    "a", encoding="utf-8",
+                ) as fh:
+                    fh.write(
+                        f"{time.time():.0f} {self.host} {candidate.name}\n"
+                    )
                 continue
             return dest
         return None

@@ -20,7 +20,6 @@ import pytest
 
 from yt_uniquifier.core.runner import CancelToken, _run_once
 
-
 needs_sh = pytest.mark.skipif(
     shutil.which("sh") is None,
     reason="POSIX sh required for hung-subprocess simulation",

@@ -293,7 +293,7 @@ class CheckpointStore:
         """
         self._release_process_lock()
 
-    def __enter__(self) -> "CheckpointStore":
+    def __enter__(self) -> CheckpointStore:
         return self
 
     def __exit__(self, *exc: object) -> None:

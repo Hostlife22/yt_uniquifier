@@ -11,7 +11,6 @@ for the 60-second timeout. Tests below pin the new mechanics.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock

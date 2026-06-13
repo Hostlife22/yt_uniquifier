@@ -7,6 +7,7 @@ loop while the analysis script runs.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 import time
@@ -43,17 +44,13 @@ class CorrelateWorker(WorkerBase):
         """SIGINT → 5 s grace → SIGKILL, matching runner._terminate."""
         if proc.poll() is not None:
             return
-        try:
+        with contextlib.suppress(OSError):
             proc.terminate()
-        except OSError:
-            pass
         try:
             proc.wait(timeout=5.0)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(OSError):
                 proc.kill()
-            except OSError:
-                pass
 
     def run(self) -> None:
         try:

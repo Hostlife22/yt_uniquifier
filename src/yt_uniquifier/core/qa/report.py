@@ -92,7 +92,7 @@ def build_report(
     predict_cid: bool = True,
     vs_corpus: Corpus | None = None,
     progress: ProgressFn | None = None,
-    cancel_token: "CancelToken | None" = None,
+    cancel_token: CancelToken | None = None,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order.
 

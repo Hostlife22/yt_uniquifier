@@ -34,7 +34,6 @@ from yt_uniquifier.core.checkpoint import (
     CheckpointStore,
     _pid_alive,
 )
-from yt_uniquifier.core.errors import CheckpointError
 from yt_uniquifier.core.models import (
     AudioStream,
     EncoderCandidate,
