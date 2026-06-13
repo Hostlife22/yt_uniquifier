@@ -23,6 +23,7 @@ from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan
 from yt_uniquifier.core.preflight import has_fail
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -115,11 +116,16 @@ class RunScreen(ScreenBase):
         self.profile_combo = QComboBox()
         for p in sorted(PROFILES_DIR.glob("*.yaml")):
             self.profile_combo.addItem(p.stem, str(p))
+        mark(
+            self.profile_combo, "Profile",
+            "Choose the transform profile (soft, medium, aggressive, cid_aware, …).",
+        )
         opts.addWidget(self.profile_combo, stretch=1)
 
         self.edit_profile_btn = QPushButton("Edit…")
         self.edit_profile_btn.setEnabled(False)
         self.edit_profile_btn.setToolTip("Coming in v0.5.2 (Profile Editor)")
+        mark(self.edit_profile_btn, "Edit profile", "Open the selected profile in the editor.")
         opts.addWidget(self.edit_profile_btn)
 
         opts.addWidget(QLabel("Encoder:"))
@@ -133,26 +139,47 @@ class RunScreen(ScreenBase):
         self.preflight_panel.has_fail.connect(self._on_has_fail)
         layout.addWidget(self.preflight_panel)
 
-        # Controls
+        # Controls — primary CTAs get keyboard shortcuts so power users
+        # never need the mouse. Ctrl+R Run, Esc Cancel, Ctrl+P Preflight.
         controls = QHBoxLayout()
-        self.preflight_btn = QPushButton("Run preflight")
+        self.preflight_btn = QPushButton("&Preflight")
         self.preflight_btn.clicked.connect(self._on_preflight)
+        mark(
+            self.preflight_btn, "Run preflight",
+            "Probe the source and warn about encode-blocking issues.",
+            shortcut="Ctrl+P",
+        )
         controls.addWidget(self.preflight_btn)
 
-        self.run_btn = QPushButton("▶ Run")
+        self.run_btn = QPushButton("▶ &Run")
         self.run_btn.setObjectName("run")
         self.run_btn.clicked.connect(self._on_run)
+        mark(
+            self.run_btn, "Run",
+            "Start the uniquification pipeline on the selected input.",
+            shortcut="Ctrl+R",
+        )
         controls.addWidget(self.run_btn)
 
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("&Cancel")
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.cancel_btn.setEnabled(False)
+        mark(
+            self.cancel_btn, "Cancel run",
+            "Stop the current encode at the next safe boundary.",
+            shortcut="Esc",
+        )
         controls.addWidget(self.cancel_btn)
 
-        self.open_qa_btn = QPushButton("Open QA report")
+        self.open_qa_btn = QPushButton("Open &QA report")
         self.open_qa_btn.setEnabled(False)
         self.open_qa_btn.clicked.connect(self._on_open_qa)
+        mark(
+            self.open_qa_btn, "Open QA report",
+            "Open the HTML report from the most recent run.",
+            shortcut="Ctrl+Q",
+        )
         controls.addWidget(self.open_qa_btn)
 
         controls.addStretch(1)

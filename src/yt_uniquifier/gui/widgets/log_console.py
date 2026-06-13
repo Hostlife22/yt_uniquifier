@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from yt_uniquifier.gui.a11y import mark
+
 LogLevel = Literal["info", "progress", "log", "error"]
 
 # Subset of common color names; specific palette tuned per theme.
@@ -50,18 +52,28 @@ class LogConsole(QWidget):
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["all", "info", "progress", "log", "error"])
         self.filter_combo.currentTextChanged.connect(lambda _: self._refresh())
+        mark(self.filter_combo, "Log level filter",
+             "Show only log lines at this severity.")
         bar.addWidget(self.filter_combo)
         bar.addStretch(1)
-        self.copy_btn = QPushButton("Copy")
+        self.copy_btn = QPushButton("&Copy")
         self.copy_btn.clicked.connect(self._copy_all)
+        mark(self.copy_btn, "Copy log",
+             "Copy every line in the buffer to the clipboard.")
         bar.addWidget(self.copy_btn)
-        self.clear_btn = QPushButton("Clear")
+        self.clear_btn = QPushButton("C&lear")
         self.clear_btn.clicked.connect(self.clear)
+        mark(self.clear_btn, "Clear log",
+             "Empty the log console.")
         bar.addWidget(self.clear_btn)
         layout.addLayout(bar)
 
         self.text = QTextEdit()
         self.text.setReadOnly(True)
+        self.text.setAccessibleName("Log output")
+        self.text.setAccessibleDescription(
+            "Streaming log of pipeline events, ffmpeg output, and errors.",
+        )
         layout.addWidget(self.text, stretch=1)
 
     def log(self, line: str, level: LogLevel = "info") -> None:

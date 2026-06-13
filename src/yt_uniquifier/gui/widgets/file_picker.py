@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.state import AppState
 
 
@@ -51,8 +52,16 @@ class FilePickerRow(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse,
         )
         layout.addWidget(self.path_label, stretch=1)
-        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn = QPushButton("&Browse…")
         self.browse_btn.clicked.connect(self._on_browse)
+        # Strip the trailing colon and trim so the accessible name is
+        # spoken as "Browse input file" rather than "Browse Input:".
+        clean_label = label.rstrip(":").strip() or self.kind
+        mark(
+            self.browse_btn,
+            f"Browse {self.kind} file",
+            f"Pick a {clean_label.lower()} via the file dialog.",
+        )
         layout.addWidget(self.browse_btn)
 
     def set_path(self, path: Path | None) -> None:

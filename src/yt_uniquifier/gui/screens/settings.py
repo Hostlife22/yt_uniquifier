@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
@@ -45,6 +46,8 @@ class SettingsScreen(ScreenBase):
         self.theme_combo.addItems(["dark", "light", "system"])
         self.theme_combo.setCurrentText(self.state.theme)
         self.theme_combo.currentTextChanged.connect(self._on_theme_change)
+        mark(self.theme_combo, "Theme",
+             "Switch between dark, light, and system color schemes.")
         f.addRow("Theme (live switch):", self.theme_combo)
         layout.addWidget(appear)
 
@@ -58,6 +61,8 @@ class SettingsScreen(ScreenBase):
             idx = self.default_profile_combo.findData(str(self.state.profile_path))
             if idx >= 0:
                 self.default_profile_combo.setCurrentIndex(idx)
+        mark(self.default_profile_combo, "Default profile",
+             "Profile pre-selected on Run / Batch / Calibrate screens at start.")
         f2.addRow("Default profile:", self.default_profile_combo)
 
         self.recents_cap_spin = QSpinBox()
@@ -67,6 +72,8 @@ class SettingsScreen(ScreenBase):
         self.recents_cap_spin.setToolTip(
             "Hard-coded constant in v0.5.4; will be user-tunable in v0.6.",
         )
+        mark(self.recents_cap_spin, "Recents cap",
+             "Maximum number of recent files to remember (hard-coded in v0.5.4).")
         f2.addRow("Recents cap:", self.recents_cap_spin)
 
         self.history_cap_spin = QSpinBox()
@@ -76,20 +83,32 @@ class SettingsScreen(ScreenBase):
         self.history_cap_spin.setToolTip(
             "Hard-coded constant in v0.5.4; will be user-tunable in v0.6.",
         )
+        mark(self.history_cap_spin, "History cap",
+             "Maximum number of past runs to keep in the History screen.")
         f2.addRow("History cap:", self.history_cap_spin)
         layout.addWidget(defaults)
 
         # Maintenance
         maint = QGroupBox("Maintenance")
         h = QHBoxLayout(maint)
-        self.reset_enc_btn = QPushButton("Reset encoder cache")
+        self.reset_enc_btn = QPushButton("&Reset encoder cache")
         self.reset_enc_btn.clicked.connect(self._reset_encoder_cache)
+        mark(
+            self.reset_enc_btn, "Reset encoder cache",
+            "Delete the cached ffmpeg-encoder detection so they are re-probed on next run.",
+        )
         h.addWidget(self.reset_enc_btn)
-        self.open_logs_btn = QPushButton("Open log dir")
+        self.open_logs_btn = QPushButton("Open &log dir")
         self.open_logs_btn.clicked.connect(self._open_log_dir)
+        mark(self.open_logs_btn, "Open log directory",
+             "Reveal the ~/.cache/yt_uniquifier/logs folder in the system file browser.")
         h.addWidget(self.open_logs_btn)
-        self.open_config_btn = QPushButton("Open config dir")
+        self.open_config_btn = QPushButton("Open &config dir")
         self.open_config_btn.clicked.connect(self._open_config_dir)
+        mark(
+            self.open_config_btn, "Open config directory",
+            "Reveal the platform config dir (state.json, history.json) in the file browser.",
+        )
         h.addWidget(self.open_config_btn)
         h.addStretch(1)
         layout.addWidget(maint)
@@ -97,8 +116,10 @@ class SettingsScreen(ScreenBase):
         # Save
         save_row = QHBoxLayout()
         save_row.addStretch(1)
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("&Save")
         self.save_btn.clicked.connect(self._on_save)
+        mark(self.save_btn, "Save settings",
+             "Persist preferences to state.json.", shortcut="Ctrl+S")
         save_row.addWidget(self.save_btn)
         layout.addLayout(save_row)
         layout.addStretch(1)

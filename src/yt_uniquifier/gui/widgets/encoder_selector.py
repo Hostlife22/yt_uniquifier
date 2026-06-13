@@ -35,6 +35,12 @@ class EncoderSelector(QComboBox):
         self._detect_worker: EncoderDetectWorker | None = None
         self._populate_auto_only()
         self.currentIndexChanged.connect(self._on_changed)
+        self.setAccessibleName("Encoder")
+        self.setAccessibleDescription(
+            "Choose the ffmpeg video encoder. 'auto' lets yt-uniquifier "
+            "pick the best detected accelerator (NVENC, QSV, AMF, VideoToolbox) "
+            "and falls back to libx264 when none works.",
+        )
         self._start_detection()
 
     def _populate_auto_only(self) -> None:

@@ -265,14 +265,24 @@ Validate: ✅ `ruff check .` — All checks passed. ✅ `mypy src/` — 109 file
 
 **Carry-over**: pre-existing flake `tests/unit/test_encoder_detect.py::test_force_bypasses_cache` (call_count race under parallel suite run; passes in isolation). Track for v0.7.0 R2 (E1/E6 round) or earlier fix-once if blocking CI.
 
-### Round 2 — Accessibility sweep (E1) + sys.excepthook (E6)
+### Round 2 — Accessibility sweep (E1) + sys.excepthook (E6) — 🟡 R2.1 SHIPPED
 
-- Сначала генерируем checklist по `_init_ui` каждого экрана (10 screens) и каждого widget (7 widgets) — какие interactive controls есть.
-- Применяем `setAccessibleName`/`setShortcut`/`setTabOrder`/мнемоники по checklist.
-- Глобальный excepthook + crash.log file.
-- Test: pytest-qt walker → проверяет accessibleName не пустой.
+R2 разбит на R2.1 (framework + Run + Settings + E6) и R2.2/R2.3 (остальные 8 screens). Это сохраняет blast-radius каждого коммита управляемым.
 
-Validate: новый `test_accessibility.py` зелёный, manual VoiceOver smoke на 3 экранах.
+**R2.1 (этот commit):**
+- [x] **a11y framework** — новый `gui/a11y.py` с `mark(widget, name, description, shortcut)` хелпером + `INTERACTIVE_WIDGET_CLASSES` allow-list для walker'а.
+- [x] **MainWindow** — Ctrl+1..Ctrl+0 shortcuts на 10 sidebar entries; sidebar получает accessibleName + description.
+- [x] **Run screen** — `mark()` на profile_combo, edit_profile_btn, preflight_btn (Ctrl+P), run_btn (Ctrl+R), cancel_btn (Esc), open_qa_btn (Ctrl+Q). Мнемоники: &Preflight/&Run/&Cancel/&QA.
+- [x] **Settings screen** — `mark()` на theme_combo, default_profile_combo, recents_cap_spin, history_cap_spin, reset_enc_btn, open_logs_btn, open_config_btn, save_btn (Ctrl+S).
+- [x] **Widgets** — file_picker (browse_btn, accessible name derived from `kind`), encoder_selector (accessibleName + description), log_console (filter_combo, copy_btn, clear_btn, text-area).
+- [x] **E6 sys.excepthook** — `_install_global_excepthook()` в `app_pyqt.py::main`. Append-only `CONFIG_DIR/crash.log` с 100 KiB ротацией → `.log.1`. QMessageBox modal с DetailedText (Copy works). KeyboardInterrupt не показывает диалог. Hook никогда не raise'ит сам.
+- [x] **Tests** — `tests/unit/test_gui_accessibility.py` (12 testcases: walker по 10 screens с pending-list; Run + Settings unskipped, остальные 8 deferred). `tests/unit/test_gui_excepthook.py` (6 testcases: write/append/rotate/KeyboardInterrupt/swallow-internal-errors/path-helper).
+
+Validate: ✅ `ruff check .` All checks passed. ✅ `mypy src/` 110 files no issues. ✅ 678 unit + 4 GUI pass, 10 skipped (8 R2 pending, 1 PyQt6.QtCharts, 1 GUI imports). Только known pre-existing flake `test_force_bypasses_cache` (v0.6.0 B6).
+
+**R2.2 carry-over** (отдельный commit): а11y sweep оставшихся 8 screens (Batch, Calibrate, QA Viewer, Profile Editor, History, Corpus, Queue, Validation). Pending-list в `tests/unit/test_gui_accessibility.py::_R2_PENDING` фильтрует один screen за commit.
+
+**Files (R2.1)**: 9 modified (`app_pyqt.py`, `screens/run.py`, `screens/settings.py`, `widgets/{file_picker,encoder_selector,log_console}.py`, plus 2 plan-update), 3 created (`a11y.py`, `tests/unit/test_gui_accessibility.py`, `tests/unit/test_gui_excepthook.py`).
 
 ### Round 3 — Platform profiles (F3)
 
