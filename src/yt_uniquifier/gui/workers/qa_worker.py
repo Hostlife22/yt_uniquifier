@@ -57,6 +57,9 @@ class QaWorker(WorkerBase):
                 progress=lambda phase, frac: self.progress.emit(
                     frac, f"{phase} {int(frac * 100)}%",
                 ),
+                # A6 (v0.5.5): honour the worker's cancel token at each
+                # QA phase boundary (md5 / phash / audio_fp / vmaf / ssim).
+                cancel_token=self.cancel_token,
             )
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")

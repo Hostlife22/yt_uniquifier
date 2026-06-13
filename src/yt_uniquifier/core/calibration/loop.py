@@ -28,6 +28,7 @@ from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.qa.cid_predict import predict
 from yt_uniquifier.core.qa.quality import QualityMetric, quality_score
+from yt_uniquifier.core.runner import CancelToken
 from yt_uniquifier.core.segmenter import stream_copy_extract
 
 
@@ -77,8 +78,16 @@ def calibrate(
     work_dir: Path,
     encoder_override: str | None = None,
     on_step: ProgressFn | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> CalibratedResult:
-    """Bisect intensity_factor on a short clip until target is met."""
+    """Bisect intensity_factor on a short clip until target is met.
+
+    A6 (v0.5.5): ``cancel_token`` is honoured at iteration boundaries
+    AND inside the inner ``run_full`` (it is forwarded). The previous
+    GUI ``CalibrateWorker.request_cancel()`` silently no-op'd because
+    this function had no cancel surface; clicking Cancel in the
+    Calibrate screen would leave encodes running for minutes.
+    """
     work_dir.mkdir(parents=True, exist_ok=True)
     clip = _cut_test_clip(input_path, work_dir, target.test_clip_sec)
 
@@ -88,6 +97,8 @@ def calibrate(
     converged = False
 
     for i in range(1, target.max_iterations + 1):
+        if cancel_token is not None and cancel_token.is_cancelled():
+            raise PipelineError("calibration cancelled by user")
         scaled = scale_profile(base_profile, factor)
         out_path = work_dir / f"iter_{i:02d}.mp4"
         step_work = work_dir / f"work_{i:02d}"
@@ -101,13 +112,21 @@ def calibrate(
                 enforce_preflight=False,
                 keep_segments=False,
                 force_new_variant=True,
-            ))
+            ), cancel_token=cancel_token)
             cid = predict(clip, out_path)
             q = quality_score(clip, out_path)
             q_value = q.value
             q_metric = q.metric
             q_note = q.note
         except Exception as exc:
+            # A6 fix: re-raise on cancel instead of swallowing as
+            # "iteration failed". Pre-fix the inner run_full would
+            # raise PipelineError("cancelled by user") and this
+            # except block converted it into a "try harder" iteration,
+            # so calibration kept encoding after the user clicked
+            # Cancel.
+            if cancel_token is not None and cancel_token.is_cancelled():
+                raise
             step = _step(i, factor, scaled, cid_self=1.0,
                          quality=None, quality_metric=None,
                          note=f"iteration failed: {exc}")

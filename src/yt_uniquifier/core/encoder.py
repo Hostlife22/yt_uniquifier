@@ -15,11 +15,14 @@ import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from yt_uniquifier.core.errors import EncoderError
 from yt_uniquifier.core.models import EncoderCandidate, EncoderKind, EncoderVendor
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
+if TYPE_CHECKING:
+    from yt_uniquifier.core.runner import CancelToken
 
 CACHE_TTL_SEC = 7 * 24 * 3600
 
@@ -70,11 +73,20 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
 )
 
 
-def detect_encoders(force: bool = False) -> list[EncoderCandidate]:
+def detect_encoders(
+    force: bool = False,
+    *,
+    cancel_token: "CancelToken | None" = None,
+) -> list[EncoderCandidate]:
     """Return list of encoder candidates with works=True/False.
 
     Cached at CACHE_PATH keyed by sha256 of `ffmpeg -version` output.
     Pass force=True to bypass the cache and re-probe.
+
+    A6 (v0.5.5): ``cancel_token`` is checked between probes. Pre-fix
+    the GUI ``EncoderDetectWorker.request_cancel()`` was a silent
+    no-op — a cold-cache probe spawns up to 10 sequential ffmpeg
+    subprocesses (~5-15 s), during which Cancel did nothing.
     """
     version_key = _ffmpeg_version_hash()
     if not force:
@@ -82,9 +94,16 @@ def detect_encoders(force: bool = False) -> list[EncoderCandidate]:
         if cached is not None:
             return cached
 
-    results = [_probe_one(name, vendor, codec) for name, vendor, codec in _CANDIDATES]
+    results = []
+    for name, vendor, codec in _CANDIDATES:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            from yt_uniquifier.core.errors import PipelineError
+            raise PipelineError("encoder detection cancelled by user")
+        results.append(_probe_one(name, vendor, codec))
     _save_cache(version_key, results)
     return results
+
+
 
 
 def pick_encoder(

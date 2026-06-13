@@ -199,6 +199,33 @@ def _run_once(
         env=proc_env,
     )
 
+    # A5 (v0.5.5): watcher thread for cancel during silent ffmpeg.
+    # The main stdout-line loop below also checks cancel_token, but it
+    # only wakes when ffmpeg writes a new progress block. A hung NVENC
+    # session or libx264 final-flush stage can be silent for minutes,
+    # during which `cancel_token.is_cancelled()` would be ignored until
+    # either fresh output arrives or the outer 3600 s communicate
+    # timeout fires. The watcher polls cancel_token.wait(0.25) and
+    # SIGTERMs the child regardless of stdout state, then exits cleanly
+    # once the main loop signals via stop_watcher.
+    stop_watcher = threading.Event()
+    watcher_thread: threading.Thread | None = None
+    if cancel_token is not None:
+        def _watch() -> None:
+            while not stop_watcher.is_set():
+                if cancel_token.wait(0.25):
+                    # Cancel fired — terminate the child if still running.
+                    # _terminate is a no-op if proc already exited.
+                    if proc.poll() is None:
+                        _terminate(proc)
+                    return
+                if proc.poll() is not None:
+                    return
+        watcher_thread = threading.Thread(
+            target=_watch, daemon=True, name="ffmpeg-cancel-watcher",
+        )
+        watcher_thread.start()
+
     log_lines: list[str] = []
     if proc.stdout is None:
         # A2 (v0.5.5): explicit guard in place of `assert` so a release
@@ -269,6 +296,14 @@ def _run_once(
     rc = getattr(proc, "returncode", None)
     if rc is None:
         rc = proc.wait()
+
+    # A5 (v0.5.5): signal the watcher to exit and join. The thread is
+    # daemon=True so it won't block process shutdown if join times out,
+    # but we wait a short window to keep test output clean and to make
+    # the thread lifecycle deterministic.
+    stop_watcher.set()
+    if watcher_thread is not None:
+        watcher_thread.join(timeout=2.0)
     return rc, log_lines
 
 

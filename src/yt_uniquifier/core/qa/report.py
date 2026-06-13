@@ -6,6 +6,10 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from yt_uniquifier.core.runner import CancelToken
 from typing import Literal
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -88,16 +92,30 @@ def build_report(
     predict_cid: bool = True,
     vs_corpus: Corpus | None = None,
     progress: ProgressFn | None = None,
+    cancel_token: "CancelToken | None" = None,
 ) -> QAReport:
-    """Collect every metric we can compute for the pair, in order."""
+    """Collect every metric we can compute for the pair, in order.
+
+    A6 (v0.5.5): ``cancel_token`` is honoured at each phase boundary.
+    The long pole is VMAF on hour-long sources; pre-fix Cancel in the
+    QA viewer was an outright lie (the QaWorker carried a cancel token
+    but no code path read it).
+    """
     p = progress or (lambda _n, _f: None)
     notes: list[str] = []
 
+    def _check_cancel(phase: str) -> None:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            from yt_uniquifier.core.errors import PipelineError
+            raise PipelineError(f"QA cancelled by user (during {phase})")
+
+    _check_cancel("md5")
     p("md5", 0.0)
     md5_in = hashes.md5_file(input_path)
     md5_out = hashes.md5_file(output_path)
     p("md5", 1.0)
 
+    _check_cancel("phash")
     p("phash", 0.0)
     ph = phash.compare(input_path, output_path, n=samples)
     p("phash", 1.0)
@@ -108,6 +126,7 @@ def build_report(
     af_per_window: list[float] | None = None
     af_variance: float | None = None
     if run_audio_fp:
+        _check_cancel("audio_fp")
         p("audio_fp", 0.0)
         af = audio_fp.compare(input_path, output_path)
         if af.available:
@@ -129,6 +148,7 @@ def build_report(
 
     vmaf_mean: float | None = None
     if run_vmaf:
+        _check_cancel("vmaf")
         p("vmaf", 0.0)
         v = vmaf.compute(input_path, output_path)
         if v.score is not None:

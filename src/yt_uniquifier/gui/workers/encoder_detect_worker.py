@@ -28,7 +28,9 @@ class EncoderDetectWorker(WorkerBase):
 
     def run(self) -> None:
         try:
-            candidates = detect_encoders()
+            # A6 (v0.5.5): the cold-cache probe spawns up to 10 sequential
+            # ffmpeg subprocesses. Honour the cancel token between probes.
+            candidates = detect_encoders(cancel_token=self.cancel_token)
         except Exception as exc:  # noqa: BLE001 - top-level worker handler
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
