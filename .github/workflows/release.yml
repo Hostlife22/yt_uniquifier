@@ -1,0 +1,158 @@
+name: Release
+
+# F1 R1 (v0.6.0): scaffolding for the desktop-binary release pipeline.
+#
+# Triggered on a `v*` tag push (e.g. `git tag v0.6.0 && git push --tags`),
+# this workflow builds the PyInstaller bundle on Ubuntu / macOS / Windows
+# and uploads the artifacts to a DRAFT GitHub Release. The draft must be
+# reviewed and published manually so an accidental tag push doesn't ship
+# binaries to users.
+#
+# This Round 1 ships UNSIGNED artifacts: macOS Gatekeeper and Windows
+# SmartScreen will warn on first launch. Later rounds add:
+#   R2 — macOS DMG + codesign + notarytool (Apple Developer ID)
+#   R3 — Windows MSI (WiX Toolset) + signtool (code signing cert)
+#   R4 — Linux AppImage (appimagetool) + ffmpeg static bundling
+#   R5 — Release automation: tag-triggered changelog + auto-publish
+#
+# The CI workflow (.github/workflows/ci.yml) tests the source. This
+# workflow tests the BUNDLE — that the existing pyinstaller spec
+# actually produces a launchable artifact on every supported OS.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  # Manual dispatch lets the maintainer test the pipeline against a
+  # branch without cutting a real tag. The resulting draft release is
+  # named after the workflow run.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch, tag, or SHA)"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write  # needed by softprops/action-gh-release to draft releases
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: yt-uniq-gui-Linux
+            archive_cmd: tar -C dist -czf "$ARTIFACT.tar.gz" yt-uniq-gui
+            archive_ext: tar.gz
+          - os: macos-latest
+            artifact_name: yt-uniq-gui-macOS
+            # ditto preserves resource forks + the .app bundle structure
+            # that `zip -r` mangles on macOS.
+            archive_cmd: ditto -c -k --keepParent "dist/yt-uniq-gui.app" "$ARTIFACT.zip"
+            archive_ext: zip
+          - os: windows-latest
+            artifact_name: yt-uniq-gui-Windows
+            # PowerShell Compress-Archive is built-in; no extra tool needed.
+            archive_cmd: powershell -Command "Compress-Archive -Path dist/yt-uniq-gui -DestinationPath $env:ARTIFACT.zip"
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg + Qt6 system libs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
+            libxcb-xfixes0 libxcb-xkb1
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+
+      - name: Install package + PyInstaller
+        # `[gui]` pulls PyQt6 + PyQt6-WebEngine which the spec hidden-imports.
+        # PyInstaller is pinned to a version known to work with PyQt6 6.7+.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,gui]"
+          pip install "pyinstaller>=6.6,<7"
+
+      - name: Smoke-test the source before bundling
+        # If the source can't import on this platform, bundling will
+        # silently produce a broken artifact. Fail loud here instead.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "import yt_uniquifier.gui.app_pyqt; print('GUI imports OK')"
+          python -c "from yt_uniquifier.core.transforms import all_ids; print('transforms:', len(all_ids()))"
+
+      - name: Build PyInstaller bundle
+        run: python -m PyInstaller pyinstaller/yt-uniq-gui.spec --clean --noconfirm
+
+      - name: Verify bundle artefact exists (macOS)
+        if: runner.os == 'macOS'
+        run: test -d dist/yt-uniq-gui.app
+
+      - name: Verify bundle artefact exists (Linux / Windows)
+        if: runner.os != 'macOS'
+        run: |
+          ls dist/yt-uniq-gui/ | head -5
+
+      - name: Package archive
+        shell: bash
+        env:
+          ARTIFACT: ${{ matrix.artifact_name }}
+        run: ${{ matrix.archive_cmd }}
+
+      - name: Upload artifact to workflow run
+        # Always upload to workflow-level artifacts so a build failure
+        # in a later step still leaves the bundle inspectable.
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+          retention-days: 14
+
+  release:
+    # Only attach to a GitHub Release when this is a tag push. Manual
+    # dispatch runs upload artifacts to the workflow run for ad-hoc
+    # inspection but don't create a release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish DRAFT release
+        # Draft so a human reviews before users see it. softprops is the
+        # most-widely-used action for this; it accepts a glob of files
+        # and attaches them to the release named after the tag.
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: "yt-uniquifier ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            artifacts/**/yt-uniq-gui-*.zip
+            artifacts/**/yt-uniq-gui-*.tar.gz
