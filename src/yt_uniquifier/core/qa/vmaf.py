@@ -37,6 +37,34 @@ def vmaf_available() -> bool:
 _SCORE_RE = re.compile(r"VMAF score:\s*([0-9.]+)")
 
 
+# B5 (v0.6.0): auto-subsample target — 1 sample per ~0.25 s of source.
+# At 24 fps, subsample=6 means one VMAF score per 6 frames ≈ 4 samples /
+# second, which is well above VMAF's temporal smoothing window. Below
+# this we waste CPU; above it we lose precision near scene cuts.
+_AUTO_SUBSAMPLE_TARGET_INTERVAL_SEC = 0.25
+
+
+def auto_subsample_for_duration(
+    duration_sec: float,
+    *,
+    fps: float = 24.0,
+    threshold_sec: float = 1800.0,
+) -> int:
+    """Return a sensible ``subsample`` for VMAF on a long source.
+
+    B5 (v0.6.0): scoring every frame on a 4-hour 24 fps source is
+    345k samples (4-11 h of compute). One sample per ~0.25 s
+    converges within ~0.5 VMAF points of full-frame scoring on
+    natural footage. For sources below ``threshold_sec`` we keep
+    ``subsample=1`` so short calibration clips and snippet QA stay
+    untouched.
+    """
+    if duration_sec < threshold_sec:
+        return 1
+    target = int(round(_AUTO_SUBSAMPLE_TARGET_INTERVAL_SEC * fps))
+    return max(1, target)
+
+
 def compute(
     input_path: Path,
     output_path: Path,

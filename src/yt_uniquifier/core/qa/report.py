@@ -120,6 +120,15 @@ def build_report(
     ph = phash.compare(input_path, output_path, n=samples)
     p("phash", 1.0)
 
+    # B5 (v0.6.0): probe early so the auto-subsample decision for VMAF
+    # has the source duration. Previously probe ran AFTER VMAF, which
+    # forced the long path to score every frame. Probe is cheap
+    # (single ffprobe call), so the reorder is essentially free.
+    p("probe", 0.0)
+    src_meta = probe_file(input_path)
+    out_meta = probe_file(output_path)
+    p("probe", 1.0)
+
     af_sim: float | None = None
     af_hamming: float | None = None
     af_confidence: float | None = None
@@ -150,7 +159,13 @@ def build_report(
     if run_vmaf:
         _check_cancel("vmaf")
         p("vmaf", 0.0)
-        v = vmaf.compute(input_path, output_path)
+        # B5: auto-subsample for long sources. Short clips keep
+        # subsample=1 — see vmaf.auto_subsample_for_duration.
+        src_fps = src_meta.video[0].fps if src_meta.video else 24.0
+        sub = vmaf.auto_subsample_for_duration(
+            src_meta.duration_sec, fps=src_fps,
+        )
+        v = vmaf.compute(input_path, output_path, subsample=sub)
         if v.score is not None:
             vmaf_mean = v.score
         elif v.note:
@@ -166,11 +181,6 @@ def build_report(
         elif s.note:
             notes.append(f"ssim: {s.note}")
         p("ssim", 1.0)
-
-    p("probe", 0.0)
-    src_meta = probe_file(input_path)
-    out_meta = probe_file(output_path)
-    p("probe", 1.0)
 
     duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
 

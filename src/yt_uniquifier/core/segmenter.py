@@ -24,7 +24,6 @@ from yt_uniquifier.core.pipeline import (
     build_main_audio_command_windowed,
     build_video_segment_command,
 )
-from yt_uniquifier.core.qa.hashes import md5_file
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
@@ -112,8 +111,23 @@ def _dedup_keyframes(sorted_ks: list[float], tol_sec: float = 1e-3) -> list[floa
 
 
 def _keyframe_cache_path(source: Path) -> Path:
-    digest = md5_file(source)
-    return _keyframe_cache_dir() / f"{digest}.json"
+    """Return the on-disk cache key for ``source``'s keyframe list.
+
+    B1 (v0.6.0): the key is ``(st_size, st_mtime_ns)`` rather than a
+    full-file MD5. On a 180 GB 4K HDR master at 500 MB/s SSD read
+    speed, the MD5 took 60-360 s before the first ffmpeg fork. ``stat``
+    is microseconds.
+
+    Trade-off: a file rewritten in place with bit-identical contents
+    but a fresh mtime triggers a cache miss (acceptable false
+    invalidation). A file replaced with identical-size content and a
+    forced-set mtime would hit the cache (acceptable false hit — same
+    duration and stream layout means same keyframe set in practice).
+    Path-independent by construction, so the cache survives moving a
+    source across mounts.
+    """
+    st = source.stat()
+    return _keyframe_cache_dir() / f"{st.st_size}_{st.st_mtime_ns}.json"
 
 
 def _load_keyframe_cache(source: Path) -> list[float] | None:

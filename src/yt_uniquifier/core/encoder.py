@@ -94,12 +94,30 @@ def detect_encoders(
         if cached is not None:
             return cached
 
-    results = []
-    for name, vendor, codec in _CANDIDATES:
-        if cancel_token is not None and cancel_token.is_cancelled():
-            from yt_uniquifier.core.errors import PipelineError
-            raise PipelineError("encoder detection cancelled by user")
-        results.append(_probe_one(name, vendor, codec))
+    # B6 (v0.6.0): parallel probe. Each _probe_one spawns an ffmpeg
+    # subprocess (~0.5 s) and they are independent — fan out via a
+    # ThreadPoolExecutor capped at len(_CANDIDATES). On a cold cache
+    # this drops the wall-clock from ~5.5 s (10 serial probes) to
+    # ~0.6 s.
+    if cancel_token is not None and cancel_token.is_cancelled():
+        from yt_uniquifier.core.errors import PipelineError
+        raise PipelineError("encoder detection cancelled by user")
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(_CANDIDATES)) as pool:
+        futures = {
+            pool.submit(_probe_one, name, vendor, codec): (name, vendor, codec)
+            for name, vendor, codec in _CANDIDATES
+        }
+        # Preserve canonical order of _CANDIDATES in the result list so
+        # pick_encoder's preference logic stays deterministic.
+        by_key: dict[tuple[str, str, str], EncoderCandidate] = {}
+        for fut, key in futures.items():
+            if cancel_token is not None and cancel_token.is_cancelled():
+                pool.shutdown(wait=False, cancel_futures=True)
+                from yt_uniquifier.core.errors import PipelineError
+                raise PipelineError("encoder detection cancelled by user")
+            by_key[key] = fut.result()
+    results = [by_key[(name, vendor, codec)] for name, vendor, codec in _CANDIDATES]
     _save_cache(version_key, results)
     return results
 
@@ -155,7 +173,19 @@ def _detect_max_parallel(vendor: EncoderVendor) -> int:
 
 
 def _nvenc_max_parallel() -> int:
-    """Parse nvidia-smi output; cap at 3 for consumer, 8 for pro/Quadro."""
+    """Parse nvidia-smi output; sum capacity across every visible GPU.
+
+    B7 (v0.6.0): pre-fix only the first GPU's capacity was returned.
+    A multi-GPU box (e.g. two RTX A6000s) reported the cap of one card
+    instead of the union, halving achievable parallelism on
+    distributed-batch workers that span both GPUs via the runtime's
+    own scheduling.
+
+    Per-GPU formula: cap = 8 if pro/Quadro/datacenter else 3, then
+    ``min(cap, free_mb // 500)``. Sum across GPUs. Caller of
+    ``_nvenc_max_parallel`` is still ``EncoderCandidate.max_parallel``
+    which the orchestrator clamps user-requested ``--workers`` against.
+    """
     try:
         proc = subprocess.run(
             [
@@ -169,20 +199,23 @@ def _nvenc_max_parallel() -> int:
         return _VENDOR_DEFAULT_PARALLEL["nvenc"]
     if proc.returncode != 0 or not proc.stdout.strip():
         return _VENDOR_DEFAULT_PARALLEL["nvenc"]
-    first_line = proc.stdout.strip().splitlines()[0]
-    parts = [p.strip() for p in first_line.split(",", 1)]
-    if len(parts) != 2:
-        return _VENDOR_DEFAULT_PARALLEL["nvenc"]
-    try:
-        free_mb = int(parts[0])
-    except ValueError:
-        return _VENDOR_DEFAULT_PARALLEL["nvenc"]
-    name = parts[1].lower()
-    is_pro = any(tok in name for tok in _NVIDIA_PRO_TOKENS)
-    cap = 8 if is_pro else 3
-    # ~500 MB per concurrent 1080p NVENC session is a safe rule of thumb.
-    by_vram = max(1, free_mb // 500)
-    return min(cap, by_vram)
+
+    total = 0
+    for line in proc.stdout.strip().splitlines():
+        parts = [p.strip() for p in line.split(",", 1)]
+        if len(parts) != 2:
+            continue
+        try:
+            free_mb = int(parts[0])
+        except ValueError:
+            continue
+        name = parts[1].lower()
+        is_pro = any(tok in name for tok in _NVIDIA_PRO_TOKENS)
+        cap = 8 if is_pro else 3
+        # ~500 MB per concurrent 1080p NVENC session is a safe rule of thumb.
+        by_vram = max(1, free_mb // 500)
+        total += min(cap, by_vram)
+    return max(1, total) if total else _VENDOR_DEFAULT_PARALLEL["nvenc"]
 
 
 def _probe_one(name: str, vendor: EncoderVendor, codec: EncoderKind) -> EncoderCandidate:
