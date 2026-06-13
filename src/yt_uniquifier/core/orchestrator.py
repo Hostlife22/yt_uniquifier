@@ -7,6 +7,7 @@ progress events (RunEvent + custom phase markers).
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from yt_uniquifier.core.notifications import (
 from yt_uniquifier.core.pipeline import compute_plan_hash
 from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
 from yt_uniquifier.core.probe import probe as probe_file
-from yt_uniquifier.core.runner import CancelToken, RunEvent
+from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.seed_resolver import resolve_run_seed
 from yt_uniquifier.core.segmenter import (
     concat_segments,
@@ -122,6 +123,7 @@ def run_full(
     *,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    pause_token: PauseToken | None = None,
 ) -> RunSummary:
     """Process one input from probe to final mp4.
 
@@ -132,7 +134,9 @@ def run_full(
     """
     emit = on_event or (lambda _e: None)
     try:
-        summary = _run_full_impl(plan, options, emit, cancel_token)
+        summary = _run_full_impl(
+            plan, options, emit, cancel_token, pause_token,
+        )
     except BaseException as exc:
         _maybe_dispatch_notification(
             options, plan, "failed",
@@ -152,6 +156,7 @@ def _run_full_impl(
     options: RunOptions,
     emit: Callable[[RunEvent], None],
     cancel_token: CancelToken | None,
+    pause_token: PauseToken | None = None,
 ) -> RunSummary:
     findings = preflight(plan.source, plan, plan.encoder)
     if options.enforce_preflight and has_fail(findings):
@@ -175,6 +180,15 @@ def _run_full_impl(
     store = CheckpointStore(options.work_dir, plan)
     segments = store.init_or_resume(
         plan_segments(plan, target_size_sec=options.target_segment_sec)
+    )
+
+    # v0.7 R6 / F5 — pause observer thread. Watches pause_token state
+    # transitions and (a) persists `paused_at` to state.json so a crash
+    # mid-pause leaves an audit trail and (b) enforces the 24-hour
+    # auto-cancel safety net so a forgotten pause never strands work.
+    # The thread is daemon=True so process shutdown doesn't block on it.
+    _pause_stop_event = _start_pause_observer(
+        pause_token, cancel_token, store, emit,
     )
 
     # Idempotent re-run over a previously-completed work-dir
@@ -288,6 +302,7 @@ def _run_full_impl(
                     payload={**e.payload, "phase": "segment"},
                 )),
                 cancel_token=cancel_token,
+                pause_token=pause_token,
                 on_segment_done=_on_segment_done,
             )
         except Exception:
@@ -320,6 +335,7 @@ def _run_full_impl(
                 kind=e.kind, payload={**e.payload, "phase": "main_audio"}
             )),
             cancel_token=cancel_token,
+            pause_token=pause_token,
         )
         if measurement is not None:
             store.set_loudnorm(measurement)
@@ -381,6 +397,11 @@ def _run_full_impl(
 
     if not options.keep_segments:
         _cleanup_artifacts(store, main_audio, emit)
+
+    # Stop the pause observer thread cleanly before returning so it
+    # doesn't outlive the RunSummary (would leak a daemon thread across
+    # back-to-back batch entries).
+    _pause_stop_event.set()
 
     return RunSummary(
         output=options.output,
@@ -588,3 +609,84 @@ def _format_findings(findings: list[PreflightFinding]) -> str:
     fails = [f for f in findings if f.severity == "fail"]
     parts = [f"[{f.severity.upper()}] {f.code}: {f.message}" for f in fails]
     return "preflight failed:\n  " + "\n  ".join(parts)
+
+
+# ---- v0.7 R6 / F5 — pause observer ----------------------------------------
+
+def _start_pause_observer(
+    pause_token: PauseToken | None,
+    cancel_token: CancelToken | None,
+    store: CheckpointStore,
+    emit: Callable[[RunEvent], None],
+) -> threading.Event:
+    """Spawn the pause-state observer; return its stop event.
+
+    Responsibilities:
+
+    * Persist ``paused_at`` to ``state.json`` on pause and clear it on
+      resume so a crash inside the pause window leaves a debuggable
+      artefact.
+    * Emit ``log`` RunEvents (``phase: paused | resumed | auto_cancel``)
+      so the GUI's existing log console reflects the transition.
+    * Enforce the 24-hour auto-cancel safety net via
+      ``PauseToken.should_auto_cancel`` — a forgotten pause cancels the
+      run rather than stranding work.
+
+    The returned ``threading.Event`` is the caller's stop signal: set
+    it at the end of ``_run_full_impl`` so the daemon exits before the
+    RunSummary is returned.
+    """
+    stop = threading.Event()
+    if pause_token is None:
+        # No token: nothing to observe, but return a sentinel stop event
+        # so the call-site is uniform.
+        return stop
+
+    def _observe() -> None:
+        last_paused = False
+        while not stop.is_set():
+            now_paused = pause_token.is_paused()
+            if now_paused and not last_paused:
+                wall = pause_token.paused_at_wall()
+                try:
+                    store.set_paused_at(wall)
+                except Exception as exc:  # noqa: BLE001 — observer is best-effort
+                    emit(RunEvent(kind="error", payload={
+                        "phase": "pause",
+                        "message": f"could not persist paused_at: {exc}",
+                    }))
+                emit(RunEvent(kind="log", payload={"phase": "paused"}))
+                last_paused = True
+            elif not now_paused and last_paused:
+                try:
+                    store.set_paused_at(None)
+                except Exception as exc:  # noqa: BLE001
+                    emit(RunEvent(kind="error", payload={
+                        "phase": "pause",
+                        "message": f"could not clear paused_at: {exc}",
+                    }))
+                emit(RunEvent(kind="log", payload={"phase": "resumed"}))
+                last_paused = False
+            if now_paused and pause_token.should_auto_cancel():
+                emit(RunEvent(kind="error", payload={
+                    "phase": "pause",
+                    "message": (
+                        f"pause exceeded {PauseToken.AUTO_CANCEL_SEC} s — "
+                        "auto-cancelling for safety"
+                    ),
+                }))
+                if cancel_token is not None:
+                    cancel_token.cancel()
+                # Clear the marker so a successor run isn't confused.
+                import contextlib
+                with contextlib.suppress(Exception):
+                    store.set_paused_at(None)
+                return
+            # 1 s poll — pause is a human-scale event; 1 s gives us
+            # ~instant marker writes without burning CPU on idle runs.
+            stop.wait(1.0)
+
+    threading.Thread(
+        target=_observe, daemon=True, name="pause-observer",
+    ).start()
+    return stop

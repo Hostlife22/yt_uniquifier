@@ -213,6 +213,35 @@ class CheckpointStore:
             # Phase-boundary write: force-flush instead of debouncing.
             self._flush()
 
+    # ---- pause marker (v0.7 R6 / F5) ----
+
+    def set_paused_at(self, ts_wall: float | None) -> None:
+        """Record / clear the wall-clock pause timestamp.
+
+        Persisted as ISO-8601 in ``state.json``: a crash inside the
+        pause window leaves a visible artefact ("paused_at": "...") so
+        the next resume can warn the user that the previous run was
+        interrupted mid-pause and the subprocess was lost.
+        Clearing (``None``) writes ``None`` — caller must do so on
+        resume and on terminal phases (done / cancelled / failed).
+        """
+        with self._lock:
+            if ts_wall is None:
+                self._state["paused_at"] = None
+            else:
+                import datetime as _dt
+                self._state["paused_at"] = _dt.datetime.fromtimestamp(
+                    ts_wall, tz=_dt.UTC,
+                ).isoformat()
+            # Phase-boundary write: pause is a user-visible event,
+            # never debounce.
+            self._flush()
+
+    def get_paused_at(self) -> str | None:
+        with self._lock:
+            raw = self._state.get("paused_at")
+            return str(raw) if raw else None
+
     # ---- main audio cache ----
 
     def get_main_audio(self) -> Path | None:

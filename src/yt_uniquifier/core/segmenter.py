@@ -25,7 +25,7 @@ from yt_uniquifier.core.pipeline import (
     build_video_segment_command,
     build_video_segment_command_fused,
 )
-from yt_uniquifier.core.runner import CancelToken, RunEvent
+from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
@@ -274,6 +274,7 @@ def process_video_segment(
     *,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    pause_token: PauseToken | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[Path | None, Path]:
     """Apply video transforms to one segment.
@@ -330,6 +331,7 @@ def process_video_segment(
         forwarded_on_event = None
     run_ffmpeg(
         cmd, output=out, on_event=forwarded_on_event, cancel_token=cancel_token,
+        pause_token=pause_token,
         log_path=out.with_suffix(".mkv.log"),
         extra_env=extra_env,
     )
@@ -356,6 +358,7 @@ def process_video_segments_parallel(
     workers: int = 1,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    pause_token: PauseToken | None = None,
     on_segment_done: Callable[[int, Path | None, Path], None] | None = None,
 ) -> list[tuple[int, Path | None, Path]]:
     """Run `process_video_segment` over `pending` segments concurrently.
@@ -386,6 +389,7 @@ def process_video_segments_parallel(
             src, out = process_video_segment(
                 seg, plan, work_dir,
                 on_event=on_event, cancel_token=cancel_token,
+                pause_token=pause_token,
             )
             results.append((seg.idx, src, out))
             if on_segment_done:
@@ -411,6 +415,7 @@ def process_video_segments_parallel(
             pool.submit(
                 process_video_segment, seg, plan, work_dir,
                 on_event=on_event, cancel_token=cancel_token,
+                pause_token=pause_token,
                 extra_env=extra_env or None,
             ): seg
             for seg in pending
@@ -444,6 +449,7 @@ def process_main_audio(
     loudnorm_measurement: LoudnormMeasurement | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    pause_token: PauseToken | None = None,
 ) -> tuple[Path | None, LoudnormMeasurement | None]:
     """Process the full source's main audio. Returns (path, measurement).
 
@@ -469,6 +475,7 @@ def process_main_audio(
     verify_audio_filters_available(plan)
     run_ffmpeg(
         cmd, output=out, on_event=on_event, cancel_token=cancel_token,
+        pause_token=pause_token,
         log_path=out.with_suffix(".m4a.log"),
     )
     return out, measurement

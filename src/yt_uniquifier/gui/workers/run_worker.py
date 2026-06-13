@@ -12,7 +12,7 @@ from PyQt6.QtCore import pyqtSignal
 from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.orchestrator import RunOptions, RunSummary, run_full
 from yt_uniquifier.core.qa.report import build_report, render_html, write_json
-from yt_uniquifier.core.runner import RunEvent
+from yt_uniquifier.core.runner import PauseToken, RunEvent
 from yt_uniquifier.gui.state import AppState, HistoryEntry
 from yt_uniquifier.gui.workers.base import WorkerBase
 
@@ -44,6 +44,10 @@ class RunWorker(WorkerBase):
     # running_phash, frames_sampled.  Forwarded raw so screens can
     # consume the keys they care about without parsing a tuple.
     divergence_sample = pyqtSignal(dict)
+    # v0.7 R6 / F5 — pause/resume state mirror. Emitted whenever
+    # `request_pause()` / `request_resume()` is called so the Run screen
+    # can flip the button label without polling the token directly.
+    paused_changed = pyqtSignal(bool)
     # Marshal history writes back onto the GUI thread. `AppState` is a
     # QObject owned by the GUI thread; mutating its `_history` list and
     # emitting `history_changed` from the worker `run()` body would race
@@ -88,8 +92,25 @@ class RunWorker(WorkerBase):
         # phases pass through immediately; subsequent log events in the
         # same phase wait for _LOG_THROTTLE_SEC.
         self._last_log_emit: dict[str, float] = {}
+        # v0.7 R6 / F5 — owned by the worker (lifecycle matches the
+        # encode run); the Run screen toggles via request_pause/resume
+        # so the GUI never holds a reference to the token directly.
+        self.pause_token = PauseToken()
         if self.state is not None:
             self._history_request.connect(self._on_history_request)
+
+    def request_pause(self) -> None:
+        if not self.pause_token.is_paused():
+            self.pause_token.pause()
+            self.paused_changed.emit(True)
+
+    def request_resume(self) -> None:
+        if self.pause_token.is_paused():
+            self.pause_token.resume()
+            self.paused_changed.emit(False)
+
+    def is_paused(self) -> bool:
+        return self.pause_token.is_paused()
 
     def run(self) -> None:  # noqa: D401 - Qt override
         try:
@@ -98,6 +119,7 @@ class RunWorker(WorkerBase):
                 self.options,
                 on_event=self._on_event,
                 cancel_token=self.cancel_token,
+                pause_token=self.pause_token,
             )
         except Exception as exc:
             # Distinguish user cancel from genuine failure: the orchestrator

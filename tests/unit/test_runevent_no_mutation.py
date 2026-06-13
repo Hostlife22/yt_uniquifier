@@ -90,7 +90,7 @@ def test_wrap_does_not_mutate_input_payload(
     # then return.
     def fake_run_ffmpeg(
         cmd, output, *, on_event=None, cancel_token=None,
-        log_path=None, extra_env=None,
+        log_path=None, extra_env=None, pause_token=None,
     ):
         # Touch the output so subsequent checks don't fail.
         Path(output).write_bytes(b"stub")
@@ -148,7 +148,7 @@ def test_wrap_preserves_caller_supplied_segment(
 
     def fake_run_ffmpeg(
         cmd, output, *, on_event=None, cancel_token=None,
-        log_path=None, extra_env=None,
+        log_path=None, extra_env=None, pause_token=None,
     ):
         Path(output).write_bytes(b"stub")
         if on_event is not None:

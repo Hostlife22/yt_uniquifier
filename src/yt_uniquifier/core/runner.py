@@ -65,6 +65,88 @@ class CancelToken:
         return self._event.wait(timeout)
 
 
+class PauseToken:
+    """Thread-safe pause/resume flag — v0.7 R6 / F5.
+
+    The pause primitive is intentionally separated from cancel:
+
+      * The GUI Pause button → ``token.pause()``. The runner's watcher
+        thread observes the flag and sends SIGSTOP to the ffmpeg
+        subprocess via ``process_control.suspend_process_tree``.
+      * Resume → ``token.resume()``. The same watcher fires
+        ``resume_process_tree`` and the encode continues.
+      * The token records ``paused_at`` (monotonic seconds) so the
+        orchestrator can apply a 24-hour safety auto-cancel — a paused
+        run that is never resumed must not strand resources forever.
+
+    All callers must treat the token as advisory: pause is best-effort
+    (a process that already exited is harmless to no-op-on), and the
+    runner falls back to "continue running" if the OS denies SIGSTOP.
+    """
+
+    AUTO_CANCEL_SEC = 24 * 3600  # 24 h — hard safety limit
+
+    def __init__(self) -> None:
+        self._paused = threading.Event()
+        self._paused_at_monotonic: float | None = None
+        self._paused_at_wall: float | None = None
+        self._lock = threading.Lock()
+
+    def pause(self) -> None:
+        with self._lock:
+            if self._paused.is_set():
+                return
+            self._paused.set()
+            self._paused_at_monotonic = time.monotonic()
+            self._paused_at_wall = time.time()
+
+    def resume(self) -> None:
+        with self._lock:
+            self._paused.clear()
+            self._paused_at_monotonic = None
+            self._paused_at_wall = None
+
+    def is_paused(self) -> bool:
+        return self._paused.is_set()
+
+    def paused_for_sec(self) -> float:
+        """Monotonic seconds since ``pause()`` was called. 0 if not paused."""
+        with self._lock:
+            if self._paused_at_monotonic is None:
+                return 0.0
+            return max(0.0, time.monotonic() - self._paused_at_monotonic)
+
+    def paused_at_wall(self) -> float | None:
+        """Wall-clock timestamp of the pause, for state.json persistence."""
+        with self._lock:
+            return self._paused_at_wall
+
+    def should_auto_cancel(self) -> bool:
+        return self.paused_for_sec() >= self.AUTO_CANCEL_SEC
+
+    def wait_while_paused(
+        self, *, cancel_token: CancelToken | None = None,
+        poll_sec: float = 0.25,
+    ) -> bool:
+        """Block until resumed or cancelled. Returns True if cancelled.
+
+        Used by the orchestrator's segment loop to honour pauses at
+        the segment boundary — the in-flight ffmpeg subprocess is
+        already suspended via the runner's watcher; this prevents the
+        orchestrator from racing ahead and queueing a new segment
+        before the user has hit Resume.
+        """
+        while self.is_paused():
+            if cancel_token is not None and cancel_token.is_cancelled():
+                return True
+            if self.should_auto_cancel():
+                if cancel_token is not None:
+                    cancel_token.cancel()
+                return True
+            time.sleep(poll_sec)
+        return False
+
+
 _NVENC_OOM_PATTERNS = (
     "openencodesessionex failed",
     "no encode capable devices",
@@ -92,6 +174,7 @@ def run(
     output: Path,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
+    pause_token: PauseToken | None = None,
     log_path: Path | None = None,
     progress_via_stdout: bool = True,
     extra_env: dict[str, str] | None = None,
@@ -142,7 +225,7 @@ def run(
     for attempt in range(_NVENC_OOM_MAX_RETRIES + 1):
         rc, log_lines = _run_once(
             full_cmd, on_event=on_event, cancel_token=cancel_token,
-            proc_env=proc_env,
+            pause_token=pause_token, proc_env=proc_env,
         )
 
         if log_path is not None:
@@ -185,7 +268,8 @@ def _run_once(
     *,
     on_event: Callable[[RunEvent], None],
     cancel_token: CancelToken | None,
-    proc_env: dict[str, str] | None,
+    pause_token: PauseToken | None = None,
+    proc_env: dict[str, str] | None = None,
 ) -> tuple[int, list[str]]:
     """One Popen + drain pass. Returns (rc, log_lines).
 
@@ -213,19 +297,54 @@ def _run_once(
     # once the main loop signals via stop_watcher.
     stop_watcher = threading.Event()
     watcher_thread: threading.Thread | None = None
-    if cancel_token is not None:
+    if cancel_token is not None or pause_token is not None:
         def _watch() -> None:
+            # Track our last-applied pause state so SIGSTOP / SIGCONT
+            # fire only on transitions — repeated SIGSTOPs are harmless
+            # but wasteful, and an OS-level "already stopped" race can
+            # mask a legitimate resume request.
+            suspended = False
             while not stop_watcher.is_set():
-                if cancel_token.wait(0.25):
-                    # Cancel fired — terminate the child if still running.
-                    # _terminate is a no-op if proc already exited.
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    if suspended:
+                        # Wake the process so SIGINT/SIGKILL can actually
+                        # land; SIGTERM-on-stopped processes hangs on some
+                        # POSIX impls.
+                        _resume_pid_safe(proc.pid)
+                        suspended = False
                     if proc.poll() is None:
                         _terminate(proc)
                     return
                 if proc.poll() is not None:
+                    if suspended:
+                        suspended = False
                     return
+                want_pause = (
+                    pause_token is not None and pause_token.is_paused()
+                )
+                if want_pause and not suspended and _suspend_pid_safe(proc.pid):
+                    suspended = True
+                    on_event(RunEvent(kind="log", payload={
+                        "phase": "paused", "pid": proc.pid,
+                    }))
+                elif (
+                    not want_pause and suspended
+                    and _resume_pid_safe(proc.pid)
+                ):
+                    suspended = False
+                    on_event(RunEvent(kind="log", payload={
+                        "phase": "resumed", "pid": proc.pid,
+                    }))
+                # Short poll: keep latency low for cancel/pause transitions.
+                # cancel_token.wait honours cancel-set; fall back to a plain
+                # sleep when only pause is wired.
+                if cancel_token is not None:
+                    if cancel_token.wait(0.25):
+                        continue
+                else:
+                    time.sleep(0.25)
         watcher_thread = threading.Thread(
-            target=_watch, daemon=True, name="ffmpeg-cancel-watcher",
+            target=_watch, daemon=True, name="ffmpeg-cancel-pause-watcher",
         )
         watcher_thread.start()
 
@@ -323,3 +442,27 @@ def _terminate(proc: subprocess.Popen[str], wait_sec: float = 5.0) -> None:
         time.sleep(0.1)
     if proc.poll() is None:
         proc.kill()
+
+
+def _suspend_pid_safe(pid: int) -> bool:
+    """Best-effort SIGSTOP / psutil.suspend over the process tree.
+
+    Imported lazily so the runner module stays importable on hosts
+    that don't have psutil (Windows pause is then a no-op with a clear
+    warning surfaced by ``process_control``). Returns True iff at
+    least one process in the tree ack'd the signal.
+    """
+    try:
+        from yt_uniquifier.core.process_control import suspend_process_tree
+        return suspend_process_tree(pid) > 0
+    except Exception:  # noqa: BLE001 — never let pause crash the run
+        return False
+
+
+def _resume_pid_safe(pid: int) -> bool:
+    """Counterpart to ``_suspend_pid_safe`` — best-effort SIGCONT."""
+    try:
+        from yt_uniquifier.core.process_control import resume_process_tree
+        return resume_process_tree(pid) > 0
+    except Exception:  # noqa: BLE001 — never let resume crash the run
+        return False

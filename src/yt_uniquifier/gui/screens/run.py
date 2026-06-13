@@ -183,6 +183,22 @@ class RunScreen(ScreenBase):
         )
         controls.addWidget(self.auto_tune_btn)
 
+        # v0.7 R6 / F5 — Pause / Resume toggle, surfaced next to Cancel
+        # so the two long-running controls live together. Disabled
+        # until the worker is alive; label flips on paused_changed.
+        self.pause_btn = QPushButton("&Pause")
+        self.pause_btn.setObjectName("pause")
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self._on_pause_toggle)
+        mark(
+            self.pause_btn, "Pause run",
+            "Suspend the running ffmpeg subprocess and freeze segment "
+            "progress until you press Resume. Long pauses (>24h) are "
+            "auto-cancelled for safety.",
+            shortcut="Space",
+        )
+        controls.addWidget(self.pause_btn)
+
         self.cancel_btn = QPushButton("&Cancel")
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.clicked.connect(self._on_cancel)
@@ -424,6 +440,8 @@ class RunScreen(ScreenBase):
         self.run_worker.finished_ok.connect(self._on_done)
         self.run_worker.failed.connect(self._on_failed)
         self.run_worker.cancelled.connect(self._on_cancelled)
+        # v0.7 R6 / F5 — pause button label & state machine.
+        self.run_worker.paused_changed.connect(self._on_paused_changed)
 
         # Initialise timeline with rough segment estimate.
         n_segments = max(1, int(plan.source.duration_sec / options.target_segment_sec))
@@ -438,6 +456,8 @@ class RunScreen(ScreenBase):
         self.audio_progress_bar.setVisible(False)
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("&Pause")
         self.status_label.setText(
             f"Running on {plan.encoder.name} ({plan.encoder.vendor})…",
         )
@@ -465,6 +485,8 @@ class RunScreen(ScreenBase):
             self.audio_progress_bar.setValue(1000)
         self.run_worker = None
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText("&Pause")
         if qa_html:
             self.qa_html_path = Path(qa_html)
             self.open_qa_btn.setEnabled(True)
@@ -485,6 +507,8 @@ class RunScreen(ScreenBase):
         self.log.log(f"!!! {message}", "error")
         self.run_worker = None
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText("&Pause")
         self._refresh_run_button()
 
     def _on_cancelled(self) -> None:
@@ -493,12 +517,37 @@ class RunScreen(ScreenBase):
         self.log.log("--- Cancelled by user ---", "info")
         self.run_worker = None
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText("&Pause")
         self._refresh_run_button()
 
     def _on_cancel(self) -> None:
         if self.run_worker is not None:
             self.run_worker.request_cancel()
             self.status_label.setText("Cancelling…")
+
+    # v0.7 R6 / F5 — Pause / Resume handlers.
+    def _on_pause_toggle(self) -> None:
+        """Flip the worker's pause state. Idempotent.
+
+        Visual feedback (label flip, status banner) is driven entirely
+        by the `paused_changed` signal so a future channel that flips
+        pause from elsewhere (e.g. headless RPC) stays in sync.
+        """
+        if self.run_worker is None:
+            return
+        if self.run_worker.is_paused():
+            self.run_worker.request_resume()
+        else:
+            self.run_worker.request_pause()
+
+    def _on_paused_changed(self, paused: bool) -> None:
+        if paused:
+            self.pause_btn.setText("&Resume")
+            self.status_label.setText("Paused — encode suspended.")
+        else:
+            self.pause_btn.setText("&Pause")
+            self.status_label.setText("Resumed.")
 
     def _on_open_qa(self) -> None:
         if self.qa_html_path and self.qa_html_path.exists():

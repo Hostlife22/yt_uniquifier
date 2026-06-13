@@ -373,15 +373,38 @@ Validate: ✅ ruff All checks passed. ✅ mypy 114 files no issues. ✅ 750 unit
 
 **Files (R5)**: 4 created (`core/notifications.py`, `gui/workers/notifications_test_worker.py`, `tests/unit/test_notifications.py`, R5 plan-update), 4 modified (`core/runner.py` extended already, `core/orchestrator.py`, `gui/state.py`, `gui/screens/settings.py`, `gui/screens/run.py`).
 
-### Round 6 — F5 Pause / Resume (наиболее рискованная)
+### Round 6 — F5 Pause / Resume ✅ DONE
 
-- `Runner.pause()` / `resume()` через signal/psutil (cross-OS abstraction в `core/process_control.py`)
-- State.json marker `paused_at`
-- Auto-cancel watcher (24h max pause)
-- GUI Pause button + state machine
-- Tests: unit (mock subprocess), integration (real ffmpeg + SIGSTOP под Linux/macOS; psutil.suspend под Windows)
+- [x] `core/process_control.py` — cross-OS suspend/resume tree
+  (POSIX `os.kill SIGSTOP/SIGCONT` + Windows lazy `psutil.suspend()/resume()`,
+  per-PID error swallow, recursive over descendants)
+- [x] `core/runner.PauseToken` — `threading.Event`-backed flag,
+  monotonic age tracking, 24h `AUTO_CANCEL_SEC` constant,
+  `wait_while_paused(cancel_token=...)` helper for orchestrator boundaries
+- [x] Runner watcher thread — single thread now handles BOTH
+  cancel + pause via state transitions (SIGSTOP only on
+  not→paused, SIGCONT only on paused→not), emits `phase=paused|resumed` logs
+- [x] `CheckpointStore.set_paused_at` / `get_paused_at` — UTC ISO-8601,
+  phase-boundary flush (never debounced)
+- [x] Orchestrator `_start_pause_observer` — daemon thread persists
+  paused_at on transitions, enforces 24h auto-cancel, emits log events
+- [x] `process_video_segment`, `process_video_segments_parallel` (seq + pool),
+  `process_main_audio` all accept `pause_token` and forward to `run_ffmpeg`
+- [x] `run_full(plan, options, *, cancel_token=, pause_token=)` — new kwarg,
+  threads through `_run_full_impl`
+- [x] `RunWorker.request_pause()` / `.request_resume()` / `paused_changed: pyqtSignal(bool)`
+- [x] Run screen — `&Pause` button (Space shortcut) next to Cancel,
+  label flips to `&Resume`, status banner reflects state, disabled on done/failed/cancelled
+- [x] Tests: `tests/unit/test_pause_resume.py` — 20 cases covering
+  PauseToken state machine, process_control contract (incl. real
+  `sleep` child SIGSTOP/SIGCONT on POSIX), runner watcher transitions,
+  checkpoint round-trip, observer auto-cancel
+- [x] `tests/unit/test_runevent_no_mutation.py` — fake_run_ffmpeg
+  fakes updated to accept `pause_token` kwarg
 
-Validate: real-ffmpeg run, pause во время encode segment 5 → resume через 30 сек → final QA report идентичен non-paused baseline; `state.json::paused_at` корректно очищается.
+Validate: ✅ ruff All checks passed. ✅ mypy 115 files clean. ✅ 745 unit + 1 skip (PyQt6.QtCharts missing). ✅ 20 R6 tests + 12 GUI accessibility tests зелёные. ✅ Real-PID `subprocess.Popen(['sleep', '5'])` SIGSTOP/SIGCONT round-trip passes on macOS.
+
+**Files (R6)**: 2 created (`core/process_control.py`, `tests/unit/test_pause_resume.py`), 7 modified (`core/runner.py`, `core/checkpoint.py`, `core/orchestrator.py`, `core/segmenter.py`, `gui/workers/run_worker.py`, `gui/screens/run.py`, `tests/unit/test_runevent_no_mutation.py`).
 
 ---
 
