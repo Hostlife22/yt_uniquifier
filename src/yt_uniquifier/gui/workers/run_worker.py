@@ -39,6 +39,11 @@ class RunWorker(WorkerBase):
     # while loudnorm 2-pass runs visibly on its own sub-bar. fraction is
     # audio_out_us / audio_duration_us; label carries phase context.
     audio_progress = pyqtSignal(float, str)        # fraction, label
+    # v0.7 R4 / F2 — per-segment pHash sample. payload is the dict
+    # from RunEvent(kind="divergence_sample"): segment, phash_similarity,
+    # running_phash, frames_sampled.  Forwarded raw so screens can
+    # consume the keys they care about without parsing a tuple.
+    divergence_sample = pyqtSignal(dict)
     # Marshal history writes back onto the GUI thread. `AppState` is a
     # QObject owned by the GUI thread; mutating its `_history` list and
     # emitting `history_changed` from the worker `run()` body would race
@@ -154,6 +159,13 @@ class RunWorker(WorkerBase):
             self.log.emit(f"history write failed: {exc}")
 
     def _on_event(self, ev: RunEvent) -> None:
+        if ev.kind == "divergence_sample":
+            # Pass the payload dict through verbatim. Qt copies it
+            # across the queued connection, so the GUI thread receives
+            # an independent dict — no shared-mutable-state worry from
+            # the worker's perspective.
+            self.divergence_sample.emit(dict(ev.payload))
+            return
         if ev.kind == "log":
             phase = str(ev.payload.get("phase", ""))
             now = time.monotonic()

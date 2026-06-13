@@ -314,13 +314,33 @@ Validate: ✅ ruff All checks passed. ✅ mypy 111 files no issues. ✅ 707 unit
 
 **Files (R3)**: 2 created (`core/transforms/video_fit_aspect.py`, `tests/unit/test_video_fit_aspect.py`, `tests/integration/test_platform_profiles.py`), 2 modified (`core/transforms/__init__.py`, `tests/unit/test_named_invariants.py`), 7 created YAMLs. Total: 12 new files, 2 modified.
 
-### Round 4 — F2 Live divergence + F7 Auto-calibrate
+### Round 4 — F2 Live divergence + F7 Auto-calibrate — ✅ DONE
 
-- F2: RunEvent kind `divergence_sample` + segmenter emit + new widget + Run/Batch wiring + sampling настройка в Settings
-- F7: Auto-tune button в Run screen → CalibrateWorker → save tuned.yaml → switch state.profile_path
-- Tests: `test_divergence_event.py` (контракт), GUI smoke что widget рендерится
+**F2 — Live divergence indicator:**
+- [x] `RunEvent.EventKind` Literal расширен `"divergence_sample"`. Payload: `{segment, phash_similarity, running_phash, frames_sampled}`.
+- [x] `RunOptions.sample_phash: Literal["off", "light", "full"] = "off"`. Default = off (cost-conscious).
+- [x] `core/qa/phash.py` новые public функции `sample_frames_range` (input seek `-ss/-t`) + `compare_range_pair` — сравнение source slice vs encoded segment без re-extract'а полного source.
+- [x] `orchestrator._maybe_emit_divergence` хелпер: cadence per mode (off skip, light=каждый 4-й, full=каждый), EMA per-plan-hash (alpha=0.25), best-effort try/except → emit `log` warning при failure (никогда не падает encode).
+- [x] Hook в `_on_segment_done` после store.mark("done").
+- [x] `RunWorker.divergence_sample = pyqtSignal(dict)` + routing в `_on_event`. Payload копируется через `dict(ev.payload)` → safe queued connection.
+- [x] Новый widget `gui/widgets/divergence_indicator.py`: title + current/avg/min метрики с KPI-banded цветом + custom-painted Sparkline (последние 30 samples) + sample count. Hidden до первого sample. Theme-aware через `tokens_for`. a11y mark на title.
+- [x] Embed в Run screen после timeline. Connect `run_worker.divergence_sample → divergence_indicator.push_sample`. Reset on new run.
 
-Validate: smoke run на tiny_clip с `--sample-phash light` логирует RunEvent с phash_similarity в [0..1], GUI рисует sparkline.
+**F7 — Auto-tune button:**
+- [x] Новая кнопка `🎯 Auto-&tune` (Ctrl+T) в Run screen рядом с Run. Enabled когда input+profile есть и оба worker'а свободны.
+- [x] Handlers: `_on_auto_tune` запускает `CalibrateWorker` с conservative default'ами (max_self_match=0.2, min_quality=88, 5 iter, 60s clip).
+- [x] `_on_auto_tune_completed` → `dump_profile` в `<stem>.tuned.yaml` рядом с оригиналом → `_reload_profile_combo` → select tuned → `state.set_profile_path(tuned)`.
+- [x] Failure paths: QMessageBox + log + status restore.
+- [x] Worker lifecycle: typed `self._tune_worker: CalibrateWorker | None` declared в `__init__`; cleanup в `_on_auto_tune_finished` (disconnect+quit+wait).
+
+**Tests:**
+- [x] `tests/unit/test_divergence_event.py` — 11 testcases: RunEvent kind, RunOptions default + Literal, cadence по 3 modes, EMA smoothing, sampler-failure containment, zero-span skip.
+- [x] `tests/unit/test_gui_divergence_indicator.py` — 7 testcases: hidden→shown, latest/running/min tracking, malformed payload no-crash, reset, band-color thresholds, theme switch.
+- [x] Run screen a11y test всё ещё проходит с новой кнопкой (mark() applied).
+
+Validate: ✅ ruff All checks passed. ✅ mypy 112 files no issues. ✅ 725 unit + 2 skip + 1 deselect. ✅ 18 новых R4 тестов зелёные. Только pre-existing flake `test_force_bypasses_cache` остаётся.
+
+**Files (R4)**: 5 modified (`core/runner.py`, `core/orchestrator.py`, `core/qa/phash.py`, `gui/workers/run_worker.py`, `gui/screens/run.py`), 3 created (`gui/widgets/divergence_indicator.py`, `tests/unit/test_divergence_event.py`, `tests/unit/test_gui_divergence_indicator.py`).
 
 ### Round 5 — F4 Notifications
 

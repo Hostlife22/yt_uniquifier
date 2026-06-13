@@ -187,4 +187,77 @@ def compare(input_path: Path, output_path: Path, n: int | None = 120) -> PHashSt
     )
 
 
-__all__ = ["PHashStats", "compare", "sample_frames"]
+def sample_frames_range(
+    path: Path, start_sec: float, span_sec: float, n: int,
+) -> list[Image.Image]:
+    """Sample n frames evenly from `[start_sec, start_sec + span_sec]`.
+
+    Used by the v0.7 R4 live-divergence indicator: the encoded
+    segment file (``seg_NNNN.mkv``) is a self-contained clip, but
+    the source slice it corresponds to is a sub-range of the much
+    larger source file. ``-ss start -t span`` input seek limits
+    extraction to just that window so per-segment sampling stays
+    O(span), not O(source duration).
+    """
+    if span_sec <= 0 or n <= 0:
+        return []
+    target_fps = max(n / span_sec, 0.01)
+    cmd = [
+        ffmpeg_bin(),
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{start_sec:.3f}",
+        "-i", str(path),
+        "-t", f"{span_sec:.3f}",
+        "-vf", f"fps={target_fps:.6f},scale=256:-2",
+        "-frames:v", str(n),
+        "-f", "image2pipe",
+        "-vcodec", "png",
+        "pipe:1",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=60, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise PipelineError(
+            f"range frame extraction failed for {path}: "
+            f"{exc.stderr.decode(errors='replace')[-300:]}",
+        ) from exc
+    return _split_png_stream(proc.stdout)
+
+
+def compare_range_pair(
+    source_path: Path, encoded_path: Path,
+    *,
+    source_start_sec: float, span_sec: float,
+    n: int = 2,
+) -> float | None:
+    """Return mean pHash similarity between source[range] and encoded clip.
+
+    `encoded_path` is a self-contained segment file produced by the
+    pipeline (sampled across its full duration). `source_path` is
+    the original source whose `[source_start_sec, +span_sec]` window
+    maps to the encoded segment.
+
+    Returns the similarity in `[0..1]` (1 = identical), or `None`
+    when frame extraction returned 0 frames on either side — that
+    signals a degenerate segment (zero duration / unreadable) and
+    callers should drop it rather than treat it as "perfect match".
+    """
+    a = sample_frames_range(source_path, source_start_sec, span_sec, n)
+    b = sample_frames(encoded_path, n)
+    pairs = min(len(a), len(b))
+    if pairs == 0:
+        return None
+    distances: list[int] = []
+    for ia, ib in zip(a[:pairs], b[:pairs], strict=True):
+        distances.append(int(imagehash.phash(ia) - imagehash.phash(ib)))
+    dmean = sum(distances) / len(distances)
+    return max(0.0, 1.0 - dmean / 64.0)
+
+
+__all__ = [
+    "PHashStats",
+    "compare",
+    "compare_range_pair",
+    "sample_frames",
+    "sample_frames_range",
+]

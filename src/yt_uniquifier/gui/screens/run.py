@@ -27,6 +27,7 @@ from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
+from yt_uniquifier.gui.widgets.divergence_indicator import DivergenceIndicator
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 from yt_uniquifier.gui.widgets.file_picker import FilePickerRow
 from yt_uniquifier.gui.widgets.kpi_pills import KpiPills
@@ -72,9 +73,16 @@ class RunScreen(ScreenBase):
 
     def __init__(self, state: AppState) -> None:
         super().__init__(state)
+        # Forward-declare optional CalibrateWorker so type-checkers see
+        # the right `T | None` shape from the first assignment. Imported
+        # locally because it pulls Qt + calibration deps that the
+        # PreflightWorker tests stub at module load time.
+        from yt_uniquifier.gui.workers.calibrate_worker import CalibrateWorker
         self.run_worker: RunWorker | None = None
         self.probe_worker: ProbeWorker | None = None
         self.preflight_worker: PreflightWorker | None = None
+        self._tune_worker: CalibrateWorker | None = None
+        self._tune_source_path: Path | None = None
         self.qa_html_path: Path | None = None
         # Cached Plan from the most recent preflight, keyed by
         # (input_path, profile_path, encoder). Lets _on_run reuse the
@@ -161,6 +169,20 @@ class RunScreen(ScreenBase):
         )
         controls.addWidget(self.run_btn)
 
+        # F7 — Auto-tune the selected profile against the current input,
+        # then save the result as <profile>.tuned.yaml and switch the
+        # state's profile_path to it.  Disabled until both input and
+        # profile are picked.
+        self.auto_tune_btn = QPushButton("🎯 Auto-&tune")
+        self.auto_tune_btn.clicked.connect(self._on_auto_tune)
+        mark(
+            self.auto_tune_btn, "Auto-tune profile",
+            "Calibrate the selected profile against this input, save the result as "
+            "<profile>.tuned.yaml, and switch to it.",
+            shortcut="Ctrl+T",
+        )
+        controls.addWidget(self.auto_tune_btn)
+
         self.cancel_btn = QPushButton("&Cancel")
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.clicked.connect(self._on_cancel)
@@ -188,6 +210,12 @@ class RunScreen(ScreenBase):
         # Timeline
         self.timeline = SegmentTimeline()
         layout.addWidget(self.timeline)
+
+        # Live divergence indicator (v0.7 R4 / F2). Hidden until the
+        # first divergence_sample arrives, so off-mode runs don't show
+        # a row of dashes.
+        self.divergence_indicator = DivergenceIndicator(self.state)
+        layout.addWidget(self.divergence_indicator)
 
         # Main overall progress (video segments)
         self.progress_bar = QProgressBar()
@@ -382,6 +410,9 @@ class RunScreen(ScreenBase):
         self.run_worker.segment_progress.connect(
             lambda idx, status: self.timeline.update_segment(idx, status),
         )
+        self.run_worker.divergence_sample.connect(
+            self.divergence_indicator.push_sample,
+        )
         self.run_worker.finished_ok.connect(self._on_done)
         self.run_worker.failed.connect(self._on_failed)
         self.run_worker.cancelled.connect(self._on_cancelled)
@@ -393,6 +424,7 @@ class RunScreen(ScreenBase):
         self.qa_html_path = None
         self.open_qa_btn.setEnabled(False)
         self.kpi_pills.clear()
+        self.divergence_indicator.reset()
         self.progress_bar.setValue(0)
         self.audio_progress_bar.setValue(0)
         self.audio_progress_bar.setVisible(False)
@@ -472,3 +504,113 @@ class RunScreen(ScreenBase):
             and not preflight_fail
         )
         self.run_btn.setEnabled(ready)
+        # Auto-tune only needs an input + a profile; output isn't required
+        # because we're not encoding the final file yet.  Also gated on no
+        # in-flight CalibrateWorker so multiple tunes can't stack.
+        self.auto_tune_btn.setEnabled(
+            self.state.input_path is not None
+            and self.profile_combo.currentData() is not None
+            and getattr(self, "_tune_worker", None) is None
+            and self.run_worker is None,
+        )
+
+    # --- F7 Auto-tune ----------------------------------------------------
+    def _on_auto_tune(self) -> None:
+        """Spawn a CalibrateWorker on (input, current profile).
+
+        Saves the tuned profile next to the original as
+        ``<stem>.tuned.yaml`` and switches ``state.profile_path`` to
+        it.  Errors surface as a QMessageBox; cancel is wired through
+        ``CalibrateWorker.request_cancel`` like other workers.
+        """
+        from yt_uniquifier.core.calibration.loop import CalibrationTarget
+        from yt_uniquifier.core.profile_loader import load_profile
+        from yt_uniquifier.gui.workers.calibrate_worker import CalibrateWorker
+
+        if self.state.input_path is None:
+            return
+        profile_data = self.profile_combo.currentData()
+        if not profile_data:
+            return
+        try:
+            profile = load_profile(Path(profile_data))
+        except YtUniquifierError as exc:
+            QMessageBox.critical(self, "Profile error", str(exc))
+            return
+
+        # Conservative defaults — same as the Calibrate screen's
+        # starting knob positions.  Users who want different knobs
+        # use the dedicated Calibrate screen.
+        target = CalibrationTarget(
+            max_self_match=0.2,
+            min_quality=88.0,
+            max_iterations=5,
+            test_clip_sec=60.0,
+        )
+
+        worker = CalibrateWorker(self.state.input_path, profile, target)
+        self._tune_worker = worker
+        self._tune_source_path = Path(profile_data)
+        worker.failed.connect(self._on_auto_tune_failed)
+        worker.completed.connect(self._on_auto_tune_completed)
+        worker.finished_ok.connect(self._on_auto_tune_finished)
+        self.auto_tune_btn.setEnabled(False)
+        self.status_label.setText("Auto-tuning profile…")
+        self.log.log(
+            f"--- Auto-tune started on {self.state.input_path.name} "
+            f"with {Path(profile_data).stem} ---", "info",
+        )
+        worker.start()
+
+    def _on_auto_tune_completed(self, tuned_profile: object) -> None:
+        """Persist the tuned profile and switch state.profile_path to it."""
+        from yt_uniquifier.core.models import Profile as _Profile
+        from yt_uniquifier.core.profile_loader import dump_profile
+
+        if not isinstance(tuned_profile, _Profile):
+            return
+        source = getattr(self, "_tune_source_path", None)
+        if source is None:
+            return
+        tuned_path = source.with_name(f"{source.stem}.tuned.yaml")
+        try:
+            dump_profile(tuned_profile, tuned_path)
+        except Exception as exc:  # noqa: BLE001 — surface dump failures to user
+            QMessageBox.critical(self, "Save tuned profile failed", str(exc))
+            return
+        # Reload the combo so the new file appears, then select it.
+        self._reload_profile_combo()
+        idx = self.profile_combo.findData(str(tuned_path))
+        if idx >= 0:
+            self.profile_combo.setCurrentIndex(idx)
+        self.state.set_profile_path(tuned_path)
+        self.log.log(f"Auto-tune saved tuned profile: {tuned_path}", "info")
+        self.status_label.setText(f"Tuned profile saved: {tuned_path.name}")
+
+    def _on_auto_tune_failed(self, message: str) -> None:
+        self.log.log(f"Auto-tune failed: {message}", "error")
+        self.status_label.setText("Auto-tune failed.")
+        QMessageBox.critical(self, "Auto-tune failed", message)
+
+    def _on_auto_tune_finished(self, _payload: object) -> None:
+        worker = getattr(self, "_tune_worker", None)
+        if worker is not None:
+            with contextlib.suppress(TypeError, RuntimeError):
+                worker.disconnect()
+            worker.quit()
+            worker.wait(2000)
+        self._tune_worker = None
+        self._refresh_run_button()
+
+    def _reload_profile_combo(self) -> None:
+        """Repopulate the profile dropdown so a newly-saved tuned file shows up."""
+        prev = self.profile_combo.currentData()
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        for p in sorted(PROFILES_DIR.glob("*.yaml")):
+            self.profile_combo.addItem(p.stem, str(p))
+        if prev:
+            idx = self.profile_combo.findData(prev)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+        self.profile_combo.blockSignals(False)

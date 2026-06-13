@@ -8,9 +8,10 @@ progress events (RunEvent + custom phase markers).
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
@@ -50,6 +51,15 @@ class RunOptions:
     # wall time + ~3 VMAF points drop on long sources. No-op for
     # libx264-source runs. Refused on HDR/HEVC paths.
     sanitize_bitstream: bool = False
+    # v0.7 R4 / F2 — live divergence sampling. After each re-encoded
+    # segment, pull a few frames from both source[start..end] and the
+    # encoded output, compute pHash similarity, and emit a
+    # ``divergence_sample`` RunEvent. Drives the live-divergence GUI
+    # indicator.
+    #   "off"   — disabled (default; sampling costs ~50 ms per segment)
+    #   "light" — sample 2 frames every 4th segment
+    #   "full"  — sample 4 frames every segment
+    sample_phash: Literal["off", "light", "full"] = "off"
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -209,6 +219,10 @@ def run_full(
                 raise PipelineError("cancelled by user")
             store.mark(seg.idx, "in_progress")
 
+        # R4/F2 — segment lookup table for the divergence sampler. Built
+        # once, indexed by idx so the per-segment hook is O(1).
+        seg_by_idx = {s.idx: s for s in segments}
+
         def _on_segment_done(idx: int, src: Path | None, out: Path) -> None:
             # Verify the worker actually produced a non-empty output file
             # before recording it as done. If ffmpeg exited 0 but the file
@@ -225,6 +239,7 @@ def run_full(
                     f"segment {idx} reported done but {out} is missing/empty"
                 )
             store.mark(idx, "done", src_path=src, out_path=out)
+            _maybe_emit_divergence(idx, out, seg_by_idx, options, plan, emit)
 
         try:
             process_video_segments_parallel(
@@ -335,6 +350,99 @@ def run_full(
         segments_done=len(final_segments),
         preflight_findings=findings,
     )
+
+
+# v0.7 R4 / F2 — exponential-moving-average half-life used by the
+# running_phash field. Roughly: the most recent ~5 samples dominate,
+# older samples decay. Match in DivergenceIndicator if the widget ever
+# computes its own EMA from raw samples.
+_DIVERGENCE_EMA_ALPHA = 0.25
+
+
+def _maybe_emit_divergence(
+    idx: int,
+    out: Path,
+    seg_by_idx: Mapping[int, object],
+    options: RunOptions,
+    plan: Plan,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    """Sample pHash similarity for one segment and emit a RunEvent.
+
+    Cadence + frame count are driven by ``options.sample_phash``:
+
+      * ``"off"``   — skip entirely (default)
+      * ``"light"`` — every 4th segment, 2 frames per pair
+      * ``"full"``  — every segment, 4 frames per pair
+
+    Best-effort: any ffmpeg / I/O failure inside the sampler is
+    swallowed so a transient frame-extract glitch never breaks the
+    encode. The pipeline's primary signal (`done` segment) has
+    already been recorded by the time this runs.
+    """
+    mode = options.sample_phash
+    if mode == "off":
+        return
+    if mode == "light" and idx % 4 != 0:
+        return
+
+    n_frames = 4 if mode == "full" else 2
+    seg = seg_by_idx.get(idx)
+    if seg is None:
+        return
+    start_sec = getattr(seg, "start_sec", None)
+    end_sec = getattr(seg, "end_sec", None)
+    if not isinstance(start_sec, (int, float)) or not isinstance(end_sec, (int, float)):
+        return
+    span_sec = float(end_sec) - float(start_sec)
+    if span_sec <= 0:
+        return
+
+    # Late import — qa.phash drags imagehash + PIL which we don't want
+    # at module import time for non-sampling runs (CI subset matrix).
+    from yt_uniquifier.core.qa.phash import compare_range_pair
+
+    try:
+        similarity = compare_range_pair(
+            plan.source.path, out,
+            source_start_sec=float(start_sec),
+            span_sec=span_sec,
+            n=n_frames,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort sampler
+        emit(RunEvent(kind="log", payload={
+            "phase": "divergence_sample",
+            "segment": idx,
+            "warning": f"divergence sampler failed: {exc}",
+        }))
+        return
+    if similarity is None:
+        return
+
+    # Track an exponential moving average across segments to give the
+    # GUI a stable "running" number that's not too jumpy on the last
+    # sample. Stored on the function as a poor-man's closure cell so we
+    # don't need to thread state through. Reset per run because the
+    # orchestrator is a single-use object — but multiple runs in the
+    # same process (tests, batch) would otherwise carry over: gate the
+    # reset on plan.plan_hash.
+    cache = _maybe_emit_divergence._ema  # type: ignore[attr-defined]
+    cur = cache.get(plan.plan_hash)
+    if cur is None:
+        running = similarity
+    else:
+        running = (1 - _DIVERGENCE_EMA_ALPHA) * cur + _DIVERGENCE_EMA_ALPHA * similarity
+    cache[plan.plan_hash] = running
+
+    emit(RunEvent(kind="divergence_sample", payload={
+        "segment": idx,
+        "phash_similarity": float(similarity),
+        "running_phash": float(running),
+        "frames_sampled": n_frames,
+    }))
+
+
+_maybe_emit_divergence._ema = {}  # type: ignore[attr-defined]
 
 
 def _cleanup_artifacts(

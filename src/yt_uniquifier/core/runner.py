@@ -15,7 +15,10 @@ from typing import Literal
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.pipeline import BuiltCommand
 
-EventKind = Literal["progress", "log", "done", "error"]
+# `divergence_sample` (v0.7 R4 / F2) carries phash_similarity + running EMA
+# per segment from `orchestrator._maybe_emit_divergence`. GUI consumers
+# match on `ev.kind` and route to the live divergence indicator.
+EventKind = Literal["progress", "log", "done", "error", "divergence_sample"]
 
 
 @dataclass(frozen=True)
