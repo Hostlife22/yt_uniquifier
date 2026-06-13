@@ -381,11 +381,19 @@ class RunScreen(ScreenBase):
             return
 
         work_dir = Path.home() / ".cache" / "yt_uniquifier" / "work" / plan.plan_hash
+        # v0.7 R5: pull NotificationConfig from AppState (set via Settings).
+        # AppState.notifications is annotated as `object` to keep the module
+        # importable without core.notifications; narrow via isinstance before
+        # forwarding so a corrupt-on-disk value can't poison RunOptions.
+        from yt_uniquifier.core.notifications import NotificationConfig
+        raw_notif = self.state.notifications
+        notif_cfg = raw_notif if isinstance(raw_notif, NotificationConfig) else None
         options = RunOptions(
             work_dir=work_dir,
             output=self.state.output_path,
             keep_segments=False,
             enforce_preflight=True,
+            notifications=notif_cfg,
         )
 
         # If a previous worker is still being torn down, disconnect its

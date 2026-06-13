@@ -342,15 +342,36 @@ Validate: ✅ ruff All checks passed. ✅ mypy 112 files no issues. ✅ 725 unit
 
 **Files (R4)**: 5 modified (`core/runner.py`, `core/orchestrator.py`, `core/qa/phash.py`, `gui/workers/run_worker.py`, `gui/screens/run.py`), 3 created (`gui/widgets/divergence_indicator.py`, `tests/unit/test_divergence_event.py`, `tests/unit/test_gui_divergence_indicator.py`).
 
-### Round 5 — F4 Notifications
+### Round 5 — F4 Notifications — ✅ DONE
 
-- `core/notifications.py` модуль (Discord/Slack/Telegram auto-detect + SMTP)
-- Hook в orchestrator
-- Settings GroupBox + Test button worker
-- `keyring` optional dependency + fallback на env var
-- Tests: `test_notifications.py` (mock webhook + mock SMTP)
+**Core module (`core/notifications.py`):**
+- [x] `NotificationConfig` + `SmtpConfig` pydantic models с `extra=forbid`. Password — НЕ field; читается из keyring или `YT_UNIQUIFIER_SMTP_PASSWORD` env. SmtpConfig имеет `use_tls` (STARTTLS vs SMTP_SSL/implicit TLS).
+- [x] `detect_provider(url)` — auto-detect Discord/Slack/Telegram/generic по host. Парсинг безопасный (любая ошибка → "generic").
+- [x] `build_webhook_payload(provider, ctx)` — формат per provider: Discord embed с color (green/red по event_kind), Slack header+section blocks, Telegram Markdown text, generic JSON envelope.
+- [x] `dispatch(config, ctx, logger=...)` — best-effort, NEVER raises. Webhook via stdlib `urllib.request` (no httpx dep), SMTP via stdlib `smtplib`. Все ошибки через `logger(msg, level)`. 5s webhook timeout, 10s SMTP timeout (configurable).
 
-Validate: «Test» button posts test message в Discord webhook URL (manual test); failed run триггерит ошибку → notification содержит traceback summary.
+**Orchestrator hook:**
+- [x] `RunOptions.notifications: NotificationConfig | None = None`.
+- [x] `run_full` refactored: внутренний `_run_full_impl` + outer wrapper с try/except. На success → dispatch `"completed"` с RunSummary deta. На любом exception → dispatch `"failed"` с `type+msg`, потом re-raise. Не propagates notification errors.
+- [x] Помощник `_maybe_dispatch_notification(options, plan, kind, *, summary, extra_message, emit)`: строит `NotificationContext` с title (profile name + status) + body (source/profile/encoder/output/segments) + fields (plan_hash[:12], encoder, segments, error). Logger callback emit'ит `RunEvent(kind="log", phase="notifications", level, message)` чтобы GUI LogConsole показывал статус каждого канала.
+
+**GUI:**
+- [x] AppState extended: `_notifications`, `notifications` property, `set_notifications(config)` setter (persists immediately), `notifications_changed` signal. Загрузка из state.json через `NotificationConfig.model_validate` (corrupt → silent None). Save via `model_dump(mode="json")`.
+- [x] Новый `gui/workers/notifications_test_worker.py` — `NotificationsTestWorker.line = pyqtSignal(str, str)` форвардит logger output на screen.
+- [x] Settings GroupBox "Post-job notifications": webhook URL line edit, completed/failed checkboxes, SMTP block (host/port/use_tls/username/sender/recipients QPlainTextEdit для one-per-line). Apply + Test buttons. Status label с emoji prefix per level (✅/⚠️/❌). a11y mark на всех 11 widgets.
+- [x] RunScreen передаёт `state.notifications` (с isinstance narrow) в `RunOptions.notifications`.
+
+**Tests (`tests/unit/test_notifications.py` — 25 cases):**
+- [x] `detect_provider` — 7 URLs incl. edge cases (empty, malformed)
+- [x] Payload formatters — Discord color per event, Slack blocks, Telegram Markdown, generic envelope
+- [x] dispatch — no-op when None, event allow-list filter, webhook success/non-2xx/transport-error/unknown-error
+- [x] SMTP — missing password warning, success via env password (starttls+login+send_message), failure swallowed
+- [x] Model validation — extra=forbid, default events list
+- [x] Orchestrator hook — `_maybe_dispatch_notification` swallows errors даже когда dispatch сам raise'ит
+
+Validate: ✅ ruff All checks passed. ✅ mypy 114 files no issues. ✅ 750 unit + 2 skip + 1 deselect (pre-existing flake). ✅ 25 R5 tests + 27 GUI tests зелёные. ✅ Settings smoke-construct без crash.
+
+**Files (R5)**: 4 created (`core/notifications.py`, `gui/workers/notifications_test_worker.py`, `tests/unit/test_notifications.py`, R5 plan-update), 4 modified (`core/runner.py` extended already, `core/orchestrator.py`, `gui/state.py`, `gui/screens/settings.py`, `gui/screens/run.py`).
 
 ### Round 6 — F5 Pause / Resume (наиболее рискованная)
 

@@ -18,6 +18,13 @@ from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import Plan, Profile
+from yt_uniquifier.core.notifications import (
+    NotificationConfig,
+    NotificationContext,
+)
+from yt_uniquifier.core.notifications import (
+    dispatch as dispatch_notifications,
+)
 from yt_uniquifier.core.pipeline import compute_plan_hash
 from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
 from yt_uniquifier.core.probe import probe as probe_file
@@ -60,6 +67,10 @@ class RunOptions:
     #   "light" — sample 2 frames every 4th segment
     #   "full"  — sample 4 frames every segment
     sample_phash: Literal["off", "light", "full"] = "off"
+    # v0.7 R5 / F4 — post-job notification config (Discord / Slack /
+    # Telegram / generic webhook + optional SMTP). None = silent.
+    # Dispatch is best-effort and never propagates errors.
+    notifications: NotificationConfig | None = None
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -112,9 +123,36 @@ def run_full(
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
 ) -> RunSummary:
-    """Process one input from probe to final mp4."""
-    emit = on_event or (lambda _e: None)
+    """Process one input from probe to final mp4.
 
+    Wraps the implementation in a try/except so v0.7 R5 / F4 post-job
+    notifications fire on both the success return AND the uncaught-
+    exception path — without forcing the impl to thread a dispatch
+    call through each early-return branch.
+    """
+    emit = on_event or (lambda _e: None)
+    try:
+        summary = _run_full_impl(plan, options, emit, cancel_token)
+    except BaseException as exc:
+        _maybe_dispatch_notification(
+            options, plan, "failed",
+            extra_message=f"{type(exc).__name__}: {exc}",
+            emit=emit,
+        )
+        raise
+    _maybe_dispatch_notification(
+        options, plan, "completed",
+        summary=summary, emit=emit,
+    )
+    return summary
+
+
+def _run_full_impl(
+    plan: Plan,
+    options: RunOptions,
+    emit: Callable[[RunEvent], None],
+    cancel_token: CancelToken | None,
+) -> RunSummary:
     findings = preflight(plan.source, plan, plan.encoder)
     if options.enforce_preflight and has_fail(findings):
         emit(RunEvent(kind="error", payload={"phase": "preflight",
@@ -350,6 +388,74 @@ def run_full(
         segments_done=len(final_segments),
         preflight_findings=findings,
     )
+
+
+# v0.7 R5 / F4 — post-job notification dispatch.
+
+def _maybe_dispatch_notification(
+    options: RunOptions,
+    plan: Plan,
+    event_kind: Literal["completed", "failed"],
+    *,
+    summary: RunSummary | None = None,
+    extra_message: str | None = None,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    """Build a NotificationContext and hand it to ``notifications.dispatch``.
+
+    Routes any dispatch log lines back through ``emit`` as `log`
+    RunEvents so the GUI's existing LogConsole shows what the
+    webhook / email channels did. ``dispatch`` itself is no-raise,
+    but the context build can still fail (e.g. profile name is an
+    unprintable object); swallow that too to honour the "never
+    propagate notification errors" invariant.
+    """
+    if options.notifications is None:
+        return
+    try:
+        title = (
+            f"yt-uniquifier: {plan.profile.name} — "
+            f"{'completed' if event_kind == 'completed' else 'FAILED'}"
+        )
+        body_lines = [
+            f"Source:  {plan.source.path.name}",
+            f"Profile: {plan.profile.name}",
+            f"Encoder: {plan.encoder.name} ({plan.encoder.vendor})",
+        ]
+        fields = {
+            "plan_hash": plan.plan_hash[:12],
+            "encoder":   f"{plan.encoder.name}/{plan.encoder.vendor}",
+        }
+        if summary is not None:
+            body_lines.append(f"Output:  {summary.output}")
+            body_lines.append(f"Segments done: {summary.segments_done}")
+            fields["segments"] = str(summary.segments_done)
+            fields["output"] = str(summary.output.name)
+        if extra_message is not None:
+            body_lines.append("")
+            body_lines.append(f"Error: {extra_message}")
+            fields["error"] = extra_message[:200]
+        ctx = NotificationContext(
+            event_kind=event_kind,
+            title=title,
+            body="\n".join(body_lines),
+            fields=fields,
+        )
+
+        def _logger(msg: str, level: str) -> None:
+            emit(RunEvent(kind="log", payload={
+                "phase": "notifications",
+                "level": level,
+                "message": msg,
+            }))
+
+        dispatch_notifications(options.notifications, ctx, logger=_logger)
+    except Exception as exc:  # noqa: BLE001 — never propagate
+        emit(RunEvent(kind="log", payload={
+            "phase": "notifications",
+            "level": "warn",
+            "message": f"notification dispatch error: {exc}",
+        }))
 
 
 # v0.7 R4 / F2 — exponential-moving-average half-life used by the

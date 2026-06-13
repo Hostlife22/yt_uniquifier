@@ -110,8 +110,15 @@ class AppState(QObject):
     theme_changed = pyqtSignal(str)                      # 'dark' | 'light' | 'system'
     recents_changed = pyqtSignal(list)                   # list[str]
     history_changed = pyqtSignal(list)                   # list[HistoryEntry]
+    notifications_changed = pyqtSignal(object)           # NotificationConfig | None
 
     def __init__(self) -> None:
+        # Lazy local import to keep this module importable without the
+        # core/notifications.py dependency materialised at GUI startup
+        # (it pulls pydantic + urllib/smtplib paths that some headless
+        # smoke tests stub).
+        from yt_uniquifier.core.notifications import NotificationConfig
+        self._NotificationConfig = NotificationConfig
         super().__init__()
         self._input_path: Path | None = None
         self._output_path: Path | None = None
@@ -120,6 +127,7 @@ class AppState(QObject):
         self._theme: str = "dark"
         self._recents: list[str] = []
         self._history: list[HistoryEntry] = []
+        self._notifications: NotificationConfig | None = None
         self._load()
 
     # ---- read-only accessors (test-friendly) ----
@@ -151,6 +159,17 @@ class AppState(QObject):
     def history(self) -> list[HistoryEntry]:
         return list(self._history)
 
+    @property
+    def notifications(self) -> object:
+        """Return the current `NotificationConfig | None`.
+
+        Annotated as ``object`` to keep the AppState public surface
+        importable without pulling ``core.notifications`` (which pulls
+        urllib/smtplib).  Callers narrow via ``isinstance`` against
+        the concrete type.
+        """
+        return self._notifications
+
     # ---- setters with signal emission ----
     def set_input_path(self, path: Path | None) -> None:
         self._input_path = path
@@ -173,6 +192,22 @@ class AppState(QObject):
     def set_theme(self, theme: str) -> None:
         self._theme = theme
         self.theme_changed.emit(theme)
+
+    def set_notifications(self, config: object) -> None:
+        """Replace the notifications config and persist immediately.
+
+        Accepts either a NotificationConfig instance or None.  Other
+        types are rejected silently — callers should serialise via
+        the model.  Persisted to state.json on every change so the
+        Settings screen doesn't need an explicit Save click for this
+        field.
+        """
+        if config is None or isinstance(config, self._NotificationConfig):
+            self._notifications = config
+            self.notifications_changed.emit(config)
+            import contextlib
+            with contextlib.suppress(OSError):
+                self.save()
 
     # ---- recents ----
     def push_recent(self, path: str) -> None:
@@ -220,6 +255,14 @@ class AppState(QObject):
                     val = data.get(key)
                     if isinstance(val, str):
                         setattr(self, attr, Path(val) if attr.endswith("path") else val)
+                notif = data.get("notifications")
+                if isinstance(notif, dict):
+                    try:
+                        self._notifications = self._NotificationConfig.model_validate(
+                            notif,
+                        )
+                    except Exception:  # noqa: BLE001 — stale schema → drop, don't crash
+                        self._notifications = None
         except json.JSONDecodeError:
             # File exists but isn't parseable — archive it so we don't
             # silently lose the user's recents/prefs on the next save.
@@ -244,12 +287,15 @@ class AppState(QObject):
     def save(self) -> None:
         """Persist non-history state to STATE_PATH."""
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        data = {
+        data: dict[str, object] = {
             "theme": self._theme,
             "recents": list(self._recents),
             "profile_path": str(self._profile_path) if self._profile_path else None,
             "encoder_name": self._encoder_name,
         }
+        if self._notifications is not None:
+            # mode="json" so HttpUrl / Path-style fields serialise as strings.
+            data["notifications"] = self._notifications.model_dump(mode="json")
         tmp = STATE_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(STATE_PATH)
