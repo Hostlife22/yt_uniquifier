@@ -8,6 +8,7 @@ output dir and appends a line to driver.log so the run is auditable.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -90,10 +91,8 @@ def _wait_signal(signal, timeout_sec: float, *, poll=0.1):
     while not fired["done"] and time.monotonic() - start < timeout_sec:
         QApplication.processEvents()
         time.sleep(poll)
-    try:
+    with contextlib.suppress(TypeError, RuntimeError):
         signal.disconnect(_slot)
-    except (TypeError, RuntimeError):
-        pass
     return fired["done"], fired["value"], time.monotonic() - start
 
 
@@ -341,12 +340,14 @@ def scenario_queue(window) -> dict:
 # ------------------------------------------------------------------
 
 def main() -> int:
-    from PyQt6.QtCore import QSize
     from PyQt6.QtWidgets import QApplication
 
     from yt_uniquifier.gui.app_pyqt import MainWindow
 
-    app = QApplication.instance() or QApplication(sys.argv[:1])
+    # Underscore prefix tells ruff F841 the reference is intentionally
+    # bound — QApplication must stay alive for the Qt event loop, but
+    # we never dereference the local.
+    _app = QApplication.instance() or QApplication(sys.argv[:1])
     win = MainWindow()
     win.resize(1400, 900)
     win.show()

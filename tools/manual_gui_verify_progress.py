@@ -321,7 +321,6 @@ def verify_queue(window) -> dict:
 # --------- Static visibility check on remaining screens -------------
 
 def verify_static_bars(window) -> dict:
-    from PyQt6.QtWidgets import QApplication
     results = {}
     for label in ("QA Viewer", "Validation", "Corpus"):
         _switch(window, label)
@@ -343,7 +342,9 @@ def main() -> int:
 
     from yt_uniquifier.gui.app_pyqt import MainWindow
 
-    app = QApplication.instance() or QApplication(sys.argv[:1])
+    # _-prefix → ruff F841 happy; QApplication has to stay alive for
+    # the Qt event loop, we just don't dereference the local.
+    _app = QApplication.instance() or QApplication(sys.argv[:1])
     win = MainWindow()
     win.resize(1400, 900)
     win.show()
