@@ -56,6 +56,11 @@ _VENDOR_DEFAULT_PARALLEL: dict[str, int] = {
     "vulkan": 2,
     "x264": 0,           # 0 = compute from cpu_count() // 2
     "x265": 0,
+    # v1.2.0 Task 22: AV1 software encoders.  libaom-av1 is single-threaded
+    # within an encode but the orchestrator already parallelises across
+    # segments, so we still treat it like x264/x265 (0 = cpu_count() // 2).
+    "libaom": 0,
+    "svtav1": 0,
 }
 
 # NVIDIA chip names that signal a pro/datacenter card with no NVENC session cap.
@@ -76,8 +81,24 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
     # NVENC/QSV/AMF paths. The probe is the same lavfi null-source
     # test as the others; pick_encoder still respects user `prefer`.
     ("av1_vulkan", "vulkan", "av1"),
+    # v1.2.0 Task 22 — AV1 hardware paths.  Probed after vulkan so the
+    # cross-vendor encoder wins by default when present, with NVENC/QSV/
+    # AMF/VideoToolbox AV1 as vendor-specific fallbacks for older FFmpeg
+    # builds.  All four reuse the same vendor tag as their h264/hevc
+    # siblings — the CRF/quality knobs are identical (cq, global_quality,
+    # qp_i/qp_p, b:v).
+    ("av1_nvenc", "nvenc", "av1"),
+    ("av1_qsv", "qsv", "av1"),
+    ("av1_amf", "amf", "av1"),
+    ("av1_videotoolbox", "videotoolbox", "av1"),
     ("libx264", "x264", "h264"),
     ("libx265", "x265", "hevc"),
+    # v1.2.0 Task 22 — AV1 software encoders.  libsvtav1 is the default
+    # CPU choice (Intel SVT-AV1, ~3× libx264 wall-clock and very widely
+    # available in modern ffmpeg builds).  libaom-av1 is the reference
+    # implementation, ~10× slower but compression-optimal.
+    ("libsvtav1", "svtav1", "av1"),
+    ("libaom-av1", "libaom", "av1"),
 )
 
 
@@ -174,7 +195,7 @@ def _detect_max_parallel(vendor: EncoderVendor) -> int:
     """
     if vendor == "nvenc":
         return _nvenc_max_parallel()
-    if vendor in ("x264", "x265"):
+    if vendor in ("x264", "x265", "libaom", "svtav1"):
         import os
         return max(1, (os.cpu_count() or 2) // 2)
     return _VENDOR_DEFAULT_PARALLEL.get(vendor, 1)

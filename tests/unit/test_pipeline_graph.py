@@ -304,3 +304,84 @@ def test_audio_chain_rejects_naked_in_prefix(
     plan = _plan(src, [TransformConfig(id=spec_id)])
     with pytest.raises(PipelineError, match="emitted .* prefix"):
         FilterGraph(plan, tmp_path / "out.mp4").build()
+
+
+# ---------------------------------------------------------------------------
+# v1.2.0 Task 22 — AV1 encoder support
+# ---------------------------------------------------------------------------
+
+
+def _av1_plan(tmp_path: Path, vendor: str, name: str) -> Plan:
+    src = _src(tmp_path)
+    profile = Profile(name="av1t", target_codec="av1")
+    enc = EncoderCandidate(name=name, vendor=vendor, codec="av1", works=True)  # type: ignore[arg-type]
+    return Plan(
+        source=src, profile=profile, encoder=enc,
+        plan_hash=compute_plan_hash(src, profile, enc),
+    )
+
+
+def test_av1_default_crf_constant_distinct_from_x26x() -> None:
+    """AV1 uses a 0..63 scale; libx264/libx265 use 0..51.  The two
+    defaults must not silently collapse into one constant."""
+    assert pipeline_mod._DEFAULT_AV1_CRF == 30
+    assert pipeline_mod._DEFAULT_X26X_CRF == 18
+    assert pipeline_mod._DEFAULT_AV1_CRF != pipeline_mod._DEFAULT_X26X_CRF
+
+
+def test_av1_encoder_args_libsvtav1(tmp_path: Path) -> None:
+    plan = _av1_plan(tmp_path, vendor="svtav1", name="libsvtav1")
+    args = pipeline_mod._encoder_args_for(plan)
+    assert "-c:v" in args and args[args.index("-c:v") + 1] == "libsvtav1"
+    assert args[args.index("-crf") + 1] == "30"
+    assert "-preset" in args and args[args.index("-preset") + 1] == "8"
+    # AV1 software encoders must emit -b:v 0 so CRF mode is unambiguous.
+    bv_idx = args.index("-b:v")
+    assert args[bv_idx + 1] == "0"
+
+
+def test_av1_encoder_args_libaom(tmp_path: Path) -> None:
+    plan = _av1_plan(tmp_path, vendor="libaom", name="libaom-av1")
+    args = pipeline_mod._encoder_args_for(plan)
+    assert args[args.index("-c:v") + 1] == "libaom-av1"
+    assert args[args.index("-crf") + 1] == "30"
+    # libaom-av1 specifics: cpu-used + row-mt + tiles.
+    assert args[args.index("-cpu-used") + 1] == "4"
+    assert args[args.index("-row-mt") + 1] == "1"
+
+
+def test_av1_encoder_args_av1_nvenc_uses_gpu_quality(tmp_path: Path) -> None:
+    """av1_nvenc maps onto the existing NVENC cq scale (0..51, default 19)
+    so a single crf_override drives both software and hardware AV1."""
+    plan = _av1_plan(tmp_path, vendor="nvenc", name="av1_nvenc")
+    args = pipeline_mod._encoder_args_for(plan)
+    cq_idx = args.index("-cq")
+    assert args[cq_idx + 1] == "19"
+    assert args[args.index("-c:v") + 1] == "av1_nvenc"
+
+
+def test_av1_crf_override_clamps_to_63_not_51(tmp_path: Path) -> None:
+    """For AV1, the clamp ceiling is 63 (the AV1 CRF max), not 51 as
+    for libx264.  A target-VMAF loop that pushes CRF past 51 on AV1
+    must not be silently truncated to libx264's range."""
+    plan = _av1_plan(tmp_path, vendor="svtav1", name="libsvtav1")
+    args = pipeline_mod._encoder_args_for(plan, crf_override=60)
+    assert args[args.index("-crf") + 1] == "60"
+    # Above the AV1 ceiling — clamps to 63, not 51.
+    args = pipeline_mod._encoder_args_for(plan, crf_override=99)
+    assert args[args.index("-crf") + 1] == "63"
+
+
+def test_av1_filter_graph_builds(tmp_path: Path) -> None:
+    """End-to-end smoke: an AV1 Plan produces a buildable FilterGraph
+    with av1 encoder name in the args list."""
+    src = _src(tmp_path)
+    profile = Profile(name="av1t", target_codec="av1",
+                      transforms=[TransformConfig(id="video.crop_resize",
+                                                  params={"rng_seed": 7})])
+    enc = EncoderCandidate(name="libsvtav1", vendor="svtav1", codec="av1", works=True)
+    plan = Plan(source=src, profile=profile, encoder=enc,
+                plan_hash=compute_plan_hash(src, profile, enc))
+    built = FilterGraph(plan, tmp_path / "out.mp4").build()
+    assert "libsvtav1" in built.args
+    assert "-crf" in built.args

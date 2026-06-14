@@ -26,6 +26,21 @@ def test_shipped_profiles_load(name: str) -> None:
     assert p.target_codec in {"h264", "hevc"}
 
 
+# v1.2.0 Task 22 — AV1 profiles ship with target_codec="av1".  Kept in
+# a separate parametrize so a regression in either AV1 profile shows up
+# with a focused test name rather than failing the broad SDR sweep.
+@pytest.mark.parametrize("name", ["youtube_av1", "youtube_4k_av1"])
+def test_shipped_av1_profiles_load(name: str) -> None:
+    p = load_profile(REPO_PROFILES / f"{name}.yaml")
+    assert p.name == name
+    assert p.target_codec == "av1"
+    assert p.output_container == "mp4"
+    # AV1 profiles should still target -14 LUFS (YouTube spec) — a
+    # silent drift here would mean uploaded files get post-ingest
+    # gain normalised, defeating the whole calibrated-loudness story.
+    assert p.target_loudness_lufs == -14.0
+
+
 def test_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(ProfileLoadError, match="not found"):
         load_profile(tmp_path / "nope.yaml")

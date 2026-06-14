@@ -454,6 +454,19 @@ class FilterGraph:
             return ["-c:v", name, "-rc", "cqp", "-qp_i", "19", "-qp_p", "19"]
         if enc.vendor == "videotoolbox":
             return ["-c:v", name, "-q:v", "50"]
+        # v1.2.0 Task 22 — AV1 software encoders.  Mirror the
+        # _encoder_args_for free function so the legacy single-shot
+        # path used by full-source encodes (no segmentation, GUI live
+        # preview) produces AV1 with the same defaults as the segmented
+        # path: SVT-AV1 preset 8, libaom-av1 cpu-used 4 + row-mt.
+        if enc.vendor == "svtav1":
+            return ["-c:v", name, "-preset", "8", "-crf", str(_DEFAULT_AV1_CRF), "-b:v", "0"]
+        if enc.vendor == "libaom":
+            return [
+                "-c:v", name, "-cpu-used", "4", "-row-mt", "1",
+                "-tile-columns", "2", "-tile-rows", "1",
+                "-crf", str(_DEFAULT_AV1_CRF), "-b:v", "0",
+            ]
         # x264 / x265
         return ["-c:v", name, "-preset", "slow", "-crf", "18"]
 
@@ -903,6 +916,12 @@ def _segment_pix_fmt(plan: Plan) -> str:
 
 _DEFAULT_X26X_CRF = 18
 _DEFAULT_GPU_QUALITY = 19  # nvenc cq, qsv global_quality, amf qp_i/qp_p
+# v1.2.0 Task 22 — AV1 CRF defaults.  libaom-av1 and libsvtav1 both use a
+# 0..63 CRF scale; CRF 30 ≈ libx264 CRF 18 quality (~VMAF 95 on most
+# content).  Hardware AV1 (av1_nvenc / av1_qsv / av1_amf / av1_videotoolbox)
+# reuses the existing 0..51 GPU quality scale because their command-line
+# knobs (cq / global_quality / qp_i / b:v) are the same family.
+_DEFAULT_AV1_CRF = 30
 
 
 def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[str]:
@@ -917,16 +936,26 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
     The fallback to the historical defaults
     (CRF 18, GPU quality 19) is preserved when ``crf_override`` is
     ``None`` — no behavioural change for callers that don't opt in.
+
+    v1.2.0 Task 22 — when ``plan.encoder.codec == "av1"``, ``crf_override``
+    is interpreted on the AV1 0..63 scale (default 30) for the software
+    encoders libaom-av1/libsvtav1, and the historical hardware mapping
+    is reused for av1_nvenc/av1_qsv/av1_amf/av1_videotoolbox so a single
+    ``crf_override`` drives quality consistently across the whole AV1
+    encoder matrix.
     """
     enc = plan.encoder
     name = enc.name
     mb = _max_bitrate_for(plan)
-    crf = _DEFAULT_X26X_CRF if crf_override is None else max(0, min(51, crf_override))
+    is_av1 = enc.codec == "av1"
+    default_crf = _DEFAULT_AV1_CRF if is_av1 else _DEFAULT_X26X_CRF
+    crf_max = 63 if is_av1 else 51
+    crf = default_crf if crf_override is None else max(0, min(crf_max, crf_override))
     # Hardware encoders use a parallel 0..51 quality scale; map by
     # preserving the (default_crf - override) delta so a profile that
     # asks for a 2-step reduction yields the same perceptual bump on
     # CPU and GPU paths.
-    gpu_q = _DEFAULT_GPU_QUALITY + (crf - _DEFAULT_X26X_CRF)
+    gpu_q = _DEFAULT_GPU_QUALITY + (crf - default_crf)
     gpu_q = max(0, min(51, gpu_q))
     gpu_q_s = str(gpu_q)
     if enc.vendor == "nvenc":
@@ -943,6 +972,26 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
             "-c:v", name, "-b:v", str(mb),
             "-maxrate", str(int(mb * 1.5)), "-bufsize", str(mb * 2),
             "-allow_sw", "1",
+        ]
+    if enc.vendor == "svtav1":
+        # SVT-AV1 preset 0=slowest/best, 13=fastest. preset 8 is the
+        # documented "balanced" point and the libsvtav1 ffmpeg default.
+        return [
+            "-c:v", name, "-preset", "8", "-crf", str(crf),
+            "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
+        ]
+    if enc.vendor == "libaom":
+        # libaom-av1 is CPU-bound (~10× slower than libx264) — cpu-used 4
+        # is the documented "good" preset that trades ~5% quality for
+        # tractable wall-clock at 1080p.  row-mt + tiles spread one
+        # encode across cores when the orchestrator runs only one
+        # segment at a time (still useful — the segment-level
+        # parallelism is bounded by max_parallel which is cpu_count/2).
+        return [
+            "-c:v", name, "-cpu-used", "4", "-row-mt", "1",
+            "-tile-columns", "2", "-tile-rows", "1",
+            "-crf", str(crf), "-b:v", "0",
+            "-maxrate", str(mb), "-bufsize", str(mb * 2),
         ]
     return [
         "-c:v", name, "-preset", "medium", "-crf", str(crf),

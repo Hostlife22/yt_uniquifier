@@ -40,6 +40,11 @@ ColorRange = Literal["tv", "pc", "unknown"]
 EncoderKind = Literal["h264", "hevc", "av1"]
 EncoderVendor = Literal[
     "nvenc", "qsv", "amf", "videotoolbox", "vulkan", "x264", "x265",
+    # v1.2.0 Task 22 — AV1 software encoders.  Hardware AV1 variants
+    # (av1_nvenc, av1_qsv, av1_amf, av1_videotoolbox) reuse the existing
+    # nvenc/qsv/amf/videotoolbox vendor tags because their command-line
+    # knobs (cq/global_quality/qp_i/b:v) are the same family.
+    "libaom", "svtav1",
 ]
 Container = Literal["mp4", "mov", "mkv"]
 AudioTracksOpt = Literal["first", "all"]

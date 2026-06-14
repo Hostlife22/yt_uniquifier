@@ -1,0 +1,40 @@
+name: youtube_av1
+description: >-
+  YouTube 1080p AV1 (1920x1080 16:9) re-encode with balanced micro-transforms.
+  AV1 yields ~30% smaller files than H.264 at equivalent VMAF and is
+  YouTube's preferred codec for ingest as of 2024+.  CPU-bound on
+  libsvtav1 (~3x libx264 wall-clock); set --workers to cpu_count() // 2
+  or use av1_nvenc / av1_vulkan if available.  Target loudness -14 LUFS
+  (YouTube spec).
+transforms:
+  - id: video.fit_aspect
+    enabled: true
+    params:
+      target_aspect: "16:9"
+      mode: crop
+  - id: video.crop_resize
+    enabled: true
+    params: {max_strength: 0.02, rng_seed: 42}
+  - id: video.color_eq
+    enabled: true
+    params: {brightness: 0.008, contrast: 1.015, gamma: 0.997, saturation: 1.02}
+  - id: video.noise
+    enabled: true
+    params: {strength: 3}
+  - id: audio.pitch_tempo
+    enabled: true
+    params: {pitch: 1.0006, tempo: 1.0}
+  - id: audio.eq
+    enabled: true
+  - id: audio.loudnorm
+    enabled: true
+audio_tracks: first
+keep_hdr: false
+# AV1-in-mp4 is widely supported by YouTube ingest (2024+) and by every
+# major desktop player that can decode AV1 at all.  Stick with mp4 so
+# downstream tooling that expects a YouTube-uploadable container keeps
+# working unchanged.
+output_container: mp4
+target_codec: av1
+target_loudness_lufs: -14.0
+seed: 42

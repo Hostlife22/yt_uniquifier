@@ -15,7 +15,7 @@ transforms:                                                   # list
 audio_tracks: "first" | "all" | [int, ...]
 keep_hdr: bool                                                # default false
 output_container: "mp4" | "mov"                               # default mp4
-target_codec: "h264" | "hevc"
+target_codec: "h264" | "hevc" | "av1"          # v1.2.0 Task 22 added av1
 target_loudness_lufs: float                                   # default -14.0
 seed: int | null                                              # used when seed_strategy=fixed
 seed_strategy: "fixed" | "per_run" | "per_file" | "divergent" # default per_run; v0.3.3 CID profiles ship divergent
@@ -93,6 +93,22 @@ square frames — no manual ffmpeg recipe needed.
 | `instagram_reels.yaml`   | 9:16 | `pad_blur` | 1080×1920 | -14 | Letterbox-blur background preserves full landscape frame |
 | `instagram_square.yaml`  | 1:1  | `pad_blur` | 1080×1080 | -14 | Square feed post with blurred sidebars |
 | `linkedin_square.yaml`   | 1:1  | `crop`     | 1080×1080 | -14 | LinkedIn timeline (no blur — professional look) |
+
+### AV1 family (v1.2.0 Task 22)
+
+AV1 yields ~30 % smaller files than H.264 at equivalent VMAF and is
+YouTube's preferred ingest codec for 2024+. Profiles target `av1` —
+`pick_encoder()` chooses, in order: `av1_vulkan` (cross-vendor, FFmpeg
+8.0+), `av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_videotoolbox` (hardware),
+`libsvtav1` (CPU, ~3× libx264 wall-clock), `libaom-av1` (CPU,
+reference, ~10× libx264). The CRF scale is 0..63 with default 30
+(≈ libx264 CRF 18 quality); `target_vmaf` retries map onto the same
+scale automatically.
+
+| Name | Target | Mode | Resolution | LUFS | Notes |
+|------|--------|------|------------|------|-------|
+| `youtube_av1.yaml`       | 16:9 | `crop`     | 1920×1080 | -14 | YouTube AV1 1080p — prefer hardware AV1 when available |
+| `youtube_4k_av1.yaml`    | 16:9 | `crop`     | 3840×2160 | -14 | YouTube AV1 4K — uncaps perceived quality vs H.264's 25 Mb/s ceiling |
 
 \* indicative on natural footage; synthetic test patterns score much lower.
 
