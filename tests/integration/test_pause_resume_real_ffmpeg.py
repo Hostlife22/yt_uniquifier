@@ -77,7 +77,7 @@ def _ffprobe_duration(path: Path) -> float:
             "-of", "default=noprint_wrappers=1:nokey=1",
             str(path),
         ],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=15,
     )
     return float(result.stdout.strip())
 
@@ -89,7 +89,7 @@ def _ffprobe_streams(path: Path) -> list[dict[str, object]]:
             "ffprobe", "-v", "error",
             "-show_streams", "-of", "json", str(path),
         ],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=15,
     )
     return list(json.loads(result.stdout)["streams"])
 

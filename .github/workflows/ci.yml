@@ -59,10 +59,28 @@ jobs:
       - name: Ruff check
         run: ruff check .
 
-      - name: Pytest
+      # v0.7.0 R8 — split fast vs. integration tests. The fast lane
+      # (unit + gui + smoke) runs on every matrix cell (3 OS × 2 Py) so
+      # PR feedback stays under ~2 min. The slow lane (real-ffmpeg
+      # integration) runs only on ubuntu+3.12 — every transform and
+      # encoder path it exercises is platform-agnostic at the Python
+      # level, so the extra coverage from running it 6× was pure
+      # wall-clock cost with no signal. The 180 s per-test cap from
+      # pyproject.toml is the safety net against any future hang.
+      - name: Pytest (fast — unit + gui + smoke)
         env:
           # Headless Qt: required for ubuntu-latest (no X display) and
           # for windows-latest under the GitHub Actions display agent;
           # harmless on macOS.
           QT_QPA_PLATFORM: offscreen
-        run: pytest -q
+        # ``visual`` is excluded per its own module docstring — PNG
+        # baselines diverge across macOS/Linux/Wayland font renderers
+        # and are meant to be regenerated locally with
+        # ``UPDATE_VISUAL_BASELINES=1`` on the canonical host.
+        run: pytest -q -m "not integration and not visual"
+
+      - name: Pytest (integration — real ffmpeg)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q -m integration

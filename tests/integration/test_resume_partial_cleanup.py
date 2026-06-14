@@ -50,7 +50,7 @@ def multi_segment_clip(tmp_path: Path) -> Path:
         "-shortest",
         str(out),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=60)
     return out
 
 

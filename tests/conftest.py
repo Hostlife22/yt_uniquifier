@@ -59,7 +59,9 @@ def tiny_clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "-shortest",
         str(out),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    # 30 s cap so a wedged ffmpeg fixture can't hang the whole suite —
+    # a 2 s testsrc2 clip generates in <1 s on every supported runner.
+    subprocess.run(cmd, check=True, capture_output=True, timeout=30)
     return out
 
 
@@ -69,3 +71,36 @@ def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     cache = tmp_path / "encoders.json"
     monkeypatch.setattr("yt_uniquifier.core.encoder.CACHE_PATH", cache)
     return cache
+
+
+@pytest.fixture(autouse=True)
+def _isolated_gui_state(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redirect GUI ``CONFIG_DIR`` / ``STATE_PATH`` / ``HISTORY_PATH`` to a
+    per-test temp directory so a test can never read or pollute the real
+    ``~/Library/Preferences/yt-uniquifier`` / ``%APPDATA%`` location.
+
+    v0.7.0 R8: the v0.5.x layout used ``~/.config/yt_uniquifier``, which
+    was already shared. v0.5.5 + E3 moved this to ``QStandardPaths``,
+    which made every CI host's home a write target. Without this
+    fixture two failure modes are possible:
+
+    * A previous run's corrupt ``state.json`` lingers and the next
+      ``AppState()`` call quietly archives it — slow on big files.
+    * Multiple parametrized tests racing on the same file under
+      a parallel pytest runner (xdist) corrupt each other's state.
+
+    Imported lazily so unit tests that never touch ``gui.state`` don't
+    pay for the import.
+    """
+    try:
+        from yt_uniquifier.gui import state as state_mod
+    except ImportError:
+        return  # GUI extras not installed — nothing to isolate
+
+    cfg = tmp_path_factory.mktemp("gui_cfg")
+    monkeypatch.setattr(state_mod, "CONFIG_DIR", cfg)
+    monkeypatch.setattr(state_mod, "STATE_PATH", cfg / "state.json")
+    monkeypatch.setattr(state_mod, "HISTORY_PATH", cfg / "history.json")

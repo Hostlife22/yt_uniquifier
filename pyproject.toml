@@ -40,6 +40,10 @@ dev = [
     "pytest~=8.2",
     "pytest-cov~=5.0",
     "pytest-qt~=4.4",         # v0.5.0 — PyQt6 widget testing fixtures
+    # v0.7.0 R8 — hard per-test cap so a stalled real-ffmpeg fixture
+    # or a leaked daemon thread can't wedge the CI matrix for an hour.
+    # See [tool.pytest.ini_options]::timeout in this file.
+    "pytest-timeout~=2.3",
     "ruff~=0.5",
     "mypy~=1.10",
     "types-PyYAML~=6.0",
@@ -88,6 +92,16 @@ markers = [
     "smoke: minimal CI sanity tests",
     "visual: GUI screenshot regression (linux-offscreen only)",
 ]
+# v0.7.0 R8 — global per-test cap via pytest-timeout. Three minutes is
+# ~3× the slowest legitimate test (GUI run e2e at ~180 s). Anything
+# that hits this is genuinely wedged — a hung subprocess, a deadlocked
+# QThread, a SIGSTOP'd ffmpeg whose SIGCONT was lost in a CI sandbox —
+# and we want the matrix to fail fast and surface a useful traceback,
+# not block PR feedback for an hour. The ``thread`` method works with
+# subprocess.communicate (signal method would only fire between Python
+# opcodes, which the GIL-released communicate() never returns to).
+timeout = 180
+timeout_method = "thread"
 
 [tool.mypy]
 python_version = "3.11"

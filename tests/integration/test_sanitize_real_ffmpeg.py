@@ -24,7 +24,7 @@ def test_sanitize_produces_h264_aac_output(tiny_clip: Path, tmp_path: Path) -> N
         "-c:v", "libx264", "-preset", "ultrafast",
         "-c:a", "aac",
         str(pre),
-    ], check=True, capture_output=True)
+    ], check=True, capture_output=True, timeout=60)
 
     out = tmp_path / "sanitized.mp4"
     sanitize_bitstream(pre, out)

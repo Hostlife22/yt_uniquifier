@@ -48,7 +48,7 @@ def _probe_resolution(path: Path) -> tuple[int, int]:
             "-show_entries", "stream=width,height",
             "-of", "csv=p=0:s=x", str(path),
         ],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=15,
     ).stdout.strip()
     w_str, h_str = out.split("x")
     return int(w_str), int(h_str)
