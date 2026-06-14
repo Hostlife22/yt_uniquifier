@@ -14,6 +14,14 @@ the file lands on disk.
 * **SHA-256 pinning.** Each catalog entry includes a hex SHA-256
   of the profile YAML it points at. `install` downloads, hashes,
   and refuses to write the file if the digest does not match.
+* **Ed25519 signatures (v1.2.0 Task 25).** Catalog entries may carry
+  a `signature` field — 64 raw bytes of Ed25519, hex-encoded — produced
+  by the marketplace operator's offline private key over the entry's
+  `sha256` field. When signature enforcement is on
+  (`require_signature=True` on the `install()` API or
+  `YT_UNIQ_REQUIRE_SIGNED_PROFILES=1` in the environment), unsigned
+  entries and entries whose signature doesn't verify against any
+  bundled marketplace public key are rejected. See § Signing policy.
 * **Schema-validated.** Even after a SHA match, the YAML is run
   through `Profile.model_validate` (with `extra=forbid`) *before*
   the atomic rename into the per-user profile dir. A malformed
@@ -104,3 +112,73 @@ exists, the network fetch wins on the next refresh.
 
 Reviewers will install the profile from your branch, run it
 against a reference source, and verify the SHA matches.
+
+## Signing policy (v1.2.0 Task 25)
+
+Catalog entries may be signed by the marketplace operator. The bundled
+public key set lives at `src/yt_uniquifier/keys/marketplace.pub`
+(shipped with the wheel) — one hex-encoded Ed25519 public key per
+non-comment line, allowing multiple keys during rotation.
+
+### What gets signed
+
+The signature covers the ASCII bytes of the entry's `sha256` field —
+the same hex string that pins the YAML body.  Binding the signature to
+the SHA means a single signature simultaneously authenticates the URL
+target and the body content: an attacker who flips the `url` to a
+different YAML must also flip the `sha256` to match, which breaks the
+signature unless they also have the operator's private key.
+
+### Signing workflow
+
+```bash
+# One-off setup: generate the operator's keypair.
+python -c "
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
+priv = ed25519.Ed25519PrivateKey.generate()
+print('PRIVATE (keep offline!):',
+      priv.private_bytes(serialization.Encoding.Raw,
+                         serialization.PrivateFormat.Raw,
+                         serialization.NoEncryption()).hex())
+print('PUBLIC (ship in marketplace.pub):',
+      priv.public_key().public_bytes(serialization.Encoding.Raw,
+                                     serialization.PublicFormat.Raw).hex())
+"
+
+# Per-entry: sign the body SHA.
+python -c "
+from cryptography.hazmat.primitives.asymmetric import ed25519
+priv = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(PRIV_HEX))
+sha256_hex = '<the entry\\'s sha256 field>'
+print(priv.sign(sha256_hex.encode('ascii')).hex())
+"
+```
+
+Paste the resulting 128-char hex string into the catalog entry's
+`signature` field.
+
+### Key rotation
+
+1. Generate a new keypair.
+2. Append the new public key to `marketplace.pub` **above** the old
+   one.  Both keys remain valid; verification accepts a signature
+   against any listed key.
+3. Re-sign every active catalog entry with the new private key.
+4. Once every entry is re-signed, drop the old public key from
+   `marketplace.pub` in the next yt-uniquifier release.
+5. Permanently destroy the old private key.
+
+### Enforcement
+
+Signature verification is opt-in to preserve backwards compatibility
+with the v0.9 catalog format.  Operators who want signature-only mode:
+
+* Pass `require_signature=True` to `install(...)` in code.
+* Or export `YT_UNIQ_REQUIRE_SIGNED_PROFILES=1` in the shell that
+  spawns `yt-uniq` / `yt-uniq-gui`.
+
+The `cryptography` package (PyCA reference) is bundled as the
+`[crypto]` extra.  Installs without the extra can still use unsigned
+catalogs; turning on enforcement on a non-`[crypto]` install raises a
+clear error pointing at the missing dependency.

@@ -1,0 +1,10 @@
+# yt-uniquifier marketplace operator public key (Ed25519, raw, hex).
+# v1.2.0 Task 25 — the corresponding private key is held offline by the
+# marketplace operator and used to sign each catalog entry's profile-body
+# SHA-256.  See docs/marketplace.md § Signing policy for rotation.
+#
+# Rotation: when this key is rotated, ship the new key here AND keep the
+# previous key in this file (one per non-comment line) until every
+# catalog entry signed with the old key has been re-signed.  Verification
+# accepts a signature against ANY listed key.
+ad3bba601e723df5437785bbb1540c957569000f02016e5a401a649be49af60e

@@ -51,6 +51,12 @@ scene = ["scenedetect~=0.6.6", "opencv-python-headless~=4.10"]
 # first run, NOT bundled in the wheel. Users invoke via `--sscd` on
 # `yt-uniq qa` or `compute_sscd=True` on the build_report API.
 ml  = ["torch>=2.1,<3", "torchvision>=0.16,<1"]
+# v1.2.0 Task 25 — Ed25519 signature verification for marketplace catalog
+# entries.  Optional so unsigned-trust installs (the v0.9 behaviour)
+# don't pull a 5 MB crypto wheel they don't use.  ``cryptography`` is
+# PyCA's reference library and the only realistic choice for raw Ed25519
+# in pure Python today.
+crypto = ["cryptography>=42,<46"]
 # v0.9.0 R4 / F13 — headless web UI for NAS / Docker deployments.
 # httpx is pulled by fastapi's TestClient too, so unit tests can run
 # in-process against the route handlers without binding a socket.
@@ -113,6 +119,11 @@ packages = ["src/yt_uniquifier"]
 # so a fresh install can list community profiles offline. Network
 # fetch overrides this on first run; see core/profile_marketplace.py.
 "src/yt_uniquifier/marketplace" = "yt_uniquifier/marketplace"
+# v1.2.0 Task 25 — marketplace operator's Ed25519 public key bundle.
+# Used by ``profile_marketplace.install(require_signature=True)`` to
+# verify each catalog entry's signature.  Rotate by appending the new
+# key and removing the old one when every entry is re-signed.
+"src/yt_uniquifier/keys" = "yt_uniquifier/keys"
 # v0.9.0 R4 / F13 — web UI templates + static assets shipped in the
 # wheel so `yt-uniq-web` works straight from a pip install (no
 # external asset directory hunt).
@@ -125,6 +136,7 @@ include = [
     "src/yt_uniquifier/profiles/*.yaml",
     "src/yt_uniquifier/core/qa/templates/*.j2",
     "src/yt_uniquifier/marketplace/*.json",
+    "src/yt_uniquifier/keys/*.pub",
     "src/yt_uniquifier/web/templates/*.html",
     "src/yt_uniquifier/web/static/*.js",
     "src/yt_uniquifier/web/static/*.css",

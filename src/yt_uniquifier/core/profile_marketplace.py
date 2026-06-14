@@ -132,6 +132,15 @@ class CatalogEntry(BaseModel):
     # Empty / missing means "any". A semver-aware compatibility gate is
     # a v1.0 feature; for now the CLI surfaces this verbatim.
     min_yt_uniquifier_version: str = Field(default="", max_length=32)
+    # v1.2.0 Task 25 — Ed25519 signature over ``sha256`` (the profile-body
+    # hash) produced by the marketplace operator's offline private key.
+    # 64 raw bytes hex-encoded → 128 hex characters.  ``None`` for legacy
+    # unsigned entries; ``install(..., require_signature=True)`` rejects
+    # those.  Verification uses the bundled public key set at
+    # ``src/yt_uniquifier/keys/marketplace.pub``.
+    signature: str | None = Field(
+        default=None, pattern=r"^[0-9a-fA-F]{128}$",
+    )
 
 
 class Catalog(BaseModel):
@@ -310,11 +319,58 @@ def _sha256_bytes(data: bytes) -> str:
     return h.hexdigest()
 
 
+def _verify_signature(
+    *,
+    sha256_hex: str,
+    signature_hex: str,
+    public_keys: tuple[bytes, ...],
+) -> bool:
+    """Return True iff ``signature_hex`` is a valid Ed25519 signature
+    over the ASCII bytes of ``sha256_hex`` under any key in ``public_keys``.
+
+    Multiple keys are accepted to support rotation: the new key is
+    pushed to the front of the bundle and the old key kept until every
+    in-flight catalog entry has been re-signed.
+
+    Imports ``cryptography`` lazily so the marketplace module stays
+    importable on installs that haven't pulled the optional crypto
+    dependency yet (signature support is opt-in via
+    ``require_signature=True`` or env var
+    ``YT_UNIQ_REQUIRE_SIGNED_PROFILES=1``).
+    """
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+    except ImportError as exc:
+        raise MarketplaceError(
+            "signature verification requires the 'cryptography' package "
+            f"({exc}).  Install yt-uniquifier with the [crypto] extra or "
+            "drop YT_UNIQ_REQUIRE_SIGNED_PROFILES."
+        ) from exc
+    try:
+        signature = bytes.fromhex(signature_hex)
+    except ValueError:
+        return False
+    if len(signature) != 64:
+        return False
+    payload = sha256_hex.encode("ascii")
+    for key_bytes in public_keys:
+        try:
+            verifier = ed25519.Ed25519PublicKey.from_public_bytes(key_bytes)
+            verifier.verify(signature, payload)
+            return True
+        except (InvalidSignature, ValueError):
+            continue
+    return False
+
+
 def install(
     entry: CatalogEntry,
     *,
     dest_dir: Path | None = None,
     overwrite: bool = False,
+    require_signature: bool | None = None,
+    public_keys: tuple[bytes, ...] | None = None,
 ) -> InstallResult:
     """Download, verify, validate, and write a community profile.
 
@@ -323,11 +379,20 @@ def install(
       * network failure or oversized response
       * SHA-256 mismatch (the file is **not** written; we never persist
         unverified bytes)
+      * v1.2.0 Task 25 — when signature enforcement is on (param
+        ``require_signature=True`` or env ``YT_UNIQ_REQUIRE_SIGNED_PROFILES=1``):
+        an entry with no ``signature``, or whose signature does not
+        verify against any bundled marketplace public key
       * profile schema validation failure
       * existing target path when ``overwrite=False``
 
     Side effects: creates ``dest_dir`` if missing; writes the YAML
     atomically via tempfile + ``os.replace``.
+
+    ``require_signature``:
+      * ``None`` (default) — read from env ``YT_UNIQ_REQUIRE_SIGNED_PROFILES``.
+      * ``True`` — reject unsigned and invalid-signature entries.
+      * ``False`` — keep the pre-v1.2 behaviour (SHA only).
     """
     target_dir = dest_dir or default_install_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -336,6 +401,37 @@ def install(
         raise MarketplaceError(
             f"refusing to overwrite existing {target_path} (pass overwrite=True)"
         )
+
+    # Resolve enforcement policy.
+    if require_signature is None:
+        import os as _os
+        require_signature = _os.environ.get(
+            "YT_UNIQ_REQUIRE_SIGNED_PROFILES", "",
+        ) == "1"
+    if require_signature and entry.signature is None:
+        raise MarketplaceError(
+            f"entry {entry.id!r} is unsigned but signature enforcement is "
+            "on (require_signature=True or YT_UNIQ_REQUIRE_SIGNED_PROFILES=1). "
+            "Ask the catalog operator to sign this entry, or drop the "
+            "enforcement flag for unsigned-trust mode."
+        )
+    if require_signature and entry.signature is not None:
+        # Lazy-load the bundled keys only when we're actually enforcing,
+        # so installs without the [crypto] extra still work for unsigned
+        # catalogs.
+        if public_keys is None:
+            from yt_uniquifier.keys import load_marketplace_public_keys
+            public_keys = load_marketplace_public_keys()
+        if not _verify_signature(
+            sha256_hex=entry.sha256,
+            signature_hex=entry.signature,
+            public_keys=public_keys,
+        ):
+            raise MarketplaceError(
+                f"signature on entry {entry.id!r} did not verify against any "
+                f"bundled marketplace public key ({len(public_keys)} keys "
+                "tried).  Refusing to install."
+            )
 
     data = _fetch_bytes(entry.url, max_bytes=_MAX_PROFILE_BYTES)
     actual_sha = _sha256_bytes(data)

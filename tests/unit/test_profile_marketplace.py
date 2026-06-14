@@ -366,3 +366,145 @@ def test_bootstrap_catalog_is_valid_and_https() -> None:
         # sha256 format already enforced by the model — assert anyway
         # for explicit failure messages.
         assert len(entry.sha256) == 64
+
+
+# ---------------------------------------------------------------------------
+# v1.2.0 Task 25 — signed marketplace entries
+# ---------------------------------------------------------------------------
+
+# Test private key paired with src/yt_uniquifier/keys/marketplace.pub.
+# Generated alongside the public key during Task 25 implementation; kept
+# in test code only so the operator's real private key can never collide.
+_TEST_PRIV_HEX = (
+    "5ee75bc200b0d6dd5cf76b69ac758a7e74a33fb15c0e18f92c1c9f24df37f161"
+)
+
+
+def _sign_ed25519(payload: bytes, priv_hex: str = _TEST_PRIV_HEX) -> str:
+    """Sign ``payload`` with the bundled test private key, return hex sig."""
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    priv = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(priv_hex))
+    return priv.sign(payload).hex()
+
+
+def test_catalog_entry_accepts_valid_signature() -> None:
+    sig = _sign_ed25519(VALID_PROFILE_SHA.encode("ascii"))
+    entry = CatalogEntry.model_validate(_make_entry(signature=sig))
+    assert entry.signature == sig
+
+
+def test_catalog_entry_rejects_malformed_signature() -> None:
+    with pytest.raises(ValidationError):
+        CatalogEntry.model_validate(_make_entry(signature="too short"))
+
+
+def test_install_rejects_unsigned_when_required(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """require_signature=True must hard-reject entries without a signature."""
+    _install_urlopen(
+        monkeypatch,
+        {"https://example.invalid/profiles/test.yaml": VALID_PROFILE_YAML},
+    )
+    entry = CatalogEntry.model_validate(_make_entry())  # no signature
+    with pytest.raises(MarketplaceError, match="unsigned"):
+        install(entry, dest_dir=tmp_path, require_signature=True)
+    assert not list(tmp_path.iterdir()), "no file may be written on rejection"
+
+
+def test_install_rejects_invalid_signature(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A 128-hex-char signature that doesn't verify against any bundled
+    public key must be rejected; the YAML never lands on disk."""
+    _install_urlopen(
+        monkeypatch,
+        {"https://example.invalid/profiles/test.yaml": VALID_PROFILE_YAML},
+    )
+    # Forge a signature: sign a DIFFERENT payload with the test key.
+    bad_sig = _sign_ed25519(b"this is the wrong payload")
+    entry = CatalogEntry.model_validate(_make_entry(signature=bad_sig))
+    with pytest.raises(MarketplaceError, match="did not verify"):
+        install(entry, dest_dir=tmp_path, require_signature=True)
+    assert not list(tmp_path.iterdir())
+
+
+def test_install_accepts_valid_signature_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A correctly-signed entry installs cleanly when enforcement is on."""
+    _install_urlopen(
+        monkeypatch,
+        {"https://example.invalid/profiles/test.yaml": VALID_PROFILE_YAML},
+    )
+    sig = _sign_ed25519(VALID_PROFILE_SHA.encode("ascii"))
+    entry = CatalogEntry.model_validate(_make_entry(signature=sig))
+    result = install(entry, dest_dir=tmp_path, require_signature=True)
+    assert result.path.exists()
+    assert result.path.name == "test_entry.yaml"
+
+
+def test_install_env_var_toggles_enforcement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """YT_UNIQ_REQUIRE_SIGNED_PROFILES=1 should drive the same behaviour
+    as the kwarg.  The kwarg overrides the env var when explicit."""
+    _install_urlopen(
+        monkeypatch,
+        {"https://example.invalid/profiles/test.yaml": VALID_PROFILE_YAML},
+    )
+    monkeypatch.setenv("YT_UNIQ_REQUIRE_SIGNED_PROFILES", "1")
+    entry = CatalogEntry.model_validate(_make_entry())  # no signature
+    with pytest.raises(MarketplaceError, match="unsigned"):
+        install(entry, dest_dir=tmp_path)
+    # Explicit require_signature=False overrides the env var.
+    result = install(entry, dest_dir=tmp_path, require_signature=False)
+    assert result.path.exists()
+
+
+def test_install_unsigned_passes_when_enforcement_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """v0.9-style unsigned catalog still installs when enforcement is off
+    — backwards compatibility for the pre-v1.2 trust mode."""
+    _install_urlopen(
+        monkeypatch,
+        {"https://example.invalid/profiles/test.yaml": VALID_PROFILE_YAML},
+    )
+    monkeypatch.delenv("YT_UNIQ_REQUIRE_SIGNED_PROFILES", raising=False)
+    entry = CatalogEntry.model_validate(_make_entry())
+    result = install(entry, dest_dir=tmp_path)
+    assert result.path.exists()
+
+
+# ---------------------------------------------------------------------------
+# v1.2.0 Task 25 — bundled key file integrity
+# ---------------------------------------------------------------------------
+
+
+def test_bundled_marketplace_key_loads_to_32_bytes() -> None:
+    from yt_uniquifier.keys import load_marketplace_public_keys
+    keys = load_marketplace_public_keys()
+    assert len(keys) >= 1
+    for k in keys:
+        assert len(k) == 32, f"Ed25519 keys must be 32 bytes, got {len(k)}"
+
+
+def test_bundled_key_matches_test_private_key() -> None:
+    """The shipped marketplace.pub must correspond to the same Ed25519
+    keypair as our test private key.  If a rotation happens this test
+    will fail loudly; the maintainer must either re-generate the test
+    private key OR explicitly add the old key for backwards-compat."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    from yt_uniquifier.keys import load_marketplace_public_keys
+    priv = ed25519.Ed25519PrivateKey.from_private_bytes(
+        bytes.fromhex(_TEST_PRIV_HEX),
+    )
+    derived_pub = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    bundled_keys = load_marketplace_public_keys()
+    assert derived_pub in bundled_keys
