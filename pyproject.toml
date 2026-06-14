@@ -51,6 +51,15 @@ scene = ["scenedetect~=0.6.6", "opencv-python-headless~=4.10"]
 # first run, NOT bundled in the wheel. Users invoke via `--sscd` on
 # `yt-uniq qa` or `compute_sscd=True` on the build_report API.
 ml  = ["torch>=2.1,<3", "torchvision>=0.16,<1"]
+# v0.9.0 R4 / F13 — headless web UI for NAS / Docker deployments.
+# httpx is pulled by fastapi's TestClient too, so unit tests can run
+# in-process against the route handlers without binding a socket.
+web = [
+    "fastapi~=0.115",
+    "uvicorn[standard]~=0.30",
+    "python-multipart~=0.0.9",
+    "httpx~=0.27",
+]
 dev = [
     "pytest~=8.2",
     "pytest-cov~=5.0",
@@ -67,6 +76,8 @@ dev = [
 [project.scripts]
 yt-uniq = "yt_uniquifier.cli.app:app"
 yt-uniq-gui = "yt_uniquifier.gui.app_pyqt:main"
+# v0.9.0 R4 / F13 — headless FastAPI server. Requires `[web]` extra.
+yt-uniq-web = "yt_uniquifier.web.cli:main"
 
 # v0.8.0 R1 — third-party transform plugins register here. A plugin package
 # advertises an entry point whose value is an import path to a module that
@@ -91,6 +102,11 @@ packages = ["src/yt_uniquifier"]
 # so a fresh install can list community profiles offline. Network
 # fetch overrides this on first run; see core/profile_marketplace.py.
 "src/yt_uniquifier/marketplace" = "yt_uniquifier/marketplace"
+# v0.9.0 R4 / F13 — web UI templates + static assets shipped in the
+# wheel so `yt-uniq-web` works straight from a pip install (no
+# external asset directory hunt).
+"src/yt_uniquifier/web/templates" = "yt_uniquifier/web/templates"
+"src/yt_uniquifier/web/static" = "yt_uniquifier/web/static"
 
 [tool.hatch.build]
 include = [
@@ -98,6 +114,9 @@ include = [
     "src/yt_uniquifier/profiles/*.yaml",
     "src/yt_uniquifier/core/qa/templates/*.j2",
     "src/yt_uniquifier/marketplace/*.json",
+    "src/yt_uniquifier/web/templates/*.html",
+    "src/yt_uniquifier/web/static/*.js",
+    "src/yt_uniquifier/web/static/*.css",
 ]
 
 [tool.ruff]
@@ -112,6 +131,9 @@ ignore = []
 # typer.Argument/Option as defaults is the idiomatic pattern.
 "src/yt_uniquifier/cli/*.py" = ["B008"]
 "tools/*.py" = ["B008"]
+# v0.9.0 R4 — FastAPI ``Depends(security)`` as a default is the
+# documented idiom; suppressing B008 here matches our cli/ rule.
+"src/yt_uniquifier/web/**/*.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -137,3 +159,12 @@ timeout_method = "thread"
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+
+# v0.9.0 R4 — the FastAPI web shell uses `app: Any` so the route
+# modules can decorate without pulling fastapi into a strict-mode
+# import graph. That produces ``untyped-decorator`` noise under
+# --strict. The web layer is intentionally a thin shell over typed
+# core/ — we relax the decorator check only inside web/.
+[[tool.mypy.overrides]]
+module = "yt_uniquifier.web.routes.*"
+disable_error_code = ["untyped-decorator", "no-any-return"]

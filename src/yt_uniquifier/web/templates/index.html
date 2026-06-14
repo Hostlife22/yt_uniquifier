@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>yt-uniquifier</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>yt-uniquifier</h1>
+    <span class="badge" id="auth-badge">
+      {% if auth_required %}auth: basic{% else %}auth: off (LAN trust){% endif %}
+    </span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Run an encode</h2>
+      <form id="run-form">
+        <label>
+          Input path
+          <input name="input_path" type="text" required
+                 placeholder="/data/input/source.mp4">
+        </label>
+        <label>
+          Profile
+          <select name="profile_path" id="profile-select" required></select>
+        </label>
+        <label>
+          Output name (optional)
+          <input name="output_name" type="text"
+                 placeholder="auto: &lt;source&gt;__&lt;profile&gt;.mp4">
+        </label>
+        <label>
+          Workers
+          <input name="workers" type="number" min="1" max="64" value="1">
+        </label>
+        <button type="submit" id="run-btn">Start</button>
+        <button type="button" id="cancel-btn" disabled>Cancel</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Progress</h2>
+      <div id="status">idle</div>
+      <pre id="log" aria-live="polite"></pre>
+    </section>
+
+    <section>
+      <h2>Community profiles</h2>
+      <button type="button" id="catalog-refresh">Refresh catalog</button>
+      <ul id="catalog"></ul>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

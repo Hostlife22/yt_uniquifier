@@ -1,0 +1,43 @@
+# Build-context exclusions for the Docker image (v0.9.0 R4).
+# Everything not needed by `python -m build --wheel` stays out, keeping
+# the layer cache cold-start fast and the image free of test fixtures.
+
+.git
+.github
+.venv
+.venv-*
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+htmlcov
+.coverage
+.coverage.*
+
+# Test artifacts
+tests
+specs
+docs/screenshots
+
+# Local dev outputs
+dist
+build
+*.egg-info
+output
+work
+.cache
+
+# Editor / OS noise
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# Plan / session metadata not used at runtime
+.claude
+.github/instructions

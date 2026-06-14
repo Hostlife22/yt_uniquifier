@@ -1,0 +1,40 @@
+# yt-uniquifier — NAS / homelab deployment template (v0.9.0 R4).
+#
+# Copy this file to your NAS, edit the volume paths, then:
+#   docker compose up -d
+#
+# Auth is OFF by default for LAN-trust scenarios. Set
+# YT_UNIQ_WEB_USER + YT_UNIQ_WEB_PASS env vars (or an .env file
+# alongside this compose) to flip basic auth on.
+
+services:
+  yt-uniquifier:
+    image: yt-uniquifier:0.9.0
+    # Use ``build: .`` instead when iterating locally on the
+    # Dockerfile. The published image lives at the tag you push to.
+    # build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"   # bind to loopback by default; reverse-
+                                # proxy via nginx/traefik for TLS + LAN
+    environment:
+      YT_UNIQ_WEB_HOST: "0.0.0.0"
+      YT_UNIQ_WEB_PORT: "8080"
+      YT_UNIQ_WEB_INPUT_ROOT: "/data/input"
+      YT_UNIQ_WEB_OUTPUT_DIR: "/data/output"
+      YT_UNIQ_WEB_WORK_DIR: "/data/work"
+      YT_UNIQ_WEB_PROFILE_DIR: "/data/profiles"
+      # Uncomment to enable basic auth.
+      # YT_UNIQ_WEB_USER: "${WEB_USER:-changeme}"
+      # YT_UNIQ_WEB_PASS: "${WEB_PASS:-changeme}"
+    volumes:
+      - ./input:/data/input:ro
+      - ./output:/data/output
+      - ./work:/data/work
+      - ./profiles:/data/profiles
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent",
+             "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
