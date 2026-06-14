@@ -230,14 +230,29 @@ def _print_dry_run_report(
     est_bytes = int(plan.source.duration_sec * (bitrate / 8.0) * 1.3)
     console.print(f"  disk estimate : ~{est_bytes / (1024**3):.2f} GiB")
 
-    # ETA. Best-effort: assume real-time encoding for hardware encoders,
-    # 0.5× real-time for libx264 -preset medium. The real PGO cache lands
-    # in v1.2.0 Task 28; this is a stopgap.
-    if plan.encoder.vendor in {"nvenc", "qsv", "amf", "videotoolbox", "vulkan"}:
+    # ETA. v1.2.0 Task 28 — prefer the PGO cache prediction (calibrated
+    # against this machine's actual encoder throughput); fall back to the
+    # rough heuristic only when there's no historical data for the
+    # (resolution, codec, encoder) key yet.
+    from yt_uniquifier.core import pgo as _pgo
+    eta_source = "heuristic"
+    if plan.source.video:
+        v = plan.source.video[0]
+        prediction = _pgo.predict(
+            source_width=v.width, source_height=v.height,
+            codec=plan.profile.target_codec,
+            encoder_kind=plan.encoder.vendor,
+        )
+    else:
+        prediction = None
+    if prediction is not None:
+        eta_sec = prediction.eta_seconds(plan.source.duration_sec)
+        eta_source = "PGO cache"
+    elif plan.encoder.vendor in {"nvenc", "qsv", "amf", "videotoolbox", "vulkan"}:
         eta_sec = plan.source.duration_sec * 0.7
     else:
         eta_sec = plan.source.duration_sec * 2.0
-    console.print(f"  eta (rough)   : ~{eta_sec / 60:.1f} min")
+    console.print(f"  eta ({eta_source}): ~{eta_sec / 60:.1f} min")
 
     # filter_complex of the first segment — identical shape across all
     # segments, so one sample is enough for the user to eyeball.

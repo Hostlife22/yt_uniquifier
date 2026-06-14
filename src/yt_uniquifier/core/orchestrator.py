@@ -203,10 +203,11 @@ def run_full(
             extra_message=f"{type(exc).__name__}: {exc}",
         )
         raise
+    wall_clock_sec = time.time() - start_ts
     log.info(
         "run.completed",
         segments_done=summary.segments_done,
-        wall_clock_sec=round(time.time() - start_ts, 3),
+        wall_clock_sec=round(wall_clock_sec, 3),
         output=str(summary.output),
     )
     _maybe_dispatch_notification(
@@ -215,9 +216,25 @@ def run_full(
     )
     _maybe_record_telemetry(
         options, plan, "completed",
-        wall_clock_sec=time.time() - start_ts,
+        wall_clock_sec=wall_clock_sec,
         summary=summary,
     )
+    # v1.2.0 Task 28 — record this operating point so the next run on
+    # the same (resolution, codec, encoder) key can predict ETA and
+    # default workers/segment_sec to what actually scaled.  Never
+    # raises; cache failures are logged at WARN inside record_run.
+    from yt_uniquifier.core import pgo as _pgo
+    if plan.source.video:
+        v = plan.source.video[0]
+        _pgo.record_run(
+            source_width=v.width, source_height=v.height,
+            source_duration_sec=plan.source.duration_sec,
+            codec=plan.profile.target_codec,
+            encoder_kind=plan.encoder.vendor,
+            workers=options.workers,
+            segment_sec=options.target_segment_sec,
+            wall_clock_sec=wall_clock_sec,
+        )
     return summary
 
 
