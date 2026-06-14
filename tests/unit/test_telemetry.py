@@ -13,6 +13,7 @@ Covers the contract that matters:
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -97,9 +98,33 @@ def test_concurrent_writes_stay_line_coherent(tele_dir: Path) -> None:
 
 def test_redact_replaces_home_prefix() -> None:
     home = str(Path.home())
+    # The forward-slash boundary is the cross-platform case (works on
+    # both POSIX and Windows because redact_path tolerates either sep
+    # after $HOME).
     assert telemetry.redact_path(f"{home}/Movies/in.mp4") == "<HOME>/Movies/in.mp4"
     assert telemetry.redact_path("/Movies/in.mp4") == "/Movies/in.mp4"
     assert telemetry.redact_path("") == ""
+
+
+def test_redact_accepts_native_os_sep_after_home() -> None:
+    """A path stamped with ``os.sep`` after $HOME must also redact.
+
+    Regression for the Windows CI failure where the test used
+    forward slash but the function only matched ``os.sep`` — and
+    its mirror, where a real Windows path with backslash needs
+    the same treatment.
+    """
+    home = str(Path.home())
+    native = home + os.sep + "Movies" + os.sep + "x.mp4"
+    redacted = telemetry.redact_path(native)
+    assert redacted.startswith("<HOME>"), (
+        f"native-sep path was not redacted: {redacted!r}"
+    )
+
+
+def test_redact_bare_home_returns_marker() -> None:
+    home = str(Path.home())
+    assert telemetry.redact_path(home) == "<HOME>"
 
 
 def test_redact_event_walks_one_level(tele_dir: Path) -> None:

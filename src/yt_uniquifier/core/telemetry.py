@@ -138,13 +138,25 @@ def redact_path(value: str) -> str:
     Operates on strings rather than Paths so the caller can pass JSON
     values without coercing. A best-effort match; relative paths and
     paths that don't start with ``$HOME`` are returned unchanged.
+
+    Separator tolerance: on Windows the OS sep is ``\\`` but cross-
+    platform code that stamps paths via ``Path.as_posix()`` or
+    ``str(path).replace("\\", "/")`` produces forward slashes. We
+    accept BOTH so a path of the shape ``C:\\Users\\foo/Movies/x``
+    (Windows home + POSIX-style child) still matches.
     """
     if not value:
         return value
     # Use the longest-prefix match so ``/Users/foo`` doesn't shadow
     # ``/Users/foobar`` when one user is a substring of another.
-    if value.startswith(_HOME_STR + os.sep) or value == _HOME_STR:
-        return value.replace(_HOME_STR, "<HOME>", 1)
+    if value == _HOME_STR:
+        return "<HOME>"
+    # Try each plausible separator. ``set`` dedups when os.sep is "/"
+    # (POSIX) so we don't double-check the same prefix.
+    for sep in {os.sep, "/"}:
+        prefix = _HOME_STR + sep
+        if value.startswith(prefix):
+            return "<HOME>" + value[len(_HOME_STR):]
     return value
 
 

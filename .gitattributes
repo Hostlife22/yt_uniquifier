@@ -1,0 +1,43 @@
+# Canonical text encoding: every text file in the repo is stored
+# with LF endings, regardless of the contributor's platform. The
+# Windows CI runner (and Windows contributors) get LF on checkout,
+# which keeps content-hash invariants (e.g. the bootstrap catalog
+# SHA-256 → in-tree profile YAML hash check) reproducible across
+# platforms.
+#
+# Reference: v0.9.0 R6 — Windows CI hit SHA mismatches because the
+# default core.autocrlf=true rewrote LF → CRLF on checkout, so
+# tests/integration/test_v090_smoke.py::test_bootstrap_catalog_shas_match
+# hashed CRLF bytes against an LF-computed catalog. Forcing LF here
+# overrides autocrlf for the affected paths without depending on
+# every contributor's git config.
+
+# Default for any unspecified text file. ``text=auto`` lets git
+# detect text vs binary, ``eol=lf`` forces LF on checkout AND
+# checkin for files git considers text.
+* text=auto eol=lf
+
+# Belt-and-braces: any file whose bytes are hashed by tests OR
+# embedded in version-stamped manifests MUST be LF — make it
+# explicit so a future contributor doesn't override the wildcard
+# above by accident.
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.json          text eol=lf
+*.toml          text eol=lf
+*.md            text eol=lf
+*.py            text eol=lf
+
+# Shell scripts and Dockerfiles must stay LF — CRLF breaks them
+# inside containers / under sh.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+
+# Binary fixtures (none today, but keep the rule pinned for
+# defence-in-depth). The list is short enough to enumerate.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.qm            binary
