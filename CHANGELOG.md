@@ -10,7 +10,69 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
-## [Unreleased] — v1.1.0 (in progress)
+## [Unreleased] — v1.2.0 (in progress)
+
+AV1 + plugin sandbox + cross-OS quality. Backwards-compatible. MINOR.
+See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
+
+### Added
+
+- **Task 22: AV1 output** — `core/encoder.py` enumerates the AV1
+  software encoders `libsvtav1` (default) and `libaom-av1`, plus the
+  hardware variants `av1_nvenc`, `av1_qsv`, `av1_amf`, and
+  `av1_videotoolbox` alongside the existing `av1_vulkan`. AV1 uses a
+  0..63 CRF scale (default 30 ≈ libx264 CRF 18); hardware AV1 reuses
+  the existing 0..51 GPU quality mapping so a single `crf_override`
+  drives the whole AV1 matrix. New profiles `youtube_av1.yaml`
+  (1080p) and `youtube_4k_av1.yaml` (4K). `EncoderVendor` gains
+  `svtav1` and `libaom` tags.
+- **Task 23: plugin manifest + capability gate + audit-hook sandbox**
+  — third-party transform plugins discovered via the
+  `yt_uniquifier.transforms` entry-points group must now ship a
+  `yt_uniquifier_plugin.toml` manifest declaring `name`, `version`,
+  and `capabilities` (`video_transform` and/or `audio_transform`).
+  `register()` is gated on the active manifest. Plugin code runs
+  inside a `sys.addaudithook` gate that raises `PluginViolation` on
+  denylisted operations (filesystem writes, network egress,
+  subprocess spawns, dynamic exec). Built-in transforms bypass the
+  gate so legitimate IO keeps working. New Typer flags
+  `--no-plugins`, `--plugins-allowlist a,b`, `--unsafe-plugins`;
+  env-var equivalents take effect before plugin discovery.
+- **Task 25: signed marketplace entries** — `CatalogEntry` gains an
+  optional 128-hex-char `signature` field (Ed25519 over the body
+  SHA). `install(..., require_signature=True)` (or env
+  `YT_UNIQ_REQUIRE_SIGNED_PROFILES=1`) hard-rejects unsigned and
+  invalid-signature entries. New `[crypto]` extra pulls
+  `cryptography>=42,<46` lazily. Bundled key set at
+  `src/yt_uniquifier/keys/marketplace.pub` supports multi-key
+  rotation. `docs/marketplace.md` gains a signing workflow + key
+  rotation policy.
+- **Task 27: property + mutation + chaos test infrastructure**
+  — `tests/property/` adds Hypothesis-driven property tests for
+  `plan_hash` (determinism, codec/encoder sensitivity) and
+  `FilterGraph` (every shipped transform combination builds, output
+  labels unique, even-dims guard at tail).
+  `tests/chaos/test_random_sigkill.py` SIGKILLs the orchestrator N
+  times then resumes, asserting VMAF ≥ 99 against a clean baseline.
+  New weekly `.github/workflows/mutation.yml` runs mutmut on
+  `core/` with a v1.2.0 floor of 40 % kill rate (v1.3.0 target: 70 %).
+- **Task 28: PGO cache for ETA prediction** — new `core/pgo.py`
+  records each successful run's `(resolution_bucket, codec,
+  encoder_kind) → (workers, segment_sec, seconds_per_min)` into
+  `~/.cache/yt_uniquifier/pgo.sqlite`. `--dry-run` ETA uses the
+  calibrated prediction when available; cache miss falls back to
+  the v1.1.0 heuristic. Writers use `BEGIN IMMEDIATE` so concurrent
+  `yt-uniq batch` workers serialise cleanly.
+
+### CI
+
+- **Task 26: cross-OS integration tests** — real-ffmpeg integration
+  tests now run on all six matrix cells
+  (`{ubuntu, macos, windows} × {3.11, 3.12}`) instead of
+  `ubuntu+3.12` only. Adds a 15 min job-level timeout per cell as
+  the worst-case wall-clock guard.
+
+## [v1.1.0] — 2026-06-14
 
 Distribution trust + observability + UX. Backwards-compatible. MINOR.
 See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
