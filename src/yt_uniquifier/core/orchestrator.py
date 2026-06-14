@@ -201,6 +201,18 @@ def run_full(
     start_ts = time.time()
     import datetime as _dt
     started_at_dt = _dt.datetime.now(tz=_dt.UTC)
+    # v1.3.0 Task 34 — wrap the entire run in an OTel span when the
+    # operator opts in via OTEL_EXPORTER_OTLP_ENDPOINT + [obs] extra.
+    # No-op otherwise.  Using contextlib.ExitStack so the existing
+    # try/except below stays unchanged; the span's __exit__ runs on
+    # both the raise and the return path.
+    import contextlib as _contextlib
+
+    from yt_uniquifier.core import tracing as _tracing
+    _span_stack = _contextlib.ExitStack()
+    _span_stack.enter_context(_tracing.run_span(
+        plan_hash=plan.plan_hash, encoder_kind=plan.encoder.vendor,
+    ))
     try:
         summary = _run_full_impl(
             plan, options, emit, cancel_token, pause_token,
@@ -235,6 +247,9 @@ def run_full(
             )
         except Exception as audit_exc:  # noqa: BLE001 — defensive
             log.warning("audit record on failure failed: %s", audit_exc)
+        # v1.3.0 Task 34 — close OTel span on the failure path so the
+        # exporter flushes duration_us before the raise propagates.
+        _span_stack.close()
         raise
     wall_clock_sec = time.time() - start_ts
     log.info(
@@ -269,6 +284,9 @@ def run_full(
             wall_clock_sec=wall_clock_sec,
         )
     # v1.3.0 Task 32 — run-level audit on success.
+    # v1.3.0 Task 34 — close OTel span on the success path before
+    # downstream telemetry so duration_us reflects the run only.
+    _span_stack.close()
     try:
         _maybe_record_audit(
             options, plan, "completed",
