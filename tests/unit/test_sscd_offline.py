@@ -235,17 +235,20 @@ def test_missing_output_raises(tmp_path: Path) -> None:
 def test_default_model_loader_raises_install_hint_without_torch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """v1.3.0 Task 29 — with neither torch nor onnxruntime installed,
+    the loader must raise the dual-extra install hint."""
     import builtins
 
     real_import = builtins.__import__
 
     def fake_import(name: str, *a: object, **kw: object) -> object:
-        if name == "torch":
-            raise ImportError("No module named 'torch'")
+        if name in {"torch", "onnxruntime"}:
+            raise ImportError(f"No module named {name!r}")
         return real_import(name, *a, **kw)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(PipelineError, match=r"install yt-uniquifier\[ml\]"):
+    monkeypatch.setattr(sscd, "_BANNER_SHOWN", True)  # silence banner
+    with pytest.raises(PipelineError, match=r"\[ml-nc\]"):
         sscd._default_model_loader()
 
 
@@ -479,3 +482,163 @@ def test_pairwise_cosine_shape_mismatch_raises() -> None:
     b = torch.zeros((4, 512))
     with pytest.raises(PipelineError, match="shape mismatch"):
         _pairwise_cosine(a, b)
+
+
+# ---------------------------------------------------------------------------
+# v1.3.0 Task 29 — ONNX backend + CC-BY-NC license banner
+# ---------------------------------------------------------------------------
+
+
+def test_license_banner_emits_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """First load → banner WARN; second load → silent.  Process-global
+    state is reset by the monkeypatch so tests stay deterministic."""
+    monkeypatch.setattr(sscd, "_BANNER_SHOWN", False)
+    caplog.set_level("WARNING", logger="yt_uniquifier.core.qa.sscd")
+    sscd._emit_license_banner_once()
+    sscd._emit_license_banner_once()
+    banner_lines = [r for r in caplog.records if "CC-BY-NC" in r.message]
+    assert len(banner_lines) == 1
+
+
+def test_commercial_env_emits_runtime_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YT_UNIQ_COMMERCIAL=1 → RuntimeWarning on first SSCD load.  The
+    operator's own self-declared commercial-use flag is incompatible
+    with the bundled CC-BY-NC weights and must surface loudly."""
+    import warnings
+
+    monkeypatch.setattr(sscd, "_BANNER_SHOWN", False)
+    monkeypatch.setenv("YT_UNIQ_COMMERCIAL", "1")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        sscd._emit_license_banner_once()
+    commercial = [w for w in caught
+                  if issubclass(w.category, RuntimeWarning)
+                  and "YT_UNIQ_COMMERCIAL" in str(w.message)]
+    assert commercial, (
+        "RuntimeWarning expected when YT_UNIQ_COMMERCIAL=1; "
+        f"caught={[str(w.message) for w in caught]}"
+    )
+
+
+def test_no_commercial_warning_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default (env unset) — no RuntimeWarning; only the banner WARN."""
+    import warnings
+
+    monkeypatch.setattr(sscd, "_BANNER_SHOWN", False)
+    monkeypatch.delenv("YT_UNIQ_COMMERCIAL", raising=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        sscd._emit_license_banner_once()
+    commercial = [w for w in caught
+                  if issubclass(w.category, RuntimeWarning)
+                  and "YT_UNIQ_COMMERCIAL" in str(w.message)]
+    assert not commercial
+
+
+def test_onnx_loader_chosen_when_only_onnx_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """When onnxruntime is installed but torch is not, _default_model_loader
+    must return an _OnnxModel wrapping an InferenceSession.
+
+    We stub onnxruntime + torch import + the model download path so this
+    test runs without either heavyweight wheel installed."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    class _StubSession:
+        def __init__(self, _path: str, providers: list[str]) -> None:
+            self.providers = providers
+
+        def get_inputs(self) -> list[object]:
+            class _I:
+                name = "x"
+            return [_I()]
+
+        def run(self, _outputs: object, _feed: dict[str, object]) -> list[object]:
+            return [object()]
+
+    class _StubOrt:
+        InferenceSession = _StubSession
+
+    def fake_import(name: str, *a: object, **kw: object) -> object:
+        if name == "onnxruntime":
+            return _StubOrt()
+        if name == "torch":
+            raise ImportError("No module named 'torch'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(sscd, "_models_dir_default", tmp_path)
+    monkeypatch.setattr(sscd, "_BANNER_SHOWN", True)  # silence
+    # Skip the real download — pretend the file is already present.
+    (tmp_path / "sscd_disc_mixup.onnx").write_bytes(b"stub")
+    monkeypatch.setattr(sscd, "_ensure_onnx_model_cached",
+                        lambda *a, **kw: tmp_path / "sscd_disc_mixup.onnx")
+
+    model = sscd._default_model_loader()
+    assert isinstance(model, sscd._OnnxModel)
+
+
+def test_ensure_onnx_model_cached_returns_existing_file(tmp_path: Path) -> None:
+    cache_path = tmp_path / "sscd_disc_mixup.onnx"
+    cache_path.write_bytes(b"fake onnx")
+    assert sscd._ensure_onnx_model_cached(tmp_path) == cache_path
+
+
+def test_ensure_onnx_model_cached_sha_mismatch_deletes_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    bad_path = tmp_path / "sscd_disc_mixup.onnx.partial"
+
+    def fake_urlretrieve(_url: str, dest: str) -> None:
+        Path(dest).write_bytes(b"corrupted")
+
+    monkeypatch.setattr(sscd.urllib.request, "urlretrieve", fake_urlretrieve)
+    with pytest.raises(PipelineError, match="SHA-256 mismatch"):
+        sscd._ensure_onnx_model_cached(tmp_path)
+    assert not bad_path.exists()
+    assert not (tmp_path / "sscd_disc_mixup.onnx").exists()
+
+
+def test_onnx_embed_uses_numpy_normalisation() -> None:
+    """The ONNX embed path must emit L2-normalised rows via numpy
+    (no torch import) — pin the math so a future refactor that drops
+    the normalise step would fail this test loudly."""
+    import numpy as np
+
+    # Stub session mimics onnxruntime.InferenceSession enough for
+    # _OnnxModel.__call__: get_inputs()[0].name + run(None, feed).
+    class _StubSession:
+        def get_inputs(self) -> list[object]:
+            class _I:
+                name = "x"
+            return [_I()]
+
+        def run(self, _outputs: object, _feed: dict[str, object]) -> list[np.ndarray]:
+            return [np.array([[3.0, 4.0], [0.0, 5.0]], dtype=np.float32)]
+
+    om = sscd._OnnxModel(session=_StubSession())
+    # Replace the body's frame loader by hand: build a dummy list with a
+    # single tiny PIL image saved to a temp file.
+    import tempfile
+
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = []
+        for i in range(2):
+            p = Path(tmp) / f"f{i}.png"
+            Image.new("RGB", (288, 288), color=(i * 10, 0, 0)).save(p)
+            paths.append(p)
+        emb = sscd._embed_frames_onnx(om, paths)
+    # First row: (3, 4) → norm 5 → (0.6, 0.8).
+    np.testing.assert_allclose(emb[0], [0.6, 0.8], atol=1e-6)
+    # Second row: (0, 5) → norm 5 → (0, 1).
+    np.testing.assert_allclose(emb[1], [0.0, 1.0], atol=1e-6)

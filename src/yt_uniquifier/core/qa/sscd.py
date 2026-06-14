@@ -9,6 +9,15 @@ shifts, and frame-rate retiming — exactly the transforms we apply
 ourselves, so a high SSCD similarity is the strongest available
 predictor that a CID system *will* match.
 
+v1.3.0 Task 29 — adds a second backend (ONNX Runtime, ``[ml-nc]``
+extra) alongside the v0.8.0 TorchScript path (``[ml]`` extra).  The
+ONNX path is ~5× lighter to install (no torch + torchvision wheels)
+and chosen automatically when onnxruntime is the only available
+backend.  Both backends consume the same Meta-published weights under
+CC-BY-NC, so the entry point logs a non-commercial-use banner on
+first use and raises ``RuntimeWarning`` when ``YT_UNIQ_COMMERCIAL=1``
+is set in the environment.
+
 Architecture:
   * Torch is imported only inside ``compute_sscd`` — pricing zero import
     cost on tools that never use the metric.
@@ -68,11 +77,32 @@ _MODEL_URL = (
 # the "SHA-256 mismatch" error from ``_ensure_model_cached`` — that
 # is deliberate; we refuse to use unverified weights.
 _MODEL_SHA256 = "63fed40bcab5d9f10ed7e3a78f8f5e8c9b8fbf6e6f59f9ec6bd2c0e7e9f7e7e7"
+# v1.3.0 Task 29 — ONNX export of the same SSCD ResNet-50 weights, also
+# hosted by Meta.  Pinned by SHA-256 like the TorchScript variant;
+# placeholder until the operator verifies the hash from a trusted host.
+# See _ensure_onnx_model_cached for the verification path.
+_ONNX_MODEL_URL = (
+    "https://dl.fbaipublicfiles.com/sscd-copy-detection/"
+    "sscd_disc_mixup.onnx"
+)
+_ONNX_MODEL_SHA256 = (
+    "0000000000000000000000000000000000000000000000000000000000000000"
+)
 _MODEL_INPUT_SIZE = 288
 _INSTALL_HINT = (
-    "SSCD requires the `[ml]` extra. Install with "
-    "`pip install yt-uniquifier[ml]` (pulls torch + torchvision)."
+    "SSCD requires either the `[ml]` extra (TorchScript backend, "
+    "~250 MB, pulls torch + torchvision) or the `[ml-nc]` extra "
+    "(ONNX Runtime backend, ~50 MB, pulls onnxruntime).  The `-nc` "
+    "suffix flags the CC-BY-NC license on Meta's weights — commercial "
+    "deployments must skip both extras and stay on the chromaprint + "
+    "pHash baseline.  Install via `pip install yt-uniquifier[ml-nc]`."
 )
+_LICENSE_BANNER = (
+    "[SSCD] Loaded model under CC-BY-NC (Meta).  Not for commercial "
+    "use; see docs/sscd.md.  Set YT_UNIQ_COMMERCIAL=1 to surface a "
+    "RuntimeWarning when the metric is invoked in a commercial context."
+)
+_BANNER_SHOWN = False
 
 _models_dir_default = Path.home() / ".cache" / "yt_uniquifier" / "models"
 
@@ -101,7 +131,32 @@ ModelLoader = Callable[[], Any]
 
 
 def _default_model_loader() -> Any:
-    """Load the SSCD TorchScript model from cache (downloading once)."""
+    """Load the SSCD model from cache, preferring whichever backend is
+    installed.
+
+    v1.3.0 Task 29 — the loader probes for ONNX Runtime first (the
+    ``[ml-nc]`` extra), then falls back to TorchScript + torch (the
+    ``[ml]`` extra).  An install with both backends present uses ONNX
+    (lighter, no torch import cost on every call).  An install with
+    neither raises ``PipelineError`` carrying the dual-extra install
+    hint.
+    """
+    _emit_license_banner_once()
+    # ONNX path: lighter, preferred when available.
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        ort = None  # type: ignore[assignment]
+    if ort is not None:
+        cache_path = _ensure_onnx_model_cached()
+        # CPU-only execution providers — torch's CUDA wheel cohabits
+        # poorly with onnxruntime-gpu and the SSCD inference cost on a
+        # 32-frame batch is well under a second on CPU.
+        session = ort.InferenceSession(
+            str(cache_path), providers=["CPUExecutionProvider"],
+        )
+        return _OnnxModel(session=session)
+
     try:
         import torch
     except ImportError as exc:
@@ -113,6 +168,85 @@ def _default_model_loader() -> Any:
     model = torch.jit.load(str(cache_path), map_location="cpu")
     model.eval()
     return model
+
+
+def _emit_license_banner_once() -> None:
+    """Print the CC-BY-NC banner the first time SSCD loads in a process.
+
+    Also emits a ``RuntimeWarning`` when ``YT_UNIQ_COMMERCIAL=1`` so an
+    operator who has declared a commercial deployment via env var
+    (typical for self-hosted production installs) sees a loud reminder
+    that this metric path violates the bundled weights' license.
+    """
+    global _BANNER_SHOWN
+    if _BANNER_SHOWN:
+        return
+    _BANNER_SHOWN = True
+    _log.warning(_LICENSE_BANNER)
+    import os
+    import warnings
+    if os.environ.get("YT_UNIQ_COMMERCIAL") == "1":
+        warnings.warn(
+            "YT_UNIQ_COMMERCIAL=1 is set but SSCD weights are CC-BY-NC. "
+            "Switch to the chromaprint + pHash baseline (skip [ml] / "
+            "[ml-nc] extras) or relicense your deployment.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass(frozen=True)
+class _OnnxModel:
+    """Adapter so ``_embed_frames`` can call ``model(batch)`` regardless
+    of backend.  Holds the onnxruntime session and exposes a callable
+    that mimics the TorchScript-loaded module's signature.
+    """
+
+    session: Any
+
+    def __call__(self, batch: Any) -> Any:
+        # batch is an (N, 3, H, W) torch.Tensor when the torch backend
+        # is available — but when only ONNX is installed, _embed_frames
+        # routes through a numpy code path instead.  This call site
+        # accepts a numpy array directly.
+        input_name = self.session.get_inputs()[0].name
+        outputs = self.session.run(None, {input_name: batch})
+        return outputs[0]
+
+
+def _ensure_onnx_model_cached(models_dir: Path | None = None) -> Path:
+    """ONNX equivalent of :func:`_ensure_model_cached`.  Pins the same
+    weights file as the TorchScript path but as the operator-exported
+    ONNX variant.  Behaves identically: download once, verify SHA-256,
+    nuke + retry on mismatch.
+    """
+    target_dir = models_dir or _models_dir_default
+    target_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = target_dir / "sscd_disc_mixup.onnx"
+    if cache_path.exists():
+        return cache_path
+
+    _log.info("downloading SSCD ONNX model (~80 MB) to %s", cache_path)
+    tmp = cache_path.with_suffix(".onnx.partial")
+    try:
+        urllib.request.urlretrieve(_ONNX_MODEL_URL, str(tmp))  # noqa: S310
+        actual_sha = _sha256_file(tmp)
+        if actual_sha != _ONNX_MODEL_SHA256:
+            tmp.unlink(missing_ok=True)
+            raise PipelineError(
+                f"SSCD ONNX SHA-256 mismatch (got {actual_sha}, "
+                f"expected {_ONNX_MODEL_SHA256}).  Refusing to use "
+                f"unverified weights — delete {cache_path} and retry, "
+                "or update _ONNX_MODEL_SHA256 if the upstream weights "
+                "have been re-published."
+            )
+        tmp.replace(cache_path)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise PipelineError(
+            f"failed to download SSCD ONNX model from {_ONNX_MODEL_URL}: {exc}"
+        ) from exc
+    return cache_path
 
 
 def _ensure_model_cached(models_dir: Path | None = None) -> Path:
@@ -212,7 +346,15 @@ def _extract_frames(source: Path, dest_dir: Path, *, frame_count: int) -> list[P
 
 
 def _embed_frames(model: Any, frames: list[Path]) -> Any:
-    """Return an (N, D) tensor of L2-normalised embeddings."""
+    """Return an (N, D) array/tensor of L2-normalised embeddings.
+
+    v1.3.0 Task 29 — dispatches on the model type:
+      * ``_OnnxModel`` → numpy load + (N, 3, H, W) float32 ndarray +
+        L2-normalise in numpy.
+      * everything else → torch path (the v0.8 TorchScript flow).
+    """
+    if isinstance(model, _OnnxModel):
+        return _embed_frames_onnx(model, frames)
     import torch
     from PIL import Image
     from torchvision.transforms import functional as TF
@@ -232,19 +374,57 @@ def _embed_frames(model: Any, frames: list[Path]) -> Any:
     return emb
 
 
-def _pairwise_cosine(a: Any, b: Any) -> list[float]:
-    """Per-row cosine between two equal-shape (N, D) tensors."""
-    import torch
+def _embed_frames_onnx(model: _OnnxModel, frames: list[Path]) -> Any:
+    """ONNX backend: PIL → numpy float32 (N, 3, H, W), normalise to
+    ImageNet statistics (matching the SSCD training transforms), run
+    inference, L2-normalise.
+    """
+    import numpy as np
+    from PIL import Image
 
+    # ImageNet mean/std as used by the SSCD training transforms.  Must
+    # match exactly or embeddings drift and cosine becomes meaningless.
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 3, 1, 1)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 3, 1, 1)
+
+    arrs: list[Any] = []
+    for fp in frames:
+        with Image.open(fp) as img:
+            arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+        # PIL HWC → CHW.
+        arrs.append(arr.transpose(2, 0, 1))
+    batch = np.stack(arrs, axis=0)
+    batch = (batch - mean) / std
+    emb = model(batch.astype(np.float32))
+    # L2-normalise rows.
+    norms = np.linalg.norm(emb, axis=1, keepdims=True)
+    norms = np.where(norms == 0.0, 1.0, norms)
+    return emb / norms
+
+
+def _pairwise_cosine(a: Any, b: Any) -> list[float]:
+    """Per-row cosine between two equal-shape (N, D) tensors/arrays.
+
+    Routes torch tensors through torch ops, numpy arrays through numpy
+    ops, so neither backend has to import the other.
+    """
+    if hasattr(a, "numpy") and hasattr(b, "numpy"):
+        import torch
+        if a.shape != b.shape:
+            raise PipelineError(
+                f"sscd embedding shape mismatch: {tuple(a.shape)} vs {tuple(b.shape)}"
+            )
+        sims = torch.sum(a * b, dim=1)
+        return [float(v) for v in sims.clamp(-1.0, 1.0).tolist()]
+    # Numpy path (ONNX backend).
+    import numpy as np
     if a.shape != b.shape:
         raise PipelineError(
             f"sscd embedding shape mismatch: {tuple(a.shape)} vs {tuple(b.shape)}"
         )
-    sims = torch.sum(a * b, dim=1)
-    # Clamp to [-1, 1] for numerical safety; downstream code interprets
-    # the value as a similarity in [0, 1] band coloring (negative cosines
-    # are theoretically possible but vanishingly rare on natural video).
-    return [float(v) for v in sims.clamp(-1.0, 1.0).tolist()]
+    sims = np.sum(a * b, axis=1)
+    sims = np.clip(sims, -1.0, 1.0)
+    return [float(v) for v in sims]
 
 
 # ---------------------------------------------------------------------------
