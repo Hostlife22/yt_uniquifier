@@ -10,13 +10,25 @@ import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.runner import CancelToken, RunEvent
+
+# Module-level import so ``from __future__ import annotations`` doesn't
+# hide ``Request`` from FastAPI's ``typing.get_type_hints`` lookup —
+# without this, ``request: Request`` becomes a 422 query parameter
+# binding because FastAPI can't resolve the string to a class.
+if TYPE_CHECKING:
+    from fastapi import Request  # noqa: F401
+else:
+    try:
+        from fastapi import Request
+    except ImportError:  # pragma: no cover — [web] extra missing
+        Request = Any  # type: ignore[assignment,misc]
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +48,25 @@ def _drain_to_jsonl(event: RunEvent) -> str:
     return json.dumps({"kind": event.kind, "payload": event.payload}, default=str)
 
 
+def _principal_from_request(request: Any) -> str | None:
+    """Decode the basic-auth principal for audit logging.
+
+    Best-effort: returns None on a malformed or absent header. We do
+    NOT verify the credentials here — auth has already run via the
+    Depends(auth) dependency. The principal is only used as a log
+    correlation key.
+    """
+    import base64
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("basic "):
+        return None
+    try:
+        decoded = base64.b64decode(auth.split(" ", 1)[1]).decode("utf-8", "replace")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return decoded.split(":", 1)[0] or None
+
+
 def register(  # noqa: PLR0913
     app: Any,
     *,
@@ -47,11 +78,22 @@ def register(  # noqa: PLR0913
     streaming_response: Any,
     json_response: Any,
     http_exception: Any,
+    limiter: Any = None,
 ) -> None:
     from fastapi import Depends
 
+    # v1.1.0 Task 16: opt-in rate limit decorator. When ``limiter`` is
+    # None (e.g. slowapi not installed, or LAN-trusted deployment with
+    # config.rate_limit_run=None) we fall back to a no-op pass-through.
+    if limiter is not None and getattr(config, "rate_limit_run", None):
+        run_rate_limit = limiter.limit(config.rate_limit_run)
+    else:
+        def run_rate_limit(fn: Any) -> Any:
+            return fn
+
     @app.post("/api/run", dependencies=[Depends(auth)])
-    def start_run(req: RunRequest) -> Any:
+    @run_rate_limit
+    def start_run(request: Request, req: RunRequest) -> Any:
         # Resolve paths through the validator so a bad input is a 404
         # before we touch the orchestrator.
         input_path = validate_input(Path(req.input_path).expanduser())
@@ -145,6 +187,23 @@ def register(  # noqa: PLR0913
         with runs_lock:
             runs[run_id] = record
         thread.start()
+        # v1.1.0 Task 16: audit only AFTER the run is actually queued
+        # so we don't record requests that bounced earlier in the
+        # validation chain (they're surfaced as 4xx, not as audit
+        # events). Principal is extracted from the basic-auth header
+        # if present.
+        from yt_uniquifier.web.audit import audit
+        audit(
+            "api.run.start",
+            principal=_principal_from_request(request),
+            payload={
+                "run_id": run_id,
+                "input": str(input_path),
+                "profile": str(profile_path),
+                "output_basename": output_path.name,
+            },
+            audit_log_path=getattr(config, "audit_log_path", None),
+        )
         return json_response({
             "run_id": run_id,
             "output_basename": output_path.name,
@@ -164,11 +223,18 @@ def register(  # noqa: PLR0913
         })
 
     @app.post("/api/run/{run_id}/cancel", dependencies=[Depends(auth)])
-    def cancel_run(run_id: str) -> Any:
+    def cancel_run(run_id: str, request: Request) -> Any:
         record = runs.get(run_id)
         if record is None:
             raise http_exception(status_code=404, detail="unknown run_id")
         record.cancel_token.cancel()
+        from yt_uniquifier.web.audit import audit
+        audit(
+            "api.run.cancel",
+            principal=_principal_from_request(request),
+            payload={"run_id": run_id},
+            audit_log_path=getattr(config, "audit_log_path", None),
+        )
         return json_response({"run_id": run_id, "cancel_requested": True})
 
     @app.get("/api/run/{run_id}/events", dependencies=[Depends(auth)])

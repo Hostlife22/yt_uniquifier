@@ -53,6 +53,20 @@ class WebConfig:
     # mounted media dir. ``None`` disables the check (useful on a
     # dev box where the LAN is trusted).
     input_root: Path | None = None
+    # v1.1.0 Task 16: state-changing requests are rate-limited per
+    # principal (basic-auth user) or per client IP. Defaults match
+    # the plan's matrix (30/min for /api/run; 5/min for any future
+    # /api/upload). Set ``None`` on a trusted LAN to disable.
+    rate_limit_run: str | None = "30/minute"
+    rate_limit_upload: str | None = "5/minute"
+    # v1.1.0 Task 16: hard ceiling on incoming Content-Length so a
+    # rogue client can't make Starlette buffer multi-GB POST bodies.
+    # 5 GiB matches the plan; legitimate uploads of larger sources
+    # should land in ``input_root`` via SCP/NFS instead.
+    max_upload_bytes: int = 5 * 1024 * 1024 * 1024
+    # v1.1.0 Task 16: append-only JSONL audit log of state-changing
+    # requests. ``None`` = disabled (default keeps unit tests hermetic).
+    audit_log_path: Path | None = None
 
 
 @dataclass
@@ -101,12 +115,66 @@ def build_app(config: WebConfig) -> Any:
     runs: dict[str, _RunRecord] = {}
     runs_lock = threading.Lock()
 
+    # v1.1.0 Task 15: register the Prometheus counter families at
+    # build_app time so the very first /metrics scrape includes them
+    # even before any run has fired an event.
+    from yt_uniquifier.web import metrics as _metrics  # noqa: F401
+
     app = FastAPI(
         title="yt-uniquifier",
         version="0.9.0",
         docs_url="/docs",
         redoc_url=None,
     )
+
+    # v1.1.0 Task 16: hard upload ceiling first so any later route
+    # additions inherit the cap automatically.
+    from yt_uniquifier.web.middleware.upload_limit import (
+        ContentLengthLimitMiddleware,
+    )
+    app.add_middleware(
+        ContentLengthLimitMiddleware,
+        max_bytes=config.max_upload_bytes,
+    )
+
+    # v1.1.0 Task 16: slowapi rate limiter keyed on principal+IP.
+    # Each route opts in via the limiter's decorator (wired in
+    # routes/run.py.register). The 429 handler returns JSON so SPA
+    # clients get a parseable error.
+    try:
+        from slowapi import Limiter
+        from slowapi.errors import RateLimitExceeded
+        from slowapi.util import get_remote_address
+
+        def _key(request: Any) -> str:
+            # Prefer the basic-auth principal so two users behind
+            # the same NAT each get their own bucket; fall back to
+            # the client IP when auth is disabled.
+            auth = request.headers.get("authorization", "")
+            if auth.lower().startswith("basic "):
+                # Bucket by the encoded principal — we don't need to
+                # decode it, identical strings map to the same bucket.
+                return f"basic:{auth.split(' ', 1)[1][:32]}"
+            return f"ip:{get_remote_address(request)}"
+
+        limiter = Limiter(key_func=_key, default_limits=[])
+        app.state.limiter = limiter
+
+        async def _ratelimit_handler(
+            request: Any, exc: Exception,
+        ) -> Any:
+            # exc is RateLimitExceeded in practice — Starlette's
+            # signature is Exception-typed though, so we accept the
+            # broader hint and downcast at the use site.
+            detail = getattr(exc, "detail", str(exc))
+            return JSONResponse(
+                {"detail": f"rate limit exceeded: {detail}"},
+                status_code=429,
+            )
+
+        app.add_exception_handler(RateLimitExceeded, _ratelimit_handler)
+    except ImportError:  # pragma: no cover — [web] extra missing slowapi
+        limiter = None
 
     # -- auth ---------------------------------------------------------
     security = HTTPBasic(auto_error=False)
@@ -253,6 +321,7 @@ def build_app(config: WebConfig) -> Any:
         streaming_response=StreamingResponse,
         json_response=JSONResponse,
         http_exception=HTTPException,
+        limiter=limiter,
     )
     register_profile(app, config=config, auth=_auth)
     register_qa(

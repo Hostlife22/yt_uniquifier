@@ -368,3 +368,152 @@ def test_metrics_update_from_event_increments_counters() -> None:
     ))
     err_after = metrics.FFMPEG_FAILURES_TOTAL.labels(encoder="libx264")._value.get()
     assert err_after == err_before + 1.0
+
+
+# ---------------------------------------------------------------------------
+# v1.1.0 Task 16: upload cap + audit log
+# ---------------------------------------------------------------------------
+
+
+def test_upload_limit_rejects_oversized_content_length(
+    web_dirs: tuple[Path, Path, Path],
+) -> None:
+    """Content-Length > config.max_upload_bytes → 413 with JSON body."""
+    work, output, profiles = web_dirs
+    config = WebConfig(
+        work_dir=work, output_dir=output, profile_dir=profiles,
+        max_upload_bytes=1024,  # 1 KiB ceiling for the test
+    )
+    client = TestClient(build_app(config))
+    # Construct a POST whose declared body length blows past the cap.
+    # We don't actually send 1 MB — Starlette only reads after the
+    # middleware runs, and the middleware short-circuits on the
+    # Content-Length header alone.
+    headers = {
+        "content-length": str(10 * 1024),
+        "content-type": "application/json",
+    }
+    r = client.post(
+        "/api/run", headers=headers, content=b"x" * 10 * 1024,
+    )
+    assert r.status_code == 413
+    body = r.json()
+    assert "10240" in body["detail"]
+    assert "1024" in body["detail"]
+
+
+def test_audit_log_records_run_start_and_cancel(
+    tmp_path: Path, web_dirs: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v1.1.0 Task 16: audit_log_path receives one JSONL line per
+    state-changing request.
+    """
+    work, output, profiles = web_dirs
+    audit_path = tmp_path / "audit.jsonl"
+    config = WebConfig(
+        work_dir=work, output_dir=output, profile_dir=profiles,
+        audit_log_path=audit_path,
+    )
+
+    # Stub the orchestrator so /api/run doesn't actually encode.
+    from yt_uniquifier.core import orchestrator
+    from yt_uniquifier.core.models import (
+        AudioStream,
+        EncoderCandidate,
+        HDRInfo,
+        Plan,
+        SourceMeta,
+        VideoStream,
+    )
+    from yt_uniquifier.core.models import (
+        Profile as CoreProfile,
+    )
+    from yt_uniquifier.core.pipeline import compute_plan_hash
+
+    src_path = tmp_path / "x.mp4"
+    src_path.write_bytes(b"x")
+    src = SourceMeta(
+        path=src_path, container="mp4", duration_sec=1.0, size_bytes=10,
+        video=[VideoStream(
+            index=0, codec="h264", width=128, height=72, fps=24.0,
+            duration_sec=1.0, pix_fmt="yuv420p",
+            color=HDRInfo(is_hdr=False),
+        )],
+        audio=[AudioStream(index=1, codec="aac", sample_rate=48000, channels=2)],
+    )
+    prof = CoreProfile(name="t", transforms=[])
+    enc = EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True)
+    plan = Plan(
+        source=src, profile=prof, encoder=enc,
+        plan_hash=compute_plan_hash(src, prof, enc),
+    )
+
+    def fake_build_plan(input_path, profile, encoder_override):  # type: ignore[no-untyped-def]
+        return plan
+
+    monkeypatch.setattr(
+        "yt_uniquifier.web.routes.run.build_plan", fake_build_plan,
+    )
+    monkeypatch.setattr(
+        "yt_uniquifier.web.routes.run.load_profile",
+        lambda _p: prof,
+    )
+
+    # Run a noop orchestrator so the worker thread finishes promptly.
+    def fake_run_full(plan, opts, on_event=None, cancel_token=None, pause_token=None):  # type: ignore[no-untyped-def]
+        if on_event is not None:
+            on_event(orchestrator.RunEvent(kind="log", payload={"phase": "noop"}))
+        return orchestrator.RunSummary(
+            output=opts.output, plan=plan, segments_done=0,
+            preflight_findings=[],
+        )
+
+    monkeypatch.setattr(
+        "yt_uniquifier.web.routes.run.run_full", fake_run_full,
+    )
+
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text("name: t\ntransforms: []\n", encoding="utf-8")
+
+    client = TestClient(build_app(config))
+    r = client.post("/api/run", json={
+        "input_path": str(src_path),
+        "profile_path": str(profile_path),
+    })
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+
+    r2 = client.post(f"/api/run/{run_id}/cancel")
+    assert r2.status_code == 200
+
+    # The audit log must contain at least one ``api.run.start`` and
+    # one ``api.run.cancel`` line.
+    import json as _json
+    lines = [
+        _json.loads(ln)
+        for ln in audit_path.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
+    events = [ln["event"] for ln in lines]
+    assert "api.run.start" in events
+    assert "api.run.cancel" in events
+    start = next(ln for ln in lines if ln["event"] == "api.run.start")
+    assert start["payload"]["run_id"] == run_id
+    assert start["payload"]["input"] == str(src_path)
+
+
+def test_audit_is_noop_when_path_unset(
+    web_dirs: tuple[Path, Path, Path],
+) -> None:
+    """No ``audit_log_path`` configured → audit() writes nothing,
+    raises nothing.
+    """
+    from yt_uniquifier.web.audit import audit
+
+    audit(
+        "api.run.start",
+        principal="alice",
+        payload={"run_id": "r1"},
+        audit_log_path=None,
+    )  # must not raise; nothing on disk to check
