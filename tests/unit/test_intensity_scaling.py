@@ -119,3 +119,131 @@ def test_scale_loudnorm_unchanged() -> None:
     out = scale_profile(p, 5.0)
     e = _get(out, "audio.loudnorm")
     assert e["integrated"] == -14.0  # target loudness doesn't scale
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 R3 — close coverage gaps in intensity._scale_params for the rest of
+# the registered transforms. Many of these branches reference legacy
+# param names that no longer live in the transform's defaults; the test
+# exercises the branch by passing the param explicitly so the production
+# rule is still verified for users carrying over older profiles.
+# ---------------------------------------------------------------------------
+
+
+def test_scale_rotate_degrees() -> None:
+    p = _profile([TransformConfig(id="video.rotate", params={"degrees": 0.3})])
+    out = scale_profile(p, 1.5)
+    assert _get(out, "video.rotate")["degrees"] == pytest.approx(0.45)
+
+
+def test_scale_speed_rate_around_one() -> None:
+    p = _profile([TransformConfig(id="video.speed", params={"rate": 1.02})])
+    out = scale_profile(p, 2.0)
+    assert _get(out, "video.speed")["rate"] == pytest.approx(1.04)
+
+
+def test_scale_blend_b_opacity_times_factor() -> None:
+    p = _profile([TransformConfig(id="video.blend_b", params={"opacity": 0.04})])
+    out = scale_profile(p, 2.0)
+    assert _get(out, "video.blend_b")["opacity"] == pytest.approx(0.08)
+
+
+def test_scale_mirror_passes_through_unchanged() -> None:
+    p = _profile([TransformConfig(id="video.mirror")])
+    out = scale_profile(p, 5.0)
+    # Mirror has no intensity knob, so the produced config carries only the
+    # explicit `enabled` flag and no params — calling _get checks that the
+    # default merge still yields an empty dict.
+    assert _get(out, "video.mirror") == {}
+
+
+def test_scale_haas_stereo_delay_ms() -> None:
+    p = _profile([TransformConfig(id="audio.haas_stereo", params={"delay_ms": 10.0})])
+    out = scale_profile(p, 1.5)
+    assert _get(out, "audio.haas_stereo")["delay_ms"] == pytest.approx(15.0)
+
+
+def test_scale_compand_amount_when_provided() -> None:
+    # `amount` is not in the current defaults but the branch handles
+    # users who carry it over from older profiles; assert the branch runs.
+    p = _profile([TransformConfig(id="audio.compand", params={"amount": 0.4})])
+    out = scale_profile(p, 1.5)
+    assert _get(out, "audio.compand")["amount"] == pytest.approx(0.6)
+
+
+def test_scale_reverb_legacy_wet_keys() -> None:
+    p = _profile([
+        TransformConfig(
+            id="audio.reverb",
+            params={"wet": 0.2, "room_size": 0.5, "damping": 0.3},
+        ),
+    ])
+    out = scale_profile(p, 2.0)
+    e = _get(out, "audio.reverb")
+    assert e["wet"] == pytest.approx(0.4)
+    assert e["room_size"] == pytest.approx(1.0)
+    assert e["damping"] == pytest.approx(0.6)
+
+
+def test_scale_noise_overlay_amix_weight() -> None:
+    p = _profile([
+        TransformConfig(id="audio.noise_overlay", params={"amix_weight_noise": 0.05}),
+    ])
+    out = scale_profile(p, 2.0)
+    assert _get(out, "audio.noise_overlay")["amix_weight_noise"] == pytest.approx(0.10)
+
+
+def test_scale_subpixel_sharpen_legacy_keys() -> None:
+    p = _profile([
+        TransformConfig(
+            id="video.subpixel_sharpen",
+            params={"amount": 0.3, "radius": 2.0},
+        ),
+    ])
+    out = scale_profile(p, 1.5)
+    e = _get(out, "video.subpixel_sharpen")
+    assert e["amount"] == pytest.approx(0.45)
+    assert e["radius"] == pytest.approx(3.0)
+
+
+def test_scale_temporal_jitter_shift_frames_int() -> None:
+    p = _profile([
+        TransformConfig(id="video.temporal_jitter", params={"shift_frames": 3}),
+    ])
+    out = scale_profile(p, 2.0)
+    assert _get(out, "video.temporal_jitter")["shift_frames"] == 6
+
+
+def test_scale_tonemap_sdr_is_pass_through() -> None:
+    # Tonemap intensity does not scale; the profile must round-trip without
+    # numeric changes (algorithm + peak + desat remain at defaults).
+    p = _profile([TransformConfig(id="video.tonemap_sdr")])
+    out = scale_profile(p, 5.0)
+    e = _get(out, "video.tonemap_sdr")
+    assert e["algorithm"] == "hable"
+    assert e["peak"] == pytest.approx(1000.0)
+    assert e["desat"] == pytest.approx(0.0)
+
+
+def test_scale_clamp_skips_unknown_field_names() -> None:
+    # User-provided params that aren't in the transform schema must still
+    # round-trip (the schema-clamp loop skips them); the scaling rule
+    # itself decides whether to touch the value.
+    p = _profile([TransformConfig(id="video.crop_resize",
+                                  params={"max_strength": 0.04,
+                                          "legacy_extra": 1.0})])
+    out = scale_profile(p, 2.0)
+    e = _get(out, "video.crop_resize")
+    assert e["max_strength"] == pytest.approx(0.08)
+    assert e["legacy_extra"] == pytest.approx(1.0)  # untouched by scaling/clamp
+
+
+def test_scale_clamps_blend_b_opacity_to_upper_bound() -> None:
+    # video.blend_b.opacity has le=0.20 in the schema; aggressive scaling
+    # must clamp into bounds rather than producing a value the pipeline
+    # would later reject at validation time.
+    p = _profile([TransformConfig(id="video.blend_b",
+                                  params={"opacity": 0.15})])
+    out = scale_profile(p, 5.0)
+    # 0.15 * 5 = 0.75 → clamped to 0.20
+    assert _get(out, "video.blend_b")["opacity"] <= 0.20 + 1e-9

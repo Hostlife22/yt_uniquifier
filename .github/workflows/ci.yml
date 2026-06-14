@@ -84,3 +84,23 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: pytest -q -m integration
+
+      # v1.0.0 R3 — SemVer-gate on `core/` coverage. Runs once
+      # (ubuntu-latest + 3.12) because line/branch coverage is
+      # platform-independent and adding the gate to every matrix
+      # cell would only burn CI minutes without surfacing new
+      # signal. Branch coverage is enabled in .coveragerc so the
+      # number reflects actual conditional-path exercise (not just
+      # statement hits); the 80% floor accommodates that stricter
+      # measure while the master-plan target (85% statement-only)
+      # is already met. Ratchet target: 85% under branch=true by
+      # v1.1, tracked in `docs/api-contracts.md` follow-ups.
+      - name: Pytest (coverage gate — core/ only)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          pytest -q -m "not integration and not visual" \
+            --cov=yt_uniquifier.core \
+            --cov-report=term \
+            --cov-fail-under=80

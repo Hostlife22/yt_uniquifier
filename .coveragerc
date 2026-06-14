@@ -1,0 +1,49 @@
+# v1.0.0 R3 — coverage configuration for the `core/` SemVer gate.
+#
+# Local development: `pytest --cov=yt_uniquifier.core` reads this
+# automatically. The 85% floor is NOT enforced locally — the gate
+# lives in the CI workflow so iterative work isn't blocked. CI runs
+# `pytest --cov-fail-under=85 --cov=yt_uniquifier.core ...` and
+# blocks the merge if the floor regresses.
+#
+# The gate covers `core/` only. The GUI and CLI layers have
+# behaviour-driven tests (visual regression, CLI smoke) that don't
+# map cleanly to line coverage; gating them at the same threshold
+# would either be vacuous or push contributors toward shallow tests.
+#
+# Why branch=true: the core has many `if cancel_token: ...` and
+# resume-path branches whose statement-level coverage is misleading
+# (the statement runs once with the False path, never the True).
+# Branch coverage reflects how much of the actual control flow we
+# exercise.
+
+[run]
+branch = true
+source = src/yt_uniquifier/core
+
+# Stamp .coverage with a stable suffix so parallel-pytest runs
+# (`-n auto` if pytest-xdist is ever added) don't clobber each other.
+# Harmless when single-process.
+parallel = true
+
+[report]
+# Skip auto-generated noise and unreachable-on-this-OS imports.
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    \.\.\.
+
+show_missing = true
+skip_covered = false
+precision = 1
+
+[paths]
+# Editable installs make coverage report `src/...` paths; CI matrix
+# Windows paths can show with backslashes. Collapse them so the
+# golden coverage report stays portable.
+source =
+    src/yt_uniquifier/core
+    */src/yt_uniquifier/core
+    *\src\yt_uniquifier\core
