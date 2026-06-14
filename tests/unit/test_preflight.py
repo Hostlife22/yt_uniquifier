@@ -243,3 +243,108 @@ def test_bitrate_over_ceiling_warns(tmp_path: Path) -> None:
     plan = _plan(src, [TransformConfig(id="audio.loudnorm")])
     f = preflight(src, plan, plan.encoder)
     assert "bitrate.over" in _codes(f)
+
+
+# ---- v1.0.1 Task 4: disk-space preflight ----------------------------------
+
+
+def _disk_usage_stub(*, free_gib: float) -> object:
+    """Build a shutil._ntuple_diskusage-style triple with a chosen free size."""
+    import collections
+    Usage = collections.namedtuple("Usage", ["total", "used", "free"])
+    free = int(free_gib * (1024 ** 3))
+    return Usage(total=free + (10 * 1024 ** 3), used=10 * 1024 ** 3, free=free)
+
+
+def test_disk_space_skipped_when_no_work_dir(tmp_path: Path) -> None:
+    src = _source(tmp_path, bit_rate=8_000_000)
+    plan = _plan(src, [])
+    f = preflight(src, plan, plan.encoder)  # no work_dir kwarg
+    assert "disk.space.ok" not in _codes(f)
+    assert "disk.space.insufficient" not in _codes(f)
+    assert "disk.space.tight" not in _codes(f)
+
+
+def test_disk_space_ok_when_plenty_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = _source(tmp_path, bit_rate=4_000_000)
+    plan = _plan(src, [])
+    # 60 s @ 4 Mbps × 1.3 ≈ 39 MB. 100 GB free is comfortable.
+    from yt_uniquifier.core import preflight as preflight_mod
+    monkeypatch.setattr(
+        preflight_mod._shutil, "disk_usage",
+        lambda _p: _disk_usage_stub(free_gib=100),
+    )
+    f = preflight(src, plan, plan.encoder, work_dir=tmp_path / "work")
+    assert "disk.space.ok" in _codes(f)
+    assert not has_fail(f)
+
+
+def test_disk_space_error_when_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Severity fail when free disk < estimated × 1.1.
+
+    Synthesise a multi-hour 4K source (~3 hours @ 50 Mbps) so the
+    estimate dwarfs the 1 GiB free we report.
+    """
+    src = _source(
+        tmp_path, bit_rate=50_000_000, width=3840, height=2160,
+    )
+    # Override duration via model_copy so the estimate sails past 1 GiB.
+    long_source = src.model_copy(update={"duration_sec": 3 * 3600})
+    plan = _plan(long_source, [])
+    from yt_uniquifier.core import preflight as preflight_mod
+    monkeypatch.setattr(
+        preflight_mod._shutil, "disk_usage",
+        lambda _p: _disk_usage_stub(free_gib=1.0),
+    )
+    f = preflight(long_source, plan, plan.encoder, work_dir=tmp_path / "work")
+    assert "disk.space.insufficient" in _codes(f)
+    assert has_fail(f)
+
+
+def test_disk_space_warn_thin_margin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Severity warn when estimated × 1.1 ≤ free < estimated × 1.5.
+
+    Setup: 1-hour @ 50 Mbps × 1.3 ≈ 27 GiB. 35 GiB free sits in the warn
+    band (1.1× = 30 GiB ≤ 35 < 1.5× = 41 GiB).
+    """
+    src = _source(tmp_path, bit_rate=50_000_000)
+    long_source = src.model_copy(update={"duration_sec": 3600})
+    plan = _plan(long_source, [])
+    from yt_uniquifier.core import preflight as preflight_mod
+    monkeypatch.setattr(
+        preflight_mod._shutil, "disk_usage",
+        lambda _p: _disk_usage_stub(free_gib=35.0),
+    )
+    f = preflight(long_source, plan, plan.encoder, work_dir=tmp_path / "work")
+    assert "disk.space.tight" in _codes(f)
+    assert not has_fail(f)
+
+
+def test_disk_space_resolves_to_existing_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If work_dir doesn't exist yet (orchestrator hasn't mkdir'd), the
+    check walks up to the nearest existing ancestor for disk_usage.
+    """
+    src = _source(tmp_path, bit_rate=4_000_000)
+    plan = _plan(src, [])
+    seen: dict[str, Path] = {}
+    from yt_uniquifier.core import preflight as preflight_mod
+
+    def _fake(p: object) -> object:
+        seen["probed"] = Path(p)
+        return _disk_usage_stub(free_gib=100)
+
+    monkeypatch.setattr(preflight_mod._shutil, "disk_usage", _fake)
+    nested = tmp_path / "does" / "not" / "exist"
+    preflight(src, plan, plan.encoder, work_dir=nested)
+    assert seen["probed"].exists(), (
+        "preflight should probe the nearest existing ancestor, not a "
+        "path that's still to be mkdir'd"
+    )

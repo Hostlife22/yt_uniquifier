@@ -158,7 +158,20 @@ class CheckpointStore:
     # ---- lifecycle ----
 
     def init_or_resume(self, fresh_segments: list[Segment]) -> list[Segment]:
-        """Either resume an existing state file or initialize a new one."""
+        """Either resume an existing state file or initialize a new one.
+
+        v1.0.1: when resuming, each segment marked ``done`` is verified
+        against the on-disk file at ``out_path``:
+          * missing file → demoted to ``pending``;
+          * zero-byte file → demoted to ``pending`` (and the file is
+            left in place for operator inspection);
+          * stored ``sha256`` present and disagrees with the recomputed
+            digest → demoted to ``pending``;
+          * stored ``sha256`` ``None`` (pre-v1.0.1 state files) → kept
+            as ``done``; the next successful re-encode will populate it.
+        Demotion mutates ``self._state`` and triggers a flush so the
+        next resume cycle starts from a clean baseline.
+        """
         with self._lock:
             if self.state_path.exists():
                 try:
@@ -170,6 +183,9 @@ class CheckpointStore:
                     ) from exc
                 if raw.get("plan_hash") == self.plan.plan_hash:
                     self._state = raw
+                    demoted_any = self._verify_done_segments_on_disk()
+                    if demoted_any:
+                        self._flush()
                     return [Segment.model_validate(s) for s in raw.get("segments", [])]
                 # Plan changed → invalidate by renaming the stale file aside.
                 # Timestamp suffix preserves history if the user retries the
@@ -204,6 +220,7 @@ class CheckpointStore:
         *,
         src_path: Path | None = None,
         out_path: Path | None = None,
+        sha256: str | None = None,
     ) -> None:
         with self._lock:
             segs = self._state.get("segments", [])
@@ -215,6 +232,15 @@ class CheckpointStore:
                 s["src_path"] = str(src_path)
             if out_path is not None:
                 s["out_path"] = str(out_path)
+            # v1.0.1: persist the encoded segment's sha256 alongside the
+            # status. On resume, init_or_resume re-hashes the on-disk
+            # file and demotes the segment if the digest disagrees. A
+            # transition to ``pending`` clears the stale hash so the
+            # re-encode isn't compared against a previous attempt.
+            if sha256 is not None:
+                s["sha256"] = sha256
+            elif status == "pending":
+                s["sha256"] = None
             # B4 (v0.6.0): debounce — most callers (the parallel segment
             # workers) hit this hot path; coalesce fsyncs over a short
             # window. terminal statuses (done/failed) get the full mark
@@ -420,6 +446,88 @@ class CheckpointStore:
 
     # ---- internals ----
 
+    def _verify_done_segments_on_disk(self) -> bool:
+        """v1.0.1: re-verify every ``done`` segment against its output file.
+
+        Returns True if any segment was demoted to ``pending``. Caller
+        must hold ``self._lock`` and is responsible for flushing.
+        """
+        segs = self._state.get("segments", [])
+        demoted = False
+        for s in segs:
+            if s.get("status") != "done":
+                continue
+            out_path_raw = s.get("out_path")
+            if not out_path_raw:
+                # Resume entry without an out_path is suspicious — demote.
+                _log.warning(
+                    "checkpoint: segment %s marked done but missing out_path; "
+                    "demoting to pending",
+                    s.get("idx"),
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+                continue
+            out_path = Path(out_path_raw)
+            if not out_path.exists():
+                _log.warning(
+                    "checkpoint: segment %s out_path %s vanished; demoting "
+                    "to pending",
+                    s.get("idx"), out_path,
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+                continue
+            try:
+                size = out_path.stat().st_size
+            except OSError as exc:
+                _log.warning(
+                    "checkpoint: segment %s stat failed (%s); demoting",
+                    s.get("idx"), exc,
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+                continue
+            if size == 0:
+                _log.warning(
+                    "checkpoint: segment %s out_path %s is zero bytes; "
+                    "demoting to pending",
+                    s.get("idx"), out_path,
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+                continue
+            stored = s.get("sha256")
+            if not stored:
+                # Pre-v1.0.1 state file — accept the done status and let
+                # the next successful re-encode (if any) populate sha256.
+                continue
+            try:
+                actual = sha256_file(out_path)
+            except OSError as exc:
+                _log.warning(
+                    "checkpoint: segment %s sha256 read failed (%s); demoting",
+                    s.get("idx"), exc,
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+                continue
+            if actual != stored:
+                _log.warning(
+                    "checkpoint: segment %s sha256 mismatch "
+                    "(stored=%s, actual=%s); demoting to pending",
+                    s.get("idx"), stored[:12], actual[:12],
+                )
+                s["status"] = "pending"
+                s["sha256"] = None
+                demoted = True
+        return demoted
+
     def _flush_maybe(self) -> None:
         """B4 (v0.6.0): flush only when debounce thresholds are exceeded.
 
@@ -480,3 +588,29 @@ class CheckpointStore:
 def _tool_version() -> str:
     from yt_uniquifier import __version__
     return __version__
+
+
+# v1.0.1: 1 MiB streaming SHA-256. Keeping the chunk size here so the
+# checkpoint verifier and the orchestrator's post-segment hash use the
+# same constant — drift would not corrupt anything (sha256 is content-
+# only), but it would muddy benchmarking numbers.
+_SHA256_CHUNK_SIZE = 1024 * 1024
+
+
+def sha256_file(path: Path) -> str:
+    """Streamed SHA-256 of a file. 1 MiB chunks, hex digest.
+
+    Used by ``CheckpointStore._verify_done_segments_on_disk`` on resume
+    and by the orchestrator after each successful segment encode so the
+    two sides agree on the digest of every ``done`` segment.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(_SHA256_CHUNK_SIZE)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()

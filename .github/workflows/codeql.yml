@@ -1,0 +1,62 @@
+# CodeQL — yt-uniquifier (v1.0.1)
+#
+# Runs github/codeql-action on every push to main and weekly so latent
+# vulns flagged by new query rollouts surface within a week of release.
+# The "security-extended" suite catches a wider net than the default
+# (e.g. py/path-traversal-uncontrolled-input which the manual audit
+# verified is correctly blocked by .resolve().relative_to() in
+# web/app.py — see specs/v1.0.1-to-v1.3-roadmap.plan.md Summary).
+#
+# Results land in the GitHub repository's Security tab. CI does NOT
+# fail on alerts — triage happens in the Security tab so a routine
+# dependency-introduced finding doesn't block a release.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Sunday 02:00 UTC — same window as Dependabot so the week starts
+    # with the maintainer reviewing both reports together.
+    - cron: "0 2 * * 0"
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+          # Cache database between runs — analysis is the slow part.
+          db-location: ${{ runner.temp }}/codeql_db
+
+      - name: Autobuild
+        # Python is interpreted; Autobuild is a no-op apart from
+        # installing detected packages from pyproject.toml, which
+        # CodeQL uses for type resolution.
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

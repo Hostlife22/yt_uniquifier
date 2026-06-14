@@ -117,3 +117,87 @@ def test_corrupt_cache_recovers(
 
     seg_mod.list_keyframes(src)
     assert calls["n"] == 1
+
+
+def test_keyframe_cache_atomic_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
+) -> None:
+    """v1.0.1 Task 1: _save_keyframe_cache must go through a {pid}.{random}
+    tmp file and end with ``os.replace`` — never a direct ``write_text``.
+
+    We patch ``os.replace`` to capture the tmp name and assert that:
+      * it contains the current PID,
+      * it contains a 4-byte hex token (8 chars),
+      * the final destination is the canonical cache path.
+    """
+    src = tmp_path / "x.mp4"
+    src.write_bytes(b"x")
+    cache_path = seg_mod._keyframe_cache_path(src)
+
+    captured: dict[str, Any] = {}
+    real_replace = seg_mod.os.replace
+
+    def fake_replace(src_path: str, dst_path: str) -> None:
+        captured["src"] = str(src_path)
+        captured["dst"] = str(dst_path)
+        real_replace(src_path, dst_path)
+
+    monkeypatch.setattr(seg_mod.os, "replace", fake_replace)
+    seg_mod._save_keyframe_cache(src, [0.0, 1.5, 3.0])
+
+    assert captured["dst"] == str(cache_path)
+    tmp_name = Path(captured["src"]).name
+    pid = str(seg_mod.os.getpid())
+    assert pid in tmp_name, f"tmp name {tmp_name!r} missing pid {pid}"
+    # token_hex(4) == 8 hex chars. Look for the .{pid}.{8-hex}. fragment.
+    import re
+    assert re.search(rf"\.{pid}\.[0-9a-f]{{8}}\.json\.tmp$", tmp_name), (
+        f"tmp name {tmp_name!r} does not match expected pid+random pattern"
+    )
+    assert cache_path.exists()
+
+
+def test_keyframe_cache_concurrent_writers_no_torn_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
+) -> None:
+    """v1.0.1 Task 1: two concurrent _save_keyframe_cache writes on the
+    same source must land as one whole payload, never a torn merge.
+
+    We race two threads on the same path; afterwards the final JSON must
+    decode cleanly and equal one of the two written keyframe lists in
+    full. A torn write (mixed bytes) would either fail to parse or
+    contain a value neither thread emitted.
+    """
+    import threading
+
+    src = tmp_path / "x.mp4"
+    src.write_bytes(b"x")
+
+    kfs_a = [float(i) for i in range(200)]
+    kfs_b = [float(i) + 0.5 for i in range(200)]
+    errors: list[BaseException] = []
+
+    def writer(kfs: list[float]) -> None:
+        try:
+            for _ in range(10):
+                seg_mod._save_keyframe_cache(src, kfs)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t1 = threading.Thread(target=writer, args=(kfs_a,))
+    t2 = threading.Thread(target=writer, args=(kfs_b,))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"writer raised: {errors}"
+    cache_path = seg_mod._keyframe_cache_path(src)
+    raw = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert raw["keyframes"] in (kfs_a, kfs_b), (
+        "final cache content does not match either writer's whole payload "
+        "— a torn write slipped through atomic replace"
+    )
+    # No leftover tmp files in the cache dir.
+    leftovers = list(cache_path.parent.glob("*.tmp"))
+    assert not leftovers, f"leftover tmp files: {leftovers}"

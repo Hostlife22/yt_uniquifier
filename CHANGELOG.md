@@ -10,6 +10,47 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
+## [Unreleased] — v1.0.1 (in progress)
+
+Hotfix release. Backwards-compatible (no Plan/Profile field changes).
+See `specs/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
+
+### Fixed
+
+- **Keyframe-cache atomic write** — `_save_keyframe_cache` now uses the
+  same `{pid}.{secrets.token_hex(4)}` tmp suffix + `fsync` + `os.replace`
+  pattern as `encoder.py`. Two concurrent batch jobs writing the same
+  source can no longer race on a PID-only tmp name and corrupt the cache.
+- **Audio-chain `__IN__` guard** — `pipeline._wrap_chain_str` now raises
+  `PipelineError` if a builder emits a naked `[in_label]` prefix in its
+  `filter_str`. The video path already routed through this helper; the
+  three audio wrap sites (FilterGraph, build_main_audio_command, and
+  build_main_audio_command_windowed) now share the same guard.
+
+### Added
+
+- **Per-segment SHA-256 on resume** — `Segment` carries an optional
+  `sha256` field; the orchestrator streams a digest after each
+  successful encode and the checkpoint store re-verifies every `done`
+  segment on resume. Truncated / corrupted segment files are demoted
+  back to `pending` so the next run re-encodes only the broken segment.
+  Pre-v1.0.1 state files (no `sha256`) are still accepted as-is.
+- **Disk-space preflight** — new `_check_disk_space` rejects runs whose
+  estimated output exceeds `free × 1.1` (`error`) and warns at
+  `free × 1.5` (`warn`). Computed from source bitrate × duration × 1.3
+  overhead; skipped when no `work_dir` is given. Walks up to the
+  nearest existing ancestor so it can run before the orchestrator
+  `mkdir`s.
+- **Supply-chain quickwins** —
+  `.github/dependabot.yml` (pip + actions + docker, weekly, grouped
+  minor+patch); `.github/workflows/codeql.yml` (security-extended
+  suite, weekly + on-push); `requirements-lock.txt` (pinned + hashed
+  via `uv pip compile`, optional install path via `make dev USE_LOCK=1`
+  and CI auto-prefers the lockfile when present).
+- **Orchestrator final flush** — `run_full` now calls `store.flush()`
+  after the segment loop so per-segment marks are persisted even on
+  resume paths that skip the `set_main_audio` / `set_loudnorm` flush.
+
 ## [v1.0.0] — 2026-06-14
 
 **First stable release.** API surface (`Plan`, `Profile`, `RunEvent`,

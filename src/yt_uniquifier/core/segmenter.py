@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import subprocess
 import time
 from collections.abc import Callable
@@ -181,12 +182,20 @@ def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
     path = _keyframe_cache_path(source)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": 1, "written_at": time.time(), "keyframes": kfs}
-    # PID suffix prevents tmp-name collisions across concurrent batch jobs
-    # processing the same source. fsync before os.replace matches the
-    # checkpoint.py atomic-write pattern — without it a crash between
-    # rename and page-write can leave a zero-byte cache file that forces
-    # a 30-60s full re-scan on the next run.
-    tmp = path.with_suffix(f".json.{os.getpid()}.tmp")
+    # PID + random-hex tmp suffix + fsync before os.replace. Mirrors the
+    # encoder.py::_save_cache pattern so the keyframe cache survives the
+    # same two failure modes:
+    #   1) Concurrent `yt-uniq batch` jobs racing on the same source —
+    #      PID alone prevents cross-process tmp collisions.
+    #   2) Same-process re-entry (e.g. two list_keyframes calls in a
+    #      short window from one worker) — a PID-only tmp can still
+    #      collide and produce a torn read on the loser. The random
+    #      suffix makes the tmp name unique per call.
+    # Without fsync a crash between the page-cache write and the rename
+    # leaves a zero-byte cache file that forces a 30-60s full re-scan.
+    tmp = path.with_name(
+        f"{path.stem}.{os.getpid()}.{secrets.token_hex(4)}.json.tmp"
+    )
     with tmp.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps(payload))
         fh.flush()

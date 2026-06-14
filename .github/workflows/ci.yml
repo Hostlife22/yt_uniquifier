@@ -52,9 +52,23 @@ jobs:
         run: choco install ffmpeg --yes --no-progress
 
       - name: Install package
+        # v1.0.1 Task 7: prefer the pinned-and-hashed dependency closure
+        # in ``requirements-lock.txt`` so every CI run installs the same
+        # versions (and verifies the wheel hashes). Fall back to the
+        # pyproject.toml ranges only if the lockfile is missing — that
+        # keeps the workflow green during the brief window between a
+        # new dependency landing in pyproject and the next ``make lock``.
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,gui]"
+          if [ -f requirements-lock.txt ]; then
+            echo "Installing pinned closure from requirements-lock.txt"
+            pip install --require-hashes -r requirements-lock.txt
+            pip install -e ".[dev,gui]" --no-deps
+          else
+            echo "requirements-lock.txt missing — falling back to ranges"
+            pip install -e ".[dev,gui]"
+          fi
 
       - name: Ruff check
         run: ruff check .

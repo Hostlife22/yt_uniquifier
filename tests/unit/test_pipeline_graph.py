@@ -248,3 +248,59 @@ def test_unknown_transform_raises(tmp_path: Path) -> None:
     plan = _plan(src, [TransformConfig(id="video.does_not_exist")])
     with pytest.raises(Exception, match="unknown transform"):
         FilterGraph(plan, tmp_path / "out.mp4").build()
+
+
+def test_audio_chain_rejects_naked_in_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v1.0.1 Task 2: a chain builder that returns ``[in_label]...`` in
+    its ``filter_str`` would otherwise produce a double-prefixed
+    ``[in][in]...[out]`` filter_complex. ``_wrap_chain_str`` must detect
+    this and raise PipelineError so the violation surfaces eagerly at
+    ``build()`` rather than at ffmpeg invocation time.
+
+    We register a misbehaving audio transform via a fresh entry in the
+    transform registry, build a Plan, and assert ``PipelineError``.
+    """
+    from pydantic import BaseModel
+
+    from yt_uniquifier.core.errors import PipelineError
+    from yt_uniquifier.core.transforms import base as tbase
+
+    class _NoOpParams(BaseModel):
+        pass
+
+    def _bad_audio_builder(
+        params: _NoOpParams,
+        alloc: tbase.LabelAllocator,
+        in_label: str,
+        *,
+        rng: object | None = None,
+    ) -> tbase.FilterChain:
+        out_label = alloc.next("a")
+        # Deliberately misbehaving: emit the [in_label] prefix ourselves.
+        bad_filter_str = f"[{in_label}]volume=1.0"
+        return tbase.FilterChain(
+            in_label=in_label,
+            out_label=out_label,
+            filter_str=bad_filter_str,
+        )
+
+    spec_id = "audio.test_bad_prefix_v101"
+    spec = tbase.TransformSpec(
+        id=spec_id,
+        kind="audio",
+        schema=_NoOpParams,
+        build=_bad_audio_builder,
+        defaults={},
+    )
+    # The registry is module-global; register once per test process.
+    if spec_id not in tbase._REGISTRY:
+        tbase.register(spec)
+    # Reset between identical-named tests in the same process: not needed
+    # because we re-use the same spec each run.
+
+    src = _src(tmp_path, n_audio=1)
+    plan = _plan(src, [TransformConfig(id=spec_id)])
+    with pytest.raises(PipelineError, match="emitted .* prefix"):
+        FilterGraph(plan, tmp_path / "out.mp4").build()

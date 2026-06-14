@@ -1,0 +1,81 @@
+# Dependabot config — yt-uniquifier (v1.0.1)
+#
+# Policy:
+#   * pip:      patch + minor grouped per week; major bumps stay separate
+#               so they can be reviewed in isolation.
+#   * actions:  patch + minor grouped per week; trivial keep-up changes.
+#   * docker:   patch + minor grouped per week; base-image hardening.
+#
+# ABI-pinned deps that must NOT auto-bump majors:
+#   * PyQt6      — Qt API moves silently across majors.
+#   * torch      — optional [ml-nc] extra, but a torch major bumps
+#                   onnxruntime in lockstep; not worth Dependabot churn.
+#
+# All ecosystems share Sunday-evening UTC schedules so the maintainer
+# wakes up to at most three PRs per week.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "02:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    rebase-strategy: "auto"
+    groups:
+      python-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "PyQt6"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "PyQt6-Qt6"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - "dependencies"
+      - "python"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "02:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    rebase-strategy: "auto"
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "02:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 2
+    rebase-strategy: "auto"
+    groups:
+      docker-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "docker"

@@ -60,7 +60,11 @@ def test_resume_same_plan_loads_existing(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     store1 = CheckpointStore(tmp_path / "work", plan)
     store1.init_or_resume(_segments())
-    store1.mark(0, "done", out_path=tmp_path / "seg0.mkv")
+    # v1.0.1: a ``done`` segment is verified against its on-disk file
+    # on resume — write a non-empty payload so the verifier accepts it.
+    seg0 = tmp_path / "seg0.mkv"
+    seg0.write_bytes(b"encoded segment payload")
+    store1.mark(0, "done", out_path=seg0)
     # B4 (v0.6.0): mark() is debounced; force a flush so the second
     # store reads the post-mark state from disk. In production this
     # happens automatically at phase boundaries (set_loudnorm /
@@ -143,3 +147,82 @@ def test_corrupt_state_raises(tmp_path: Path) -> None:
     (work / "state.json").write_text("{ this is not json")
     with pytest.raises(CheckpointError, match="unreadable"):
         CheckpointStore(work, _plan(tmp_path)).init_or_resume(_segments())
+
+
+def test_resume_demotes_truncated_segment(tmp_path: Path) -> None:
+    """v1.0.1 Task 3: a 0-byte ``done`` segment is demoted to pending."""
+    plan = _plan(tmp_path)
+    store1 = CheckpointStore(tmp_path / "work", plan)
+    store1.init_or_resume(_segments())
+    seg0 = tmp_path / "seg0.mkv"
+    seg0.write_bytes(b"good payload")
+    from yt_uniquifier.core.checkpoint import sha256_file
+    store1.mark(0, "done", out_path=seg0, sha256=sha256_file(seg0))
+    store1.close()
+
+    # Truncate to 0 bytes (the failure mode the task description targets:
+    # a crash that leaves an empty placeholder file on disk).
+    seg0.write_bytes(b"")
+
+    store2 = CheckpointStore(tmp_path / "work", plan)
+    segs = store2.init_or_resume(_segments())
+    assert segs[0].status == "pending", "0-byte segment should be demoted"
+
+
+def test_resume_demotes_sha256_mismatch(tmp_path: Path) -> None:
+    """v1.0.1 Task 3: a ``done`` segment whose on-disk sha256 disagrees
+    with the stored digest is demoted on resume.
+    """
+    plan = _plan(tmp_path)
+    store1 = CheckpointStore(tmp_path / "work", plan)
+    store1.init_or_resume(_segments())
+    seg0 = tmp_path / "seg0.mkv"
+    seg0.write_bytes(b"original encoded payload")
+    from yt_uniquifier.core.checkpoint import sha256_file
+    store1.mark(0, "done", out_path=seg0, sha256=sha256_file(seg0))
+    store1.close()
+
+    # Corrupt the segment file in-place (e.g. partial overwrite).
+    seg0.write_bytes(b"different content of same length!!")
+
+    store2 = CheckpointStore(tmp_path / "work", plan)
+    segs = store2.init_or_resume(_segments())
+    assert segs[0].status == "pending", "sha256 mismatch should be demoted"
+
+
+def test_resume_accepts_done_with_no_stored_sha256(tmp_path: Path) -> None:
+    """v1.0.1 Task 3: pre-v1.0.1 state files have no ``sha256`` field;
+    those segments must NOT be demoted just because the digest is
+    absent, otherwise every upgrade would discard prior progress.
+    """
+    plan = _plan(tmp_path)
+    store1 = CheckpointStore(tmp_path / "work", plan)
+    store1.init_or_resume(_segments())
+    seg0 = tmp_path / "seg0.mkv"
+    seg0.write_bytes(b"legacy payload")
+    # Mark done WITHOUT sha256 — emulates the pre-v1.0.1 mark() signature.
+    store1.mark(0, "done", out_path=seg0)
+    store1.close()
+
+    store2 = CheckpointStore(tmp_path / "work", plan)
+    segs = store2.init_or_resume(_segments())
+    assert segs[0].status == "done"
+
+
+def test_mark_pending_clears_stale_sha256(tmp_path: Path) -> None:
+    """v1.0.1 Task 3: a ``pending`` re-mark must clear any prior sha256
+    so the next ``done`` doesn't accidentally compare against the
+    earlier attempt's digest.
+    """
+    plan = _plan(tmp_path)
+    store = CheckpointStore(tmp_path / "work", plan)
+    store.init_or_resume(_segments())
+    seg0 = tmp_path / "seg0.mkv"
+    seg0.write_bytes(b"v1")
+    from yt_uniquifier.core.checkpoint import sha256_file
+    store.mark(0, "done", out_path=seg0, sha256=sha256_file(seg0))
+    store.mark(0, "pending")
+    store.flush()
+
+    raw = json.loads(store.state_path.read_text(encoding="utf-8"))
+    assert raw["segments"][0]["sha256"] is None

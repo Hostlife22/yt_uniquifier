@@ -88,7 +88,13 @@ def test_checkpoint_store_concurrent_mark_no_lost_updates(tmp_path: Path) -> Non
     def _worker(i: int) -> None:
         try:
             barrier.wait()
-            store.mark(i, "done", out_path=tmp_path / f"out_{i:04d}.mkv")
+            # v1.0.1: the on-resume verifier demotes ``done`` segments
+            # whose ``out_path`` is missing — write a non-empty payload
+            # so the integrity of the concurrent mark itself is what's
+            # under test, not the verifier's demotion path.
+            out = tmp_path / f"out_{i:04d}.mkv"
+            out.write_bytes(b"x")
+            store.mark(i, "done", out_path=out)
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 

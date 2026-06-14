@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib as _hashlib
 import logging as _logging
+import shutil as _shutil
 import threading as _threading
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
@@ -34,10 +36,20 @@ _COLOR_TRANSFORMS = {"video.color_eq", "video.noise"}
 
 
 def preflight(
-    source: SourceMeta, plan: Plan, encoder: EncoderCandidate
+    source: SourceMeta,
+    plan: Plan,
+    encoder: EncoderCandidate,
+    *,
+    work_dir: Path | None = None,
 ) -> list[PreflightFinding]:
     findings: list[PreflightFinding] = []
 
+    # v1.0.1: disk-space check runs before encoder/bitrate so a thin-margin
+    # warning sits at the top of the report. Skipped when work_dir is None
+    # (callers that build a Plan without committing to a run dir — e.g.
+    # the GUI calibration screen — don't need the check).
+    if work_dir is not None:
+        findings.extend(_check_disk_space(source, work_dir))
     findings.append(_check_container(source))
     findings.append(_check_video_codec(source))
     findings.extend(_check_audio_streams(source))
@@ -176,6 +188,123 @@ def _check_subtitle_burnin(plan: Plan) -> list[PreflightFinding]:
 
 def has_fail(findings: list[PreflightFinding]) -> bool:
     return any(f.severity == "fail" for f in findings)
+
+
+# v1.0.1: filter-graph overhead + per-segment header padding empirically
+# adds ~25-35% to the raw bitrate-times-duration estimate on 1080p
+# libx264 runs. 1.3× is the safe upper end; the actual rule the run
+# stays within is the .1× warning margin below.
+_DISK_BYTES_OVERHEAD_FACTOR = 1.3
+_DISK_FREE_FAIL_FACTOR = 1.1
+_DISK_FREE_WARN_FACTOR = 1.5
+_DEFAULT_TARGET_BITRATE_BPS = 8_000_000
+
+
+def _check_disk_space(
+    source: SourceMeta, work_dir: Path,
+) -> list[PreflightFinding]:
+    """v1.0.1: refuse runs that almost certainly won't fit on disk.
+
+    Estimate ``estimated_bytes ≈ source.duration_sec × target_bitrate ×
+    1.3`` where ``target_bitrate`` is the source's declared video
+    bitrate (falling back to 8 Mbps when missing). Compare against
+    ``shutil.disk_usage(work_dir).free``:
+
+      * ``error`` (severity ``fail``) when ``free < estimated × 1.1`` —
+        ffmpeg would fill the disk mid-segment and leave a half-encoded
+        state.json that is harder to recover from than refusing up
+        front;
+      * ``warn`` when ``free < estimated × 1.5`` — the run probably fits
+        but the safety margin for swap, system updates, and other
+        processes is thin enough that the user should be told.
+
+    The check is skipped when ``work_dir`` doesn't exist yet — the
+    orchestrator creates it after preflight runs, so callers driving
+    a fresh dir should resolve disk_usage against the nearest existing
+    parent.
+    """
+    # Walk up to the nearest existing ancestor so the check can run
+    # before the orchestrator's ``options.work_dir.mkdir`` call.
+    probe_dir: Path | None = work_dir
+    while probe_dir is not None and not probe_dir.exists():
+        probe_dir = probe_dir.parent if probe_dir.parent != probe_dir else None
+    if probe_dir is None:
+        # Couldn't resolve any existing parent (Path("/nonexistent")
+        # on a system without root? — treat as informational, not a
+        # blocking error).
+        return [PreflightFinding(
+            code="disk.unknown",
+            severity="warn",
+            message=(
+                f"Could not resolve a real parent for {work_dir} — "
+                "skipping disk-space check."
+            ),
+            suggestion=(
+                "Pass --work-dir to a directory that exists or whose "
+                "parent does."
+            ),
+        )]
+
+    bitrate = _DEFAULT_TARGET_BITRATE_BPS
+    if source.video and source.video[0].bit_rate:
+        # ffprobe bit_rate is in bits/sec.
+        bitrate = source.video[0].bit_rate
+    estimated = int(
+        max(0.0, source.duration_sec)
+        * (bitrate / 8.0)
+        * _DISK_BYTES_OVERHEAD_FACTOR,
+    )
+    try:
+        usage = _shutil.disk_usage(probe_dir)
+    except OSError as exc:
+        return [PreflightFinding(
+            code="disk.probe_failed",
+            severity="warn",
+            message=f"Could not query disk usage for {probe_dir}: {exc}",
+            suggestion=(
+                "Verify the path is on a mounted filesystem before running."
+            ),
+        )]
+
+    free = usage.free
+    estimated_gib = estimated / (1024 ** 3)
+    free_gib = free / (1024 ** 3)
+    if free < estimated * _DISK_FREE_FAIL_FACTOR:
+        return [PreflightFinding(
+            code="disk.space.insufficient",
+            severity="fail",
+            message=(
+                f"Free space on {probe_dir} is {free_gib:.1f} GiB; "
+                f"the run is estimated to need ~{estimated_gib:.1f} GiB "
+                "(source bitrate × duration × 1.3 overhead). Refusing to "
+                "start so a mid-run disk-full failure doesn't leave a "
+                "half-encoded state.json."
+            ),
+            suggestion=(
+                "Free at least "
+                f"{(estimated * _DISK_FREE_FAIL_FACTOR - free) / (1024**3):.1f}"
+                " GiB or point --work-dir at a roomier filesystem."
+            ),
+        )]
+    if free < estimated * _DISK_FREE_WARN_FACTOR:
+        return [PreflightFinding(
+            code="disk.space.tight",
+            severity="warn",
+            message=(
+                f"Free space on {probe_dir} is {free_gib:.1f} GiB versus "
+                f"~{estimated_gib:.1f} GiB estimated — the safety margin "
+                "for swap, system updates, and other processes is thin."
+            ),
+            suggestion="Free a few GiB before long unattended runs.",
+        )]
+    return [PreflightFinding(
+        code="disk.space.ok",
+        severity="ok",
+        message=(
+            f"Free space on {probe_dir}: {free_gib:.1f} GiB "
+            f"(estimated need ~{estimated_gib:.1f} GiB)."
+        ),
+    )]
 
 
 def _check_container(source: SourceMeta) -> PreflightFinding:

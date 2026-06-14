@@ -245,6 +245,14 @@ class Segment(BaseModel):
     status: SegmentStatus = "pending"
     src_path: Path | None = None
     out_path: Path | None = None
+    # v1.0.1: SHA-256 of the encoded segment at the moment it was marked
+    # ``done``. On resume, the orchestrator re-hashes ``out_path`` and
+    # demotes the segment back to ``pending`` if the on-disk file is
+    # missing, zero bytes, or has a different hash — catching truncated
+    # or corrupted segments that previous resumes would silently keep.
+    # Post-hoc field: NOT part of compute_plan_hash() — adding a hash
+    # must not invalidate every existing resume cache.
+    sha256: str | None = None
 
 
 class QAReport(BaseModel):

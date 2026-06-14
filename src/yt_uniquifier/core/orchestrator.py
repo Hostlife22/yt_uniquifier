@@ -176,7 +176,9 @@ def _run_full_impl(
     cancel_token: CancelToken | None,
     pause_token: PauseToken | None = None,
 ) -> RunSummary:
-    findings = preflight(plan.source, plan, plan.encoder)
+    findings = preflight(
+        plan.source, plan, plan.encoder, work_dir=options.work_dir,
+    )
     if options.enforce_preflight and has_fail(findings):
         emit(RunEvent(kind="error", payload={"phase": "preflight",
                                              "findings": [f.model_dump() for f in findings]}))
@@ -336,7 +338,19 @@ def _run_full_body(
                 raise PipelineError(
                     f"segment {idx} reported done but {out} is missing/empty"
                 )
-            store.mark(idx, "done", src_path=src, out_path=out)
+            # v1.0.1: stream a SHA-256 of the encoded segment so the
+            # next resume can detect a truncated or corrupted segment
+            # file and demote it back to ``pending``. On a modern CPU
+            # this runs at ~500 MB/s; an OS read error here is rare but
+            # non-fatal — record the segment as done without a hash and
+            # let the next resume cycle accept it (legacy-state-file
+            # path in checkpoint._verify_done_segments_on_disk).
+            try:
+                from yt_uniquifier.core.checkpoint import sha256_file
+                seg_sha256: str | None = sha256_file(out)
+            except OSError:
+                seg_sha256 = None
+            store.mark(idx, "done", src_path=src, out_path=out, sha256=seg_sha256)
             _maybe_emit_divergence(idx, out, seg_by_idx, options, plan, emit)
 
         try:
@@ -369,6 +383,14 @@ def _run_full_body(
                     "message": f"failed to re-mark segments: {flush_exc}",
                 }))
             raise
+
+    # v1.0.1: force a flush after the segment loop so the per-segment
+    # sha256s recorded by ``mark(..., sha256=...)`` land in state.json
+    # before we move on. Without this the marks stay in the debounce
+    # window and a process exit (or a follow-up resume that touches a
+    # branch which doesn't call set_loudnorm / set_main_audio) would
+    # read a stale "pending" for segments that finished successfully.
+    store.flush()
 
     # Main audio (cached via state.json).
     main_audio = store.get_main_audio()

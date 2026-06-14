@@ -69,9 +69,20 @@ def _wrap_chain_str(in_label: str, filter_str: str, out_label: str) -> str:
     For those, the wrap only substitutes ``[__IN__]`` and emits the
     filter_str raw — the builder is responsible for its own trailing
     ``[out_label]``. Single-input transforms get the legacy wrap.
+
+    Defensive guard (v1.0.1): a builder that emits its own ``[in_label]``
+    prefix would otherwise produce a double-prefixed
+    ``[in][in]<expr>[out]`` filter_complex that ffmpeg rejects with an
+    obscure "Output pad with label '...' is not connected" error. Reject
+    the misbehaving builder eagerly with a clear message.
     """
     if f"[{IN_PLACEHOLDER}]" in filter_str:
         return filter_str.replace(f"[{IN_PLACEHOLDER}]", f"[{in_label}]")
+    if filter_str.startswith(f"[{in_label}]"):
+        raise PipelineError(
+            f"chain builder emitted [{in_label}] prefix; use __IN__ "
+            "placeholder or return filter_str without the leading label",
+        )
     return f"[{in_label}]{filter_str}[{out_label}]"
 
 
@@ -284,7 +295,7 @@ class FilterGraph:
                 else:
                     chain = call_build(spec, params, self.alloc, a_label, rng=rng)
                 a_chains.append(
-                    f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"
+                    _wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label)
                 )
                 a_label = chain.out_label
 
@@ -692,7 +703,9 @@ def build_main_audio_command(
             chain = build_apply(ln_params, measurement, alloc, a_label, rng=rng)
         else:
             chain = call_build(spec, params, alloc, a_label, rng=rng)
-        a_chains.append(f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]")
+        a_chains.append(
+            _wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label)
+        )
         a_label = chain.out_label
 
     filter_complex = ";".join(a_chains)
@@ -803,7 +816,7 @@ def build_main_audio_command_windowed(
             params = spec.schema.model_validate({**spec.defaults, **tc.params})
             chain = call_build(spec, params, alloc, a_label, rng=win_rng)
             chain_parts.append(
-                f"[{chain.in_label}]{chain.filter_str}[{chain.out_label}]"
+                _wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label)
             )
             a_label = chain.out_label
         window_chains.append(";".join(chain_parts))
@@ -844,7 +857,9 @@ def build_main_audio_command_windowed(
             rng=random.Random(ln_seed),
         )
         final_label = ln_chain.out_label
-        loudnorm_str = f"[{ln_chain.in_label}]{ln_chain.filter_str}[{ln_chain.out_label}]"
+        loudnorm_str = _wrap_chain_str(
+            ln_chain.in_label, ln_chain.filter_str, ln_chain.out_label,
+        )
         all_chains = window_chains + acrossfade_chains + [loudnorm_str]
     else:
         final_label = accumulator
