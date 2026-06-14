@@ -14,6 +14,7 @@ from yt_uniquifier.cli.cmd_queue import queue_app
 from yt_uniquifier.cli.cmd_run import run_cmd
 from yt_uniquifier.cli.cmd_subtitles import subtitles_app
 from yt_uniquifier.cli.cmd_telemetry import telemetry_app
+from yt_uniquifier.cli.cmd_update import update_cmd
 from yt_uniquifier.cli.cmd_worker import worker_cmd
 from yt_uniquifier.core.plugins import drop_disabled_plugins
 
@@ -105,6 +106,7 @@ app.command("qa")(qa_cmd)
 app.command("batch")(batch_cmd)
 app.command("calibrate")(calibrate_cmd)
 app.command("worker")(worker_cmd)
+app.command("update")(update_cmd)
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(queue_app, name="queue")
 app.add_typer(profile_app, name="profile")
