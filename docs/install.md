@@ -16,7 +16,7 @@ desktop-бинарника.
 | Файл                                | OS              | Подпись                | Что внутри                                             |
 |-------------------------------------|-----------------|------------------------|--------------------------------------------------------|
 | `yt-uniq-gui-*.AppImage`            | Linux (x86_64)  | ✅ self-contained       | PyInstaller бандл + **bundled static ffmpeg/ffprobe**  |
-| `yt-uniq-gui-macOS.zip` (`.app`)    | macOS 12+       | ❌ unsigned (см. ниже)  | `.app` бандл; ffmpeg = system (brew install ffmpeg)    |
+| `yt-uniq-gui-macOS.zip` (`.app`)    | macOS 12+       | ⚠️ ad-hoc только (v1.1.0+) — см. ниже | `.app` бандл; ffmpeg = system (brew install ffmpeg)    |
 | `yt-uniq-gui-Windows.zip` (`.exe`)  | Windows 10/11   | ❌ unsigned (см. ниже)  | PyInstaller бандл; ffmpeg = system (`choco install`)   |
 | `SHA256SUMS`                        | все             | —                       | стандартный `sha256sum -c`-формат                       |
 
@@ -41,54 +41,91 @@ AppImage **самодостаточен** — Python, PyQt6 и ffmpeg/ffprobe в
 Распаковывать ничего не нужно; запускается на любом дистрибутиве с
 glibc 2.31+ (Ubuntu 20.04+, Fedora 33+, Debian 11+).
 
-**macOS (unsigned `.app`):**
+**macOS (ad-hoc signed `.app`, v1.1.0+):**
+
+С v1.1.0 бандл проходит ad-hoc codesign (`codesign --sign -`) — это
+**не** Developer ID и **не** notarization, но подпись стабилизирует
+бандл между обновлениями macOS, так что повторных «is damaged and
+can’t be opened» при апгрейдах OS больше нет. Первый запуск
+по-прежнему требует ручного bypass Gatekeeper:
 
 ```bash
 # 1) Скачать + проверить
-curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/yt-uniq-gui-macOS.zip
-curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/SHA256SUMS
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.1.0/yt-uniq-gui-macOS.zip
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.1.0/SHA256SUMS
 shasum -a 256 -c SHA256SUMS --ignore-missing
 
 # 2) Распаковать
 unzip yt-uniq-gui-macOS.zip
 mv yt-uniq-gui.app /Applications/
 
-# 3) Первый запуск — Gatekeeper покажет "cannot be opened because
-#    the developer cannot be verified". Это ожидаемо (v1.0.0 не
-#    подписан). Bypass:
+# 3) Первый запуск — Gatekeeper покажет
+#    "yt-uniq-gui cannot be opened because the developer cannot be verified".
+#    Это ожидаемо: ad-hoc подпись ≠ Developer ID.
 #
-#    Right-click /Applications/yt-uniq-gui.app → Open
-#    → Open Anyway → ввести админ-пароль.
+#    Bypass (один раз):
+#       Right-click /Applications/yt-uniq-gui.app → Open
+#       → Open Anyway → ввести админ-пароль.
 #
-#    После одного раза Gatekeeper запоминает решение.
+#    После этого Gatekeeper запоминает решение, и обычный двойной
+#    клик работает без диалога. Та же UX, что у HandBrake / Audacity
+#    до того, как они купили Apple Developer Program.
+#
+# 4) Альтернатива — снять карантин-флаг вручную:
+xattr -d com.apple.quarantine /Applications/yt-uniq-gui.app
+#    (так делают brew cask formulas; работает без диалога вообще).
 #
 # ffmpeg должен быть в PATH:
 brew install ffmpeg chromaprint
 ```
 
+**Если spctl кричит «code object is not signed at all»** — значит
+скачался pre-v1.1.0 бандл; обновись до последней release или примени
+`codesign --deep --force --sign - /Applications/yt-uniq-gui.app`
+вручную, чтобы получить ту же подпись, которую CI ставит.
+
 **Windows (unsigned `.exe`):**
+
+v1.1.0 продолжает шипиться **без подписи** под Windows — sponsored
+SignPath OSS и коммерческие EV-сертификаты вне scope этого relase
+(см. `specs/v1.0.1-to-v1.3-roadmap.plan.md` § v1.1.0 Task 9). UX
+почти как с unsigned macOS-бандлом: SmartScreen один раз показывает
+warning, дальше тишина.
 
 ```powershell
 # 1) Скачать + проверить (PowerShell 5+)
-Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/yt-uniq-gui-Windows.zip" -OutFile yt-uniq-gui-Windows.zip
-Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/SHA256SUMS" -OutFile SHA256SUMS
+Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.1.0/yt-uniq-gui-Windows.zip" -OutFile yt-uniq-gui-Windows.zip
+Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.1.0/SHA256SUMS" -OutFile SHA256SUMS
 Get-FileHash yt-uniq-gui-Windows.zip -Algorithm SHA256
+# Сверить с строкой в SHA256SUMS. Любой mismatch = повреждён или
+# подменён → НЕ распаковывать.
 
 # 2) Распаковать
 Expand-Archive yt-uniq-gui-Windows.zip -DestinationPath .
 
-# 3) Первый запуск — SmartScreen покажет синее окно
-#    "Windows protected your PC". Это ожидаемо (v1.0.0 не подписан).
-#    Bypass:
-#       More info → Run anyway
+# 3) Первый запуск. Есть два пути.
 #
-#    Альтернатива — `Unblock-File` через PowerShell:
+#    Path A — bypass через UI (для большинства пользователей):
+#       Двойной клик → SmartScreen выдаст синее окно
+#       "Windows protected your PC". Кликнуть "More info" →
+#       "Run anyway". Дальше Windows запоминает решение и
+#       больше не спрашивает.
+#
+#    Path B — снять Mark-Of-The-Web сразу через PowerShell:
 Unblock-File .\yt-uniq-gui\yt-uniq-gui.exe
+#       Или, если разархивирована вся папка:
+Get-ChildItem -Path .\yt-uniq-gui -Recurse | Unblock-File
 .\yt-uniq-gui\yt-uniq-gui.exe
+#       После Unblock-File SmartScreen-диалог не появится вовсе.
 
 # ffmpeg должен быть в PATH:
 choco install ffmpeg
 ```
+
+**Корпоративные Windows-окружения с AppLocker / WDAC:** unsigned
+exe там обычно полностью запрещён и Path A/B не помогут — нужен
+admin override или signed cert. Это backlog-задача (см. roadmap);
+для personal use оба пути выше работают на стоковой Windows 10/11.
 
 ### Почему unsigned на macOS/Windows?
 
@@ -106,6 +143,39 @@ file повреждён или подменён → не запускать, с�
 
 См. `installers/README.md` в репозитории для технических деталей
 будущей signing-pipeline.
+
+### Supply-chain verification (v1.1.0+): cosign + SBOM
+
+Помимо `SHA256SUMS` каждый артефакт в релизе сопровождается
+**cosign keyless-bundle** (`<asset>.cosign.bundle`) и единым
+**CycloneDX SBOM** (`sbom.cdx.json`). Подпись выпускается через
+GitHub OIDC — никаких долгоживущих ключей у мейнтейнера нет,
+поэтому ничего не нужно ротировать, и подменить релиз без записи
+в публичный Sigstore Rekor log невозможно.
+
+```bash
+# Установить cosign один раз:
+brew install cosign           # macOS
+sudo apt install cosign       # Debian/Ubuntu 24.04+
+# Или скачать бинарник: https://github.com/sigstore/cosign/releases
+
+# Проверить любой артефакт (пример — AppImage):
+cosign verify-blob \
+  --bundle yt-uniq-gui-1.1.0-x86_64.AppImage.cosign.bundle \
+  --certificate-identity-regexp 'https://github\.com/Hostlife22/Video-Deduplicator/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  yt-uniq-gui-1.1.0-x86_64.AppImage
+# → Verified OK
+
+# SBOM в CycloneDX 1.5 JSON:
+cyclonedx validate --input-file sbom.cdx.json    # схему проверить
+# Или скормить в Grype / Trivy / OSV-Scanner для CVE-аудита:
+grype sbom:sbom.cdx.json
+```
+
+Если cosign verification фейлит — значит артефакт подменён по
+дороге (CDN, mirror, MITM); качайте напрямую с
+`https://github.com/Hostlife22/Video-Deduplicator/releases`.
 
 ### Когда выбирать source-install вместо бинарника?
 

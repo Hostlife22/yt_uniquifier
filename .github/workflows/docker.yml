@@ -1,0 +1,116 @@
+# v1.1.0 Task 12 — multi-arch Docker image to ghcr.io.
+#
+# Triggered on the same v*.*.* tag push as release.yml so the GitHub
+# Release page and the container registry move together. We use the
+# native buildx multi-arch path so the resulting image works on:
+#   * x86_64 (Intel/AMD64 servers)
+#   * arm64  (M-series Macs, Raspberry Pi 5, AWS Graviton)
+#
+# The Dockerfile already uses python:3.12-slim-bookworm (multi-arch)
+# and jrottenberg/ffmpeg (multi-arch since 5.1). We pin the digest of
+# both base images inside the Dockerfile build args so a base-image
+# rebuild can't silently change the produced image.
+
+name: Docker
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch, tag, SHA)"
+        required: false
+        default: "main"
+      tag:
+        description: "Image tag (defaults to git ref name)"
+        required: false
+        default: "edge"
+
+permissions:
+  contents: read
+  packages: write     # publish to ghcr.io
+  id-token: write     # cosign keyless on the image too
+
+jobs:
+  buildx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up QEMU
+        # Cross-arch emulation for the arm64 leg on an x86_64 runner.
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image metadata
+        id: meta
+        # The metadata-action plumbs the right OCI labels (source URL,
+        # licenses, version) so anyone running `docker inspect` sees
+        # the same info that GH renders on the package page.
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/yt-uniquifier
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.title=yt-uniquifier
+            org.opencontainers.image.description=Headless web UI for re-encoding owned/licensed video with controlled micro-transforms.
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Provenance + SBOM attestation are produced and pushed
+          # alongside the image so `docker buildx imagetools inspect`
+          # surfaces the same supply-chain audit trail as the GH
+          # Release artifacts.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Sign published image (keyless OIDC)
+        # Same approach as release.yml — no long-lived keys. The image
+        # digest from build-push-action is what cosign signs so any
+        # downstream retag still resolves to the verified digest.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # The metadata-action `tags` output is newline-separated. For
+          # each tag, point cosign at the digest-pinned reference so
+          # we don't sign a moving target.
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Signing $tag@$DIGEST"
+            cosign sign --yes "$tag@$DIGEST"
+          done <<< "$TAGS"

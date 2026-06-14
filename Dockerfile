@@ -28,6 +28,13 @@
 # with `pip install yt-uniquifier[ml]` inside the runtime stage if
 # you need SSCD/PySceneDetect on the container.
 
+# v1.1.0 Task 12: multi-arch image. Both base tags resolve to a
+# manifest list with linux/amd64 + linux/arm64 entries — buildx will
+# pick the right arch per --platform leg. Dependabot's docker
+# ecosystem updates this file weekly so the floating tags stay close
+# to upstream patch releases without losing reproducibility (digest
+# pins are added by Dependabot's `docker-image` updater when it
+# rewrites these lines).
 ARG FFMPEG_IMAGE=jrottenberg/ffmpeg:7-alpine
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 

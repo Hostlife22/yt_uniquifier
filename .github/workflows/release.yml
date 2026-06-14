@@ -40,7 +40,8 @@ on:
         default: "main"
 
 permissions:
-  contents: write  # needed by softprops/action-gh-release to draft releases
+  contents: write   # softprops/action-gh-release draft creation
+  id-token: write   # v1.1.0 Task 11: cosign keyless OIDC signing
 
 jobs:
   build:
@@ -121,6 +122,16 @@ jobs:
         if: runner.os != 'macOS'
         run: |
           ls dist/yt-uniq-gui/ | head -5
+
+      - name: Ad-hoc codesign .app bundle (macOS)
+        # v1.1.0 Task 8: ad-hoc signature stabilises the bundle across
+        # macOS updates. Does NOT pass Gatekeeper on its own — users
+        # still right-click → Open the first time per docs/install.md.
+        # Full notarization remains a backlog item if an Apple Developer
+        # Program account materialises.
+        if: runner.os == 'macOS'
+        run: |
+          bash installers/macos/codesign-adhoc.sh dist/yt-uniq-gui.app
 
       - name: Package archive
         shell: bash
@@ -224,7 +235,16 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, appimage]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # softprops/action-gh-release write
+      id-token: write   # v1.1.0 Task 11: cosign keyless OIDC token
     steps:
+      - uses: actions/checkout@v4
+        # v1.1.0 Task 10: cyclonedx-py needs pyproject.toml present at
+        # the repo root to enumerate the declared dependency closure.
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -254,6 +274,61 @@ jobs:
           cd _release
           sha256sum yt-uniq-gui-* > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Set up Python for SBOM
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate CycloneDX SBOM
+        # v1.1.0 Task 10: enumerate the runtime + [gui] dependency
+        # closure as a CycloneDX 1.5 JSON bundle. Users can verify
+        # supply-chain provenance with `cyclonedx validate` or feed
+        # the SBOM into Trivy / Grype / OSV-Scanner.
+        run: |
+          python -m pip install --upgrade pip
+          # Install the package into the runner's Python so
+          # cyclonedx-py's `environment` command sees the full
+          # transitive closure. `--no-deps -e .` would miss runtime
+          # deps; install with [gui] to mirror the .app bundle's
+          # surface.
+          pip install -e ".[gui]"
+          pip install "cyclonedx-bom>=4.4,<5"
+          cyclonedx-py environment \
+            --output-format json \
+            --output-file _release/sbom.cdx.json
+          # Sanity: must be valid JSON with the cyclonedx schema marker.
+          python -c "import json; \
+                     d = json.load(open('_release/sbom.cdx.json')); \
+                     assert d.get('bomFormat') == 'CycloneDX', d.get('bomFormat'); \
+                     print('SBOM components:', len(d.get('components', [])))"
+
+      - name: Install cosign
+        # v1.1.0 Task 11: cosign keyless signing via GitHub OIDC.
+        # No long-lived keys — the workflow's id-token claim is what
+        # Fulcio / Rekor verify against on `cosign verify-blob`.
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Sign release artifacts with cosign
+        # One signed bundle per artifact (incl. SBOM and SHA256SUMS).
+        # The .cosign.bundle file is self-describing (carries the
+        # certificate + Rekor proof) so verification only needs the
+        # public github.com/Hostlife22 identity regexp.
+        run: |
+          cd _release
+          for asset in *; do
+            # Skip already-generated bundles to keep re-runs idempotent.
+            case "$asset" in
+              *.cosign.bundle) continue ;;
+            esac
+            echo "Signing $asset…"
+            cosign sign-blob --yes \
+              --bundle "$asset.cosign.bundle" \
+              "$asset"
+          done
+          ls -la *.cosign.bundle
 
       - name: Publish DRAFT release
         # Draft so a human reviews before users see it. softprops is the
