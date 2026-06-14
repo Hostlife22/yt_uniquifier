@@ -469,11 +469,15 @@ def _terminate(proc: subprocess.Popen[str], wait_sec: float = 5.0) -> None:
 def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
     """Send ``sig`` to the proc's process group on POSIX, direct on Windows.
 
-    On POSIX we try ``os.killpg`` first so silent grandchildren die with
-    the leader; if that fails (process gone, or the proc wasn't actually
-    spawned with ``start_new_session=True`` — e.g. a unit-test fake Popen)
-    we fall back to ``proc.send_signal`` so the legacy single-process
-    path still works.
+    POSIX: try ``os.killpg`` first so silent grandchildren die with the
+    leader; if that fails (process gone, or the proc wasn't actually
+    spawned with ``start_new_session=True`` — e.g. a unit-test fake
+    Popen) fall back to ``proc.send_signal``.
+
+    Windows: ``proc.send_signal`` only accepts CTRL_C_EVENT and
+    CTRL_BREAK_EVENT; arbitrary signals raise ``ValueError``. Map our
+    POSIX vocabulary (SIGINT → graceful, SIGKILL/SIGTERM → hard) onto
+    ``proc.terminate`` / ``proc.kill`` instead.
     """
     if sys.platform != "win32":
         try:
@@ -481,8 +485,15 @@ def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
             return
         except (OSError, ProcessLookupError):
             pass
+        with contextlib.suppress(OSError, ProcessLookupError):
+            proc.send_signal(sig)
+        return
+    # Windows path: collapse POSIX signal vocabulary to terminate/kill.
     with contextlib.suppress(OSError, ProcessLookupError):
-        proc.send_signal(sig)
+        if sig == signal.SIGINT:
+            proc.terminate()
+        else:
+            proc.kill()
 
 
 def _suspend_pid_safe(pid: int) -> bool:

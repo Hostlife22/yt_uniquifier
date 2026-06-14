@@ -30,7 +30,13 @@ def test_set_input_path_emits_signal(isolated_state: AppState) -> None:
 def test_set_input_path_pushes_recent(isolated_state: AppState) -> None:
     isolated_state.set_input_path(Path("/tmp/a.mp4"))
     isolated_state.set_input_path(Path("/tmp/b.mp4"))
-    assert isolated_state.recents == ["/tmp/b.mp4", "/tmp/a.mp4"]
+    # AppState normalises via ``str(Path(...))`` which produces
+    # backslashes on Windows. Match the platform-native form rather
+    # than hard-coding POSIX slashes.
+    assert isolated_state.recents == [
+        str(Path("/tmp/b.mp4")),
+        str(Path("/tmp/a.mp4")),
+    ]
 
 
 def test_recents_dedup(isolated_state: AppState) -> None:

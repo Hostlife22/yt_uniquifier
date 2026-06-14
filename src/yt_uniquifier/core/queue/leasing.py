@@ -21,6 +21,7 @@ Layout:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import socket
 import time
@@ -177,18 +178,45 @@ class FileQueue:
                 continue
             candidate = self.layout.pending / name
             dest = self.host_dir / name
+            # v0.7 R9 — ``os.rename`` on POSIX is the canonical
+            # synchronisation point (atomic via rename(2)). On Windows,
+            # concurrent ``MoveFileEx`` calls against the same source
+            # have been observed to *both* succeed under the GitHub
+            # Actions CI runner — likely a metadata-cache race in the
+            # underlying NTFS layer. We add a per-file ``.__lock__``
+            # marker created with ``O_CREAT | O_EXCL`` (atomic on every
+            # FS we ship to) BEFORE the rename. Whoever creates the
+            # marker first owns the lease; everyone else falls through.
+            # Leading dot so ``_refresh_lease_cursor``'s dotfile filter
+            # naturally skips abandoned locks; otherwise a crashed
+            # worker's leftover ``f0.mp4.__lock__`` would itself appear
+            # as a candidate name on the next refresh.
+            lock_path = candidate.with_name("." + candidate.name + ".__lock__")
+            try:
+                lock_fd = os.open(
+                    str(lock_path),
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o600,
+                )
+            except FileExistsError:
+                continue
+            os.close(lock_fd)
             try:
                 os.rename(candidate, dest)
             except (OSError, FileNotFoundError):
-                # Another worker beat us to this file. Cursor moves
-                # on; refresh happens when the cursor exhausts.
+                # Another worker beat us to this file or it was
+                # removed externally. Cursor moves on; refresh happens
+                # when the cursor exhausts.
+                with contextlib.suppress(OSError):
+                    os.unlink(lock_path)
                 continue
+            with contextlib.suppress(OSError):
+                os.unlink(lock_path)
             if dest.is_symlink():
                 # Hostile or accidental symlink. Drop it, do NOT return
                 # it to pending (an attacker could re-place it). Log via
                 # the side-channel ``.rejected_symlinks`` marker so an
                 # operator can audit.
-                import contextlib
                 with contextlib.suppress(OSError):
                     dest.unlink()
                 marker = self.layout.in_progress / ".rejected_symlinks.log"

@@ -168,9 +168,12 @@ def test_correlate_worker_emits_correlated(tmp_path: Path) -> None:
     from yt_uniquifier.gui.workers.correlate_worker import CorrelateWorker
 
     script = tmp_path / "correlate.py"
-    script.write_text("print('phash↔CID correlation: 0.42')")
+    # Explicit UTF-8 — Windows default ``cp1252`` can't encode ↔ (U+2194).
+    script.write_text(
+        "print('phash↔CID correlation: 0.42')", encoding="utf-8",
+    )
     csv = tmp_path / "validation_log.csv"
-    csv.write_text("src,delta,vmaf\n")
+    csv.write_text("src,delta,vmaf\n", encoding="utf-8")
 
     fake_result = MagicMock()
     fake_result.returncode = 0

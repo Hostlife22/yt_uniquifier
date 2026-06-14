@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from yt_uniquifier.core.transforms import get
@@ -91,7 +93,9 @@ def test_blend_b_has_extra_input() -> None:
         LabelAllocator(),
         "0:v:0",
     )
-    assert c.extra_inputs == ("/tmp/b.mp4",)
+    # ``BlendB.build`` normalises ``b_video_path`` via ``str(Path(...))``
+    # which uses backslashes on Windows. Compare with the platform form.
+    assert c.extra_inputs == (str(Path("/tmp/b.mp4")),)
     assert "scale2ref" in c.filter_str
     assert "blend=all_expr" in c.filter_str
     assert "__B__" in c.filter_str  # placeholder, rewritten by pipeline
