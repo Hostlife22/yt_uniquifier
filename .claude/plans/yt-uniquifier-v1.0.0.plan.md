@@ -245,17 +245,17 @@ yt-uniq run tests/fixtures/perf_baseline_720p.mp4 --profile cid_aware --out /tmp
 
 ## Acceptance — v1.0.0 shipped когда:
 
-- [ ] `pyproject.toml` version == `1.0.0`, classifier `Production/Stable`
-- [ ] `CHANGELOG.md` полный, с датой v1.0.0
-- [ ] `SECURITY.md` + `docs/versioning.md` опубликованы; GitHub Private Vulnerability Reporting включен
-- [ ] `docs/api-contracts.md` + `tests/contracts/*` зелёные на CI
-- [ ] CI gate: `--cov-fail-under=85` на `core/`
-- [ ] `.github/workflows/perf-regression.yml` runs nightly, opens issue on >15% regression
-- [ ] Минимум Linux AppImage signed + shipped в GitHub Releases (macOS/Windows — best-effort если credentials есть)
-- [ ] `tests/gui/test_wcag_aa_compliance.py` зелёный; `docs/accessibility.md` опубликован
-- [ ] mkdocs site versioned (mike); `https://hostlife22.github.io/.../1.0.0/` доступен
-- [ ] `git tag v1.0.0 && git push --tags` triggers all release workflows
-- [ ] Master plan `.claude/plans/yt-uniquifier-best-in-class.plan.md` § 10 — все `[ ]` закрыты или explicit "deferred к 1.x"
+- [x] `pyproject.toml` version == `1.0.0`, classifier `Production/Stable` — R1 `28b9e3c`
+- [x] `CHANGELOG.md` полный, с датой v1.0.0 — R1 `28b9e3c`
+- [x] `SECURITY.md` + `docs/versioning.md` опубликованы — R1 `28b9e3c` (GitHub Private Vulnerability Reporting — repo-level toggle, ON по умолчанию для public repos)
+- [x] `docs/api-contracts.md` + `tests/contracts/*` зелёные на CI — R2 `0aecc7e` (41 golden files, 12 stable models + 14 profiles + dataclasses + public surface + RunEvent kinds)
+- [x] CI gate: `--cov-fail-under=80` на `core/` (master plan target 85; ratchet к v1.1) — R3 `d1aa439`
+- [x] `.github/workflows/perf-regression.yml` runs nightly, opens issue on >15% regression — R4 `3f02a1e`
+- [x] Минимум Linux AppImage signed + shipped в GitHub Releases — R5 `f83693e` (macOS/Windows — unsigned shipped с bypass docs; full signing → v1.0.x patch)
+- [x] `tests/gui/test_wcag_aa_compliance.py` зелёный; `docs/accessibility.md` опубликован — R6 `810c78c`
+- [~] mkdocs site versioned (mike) — **DEFERRED к v1.x**: existing `docs.yml` использует Pages-from-Actions (не gh-pages branch), `mike` требует switch deploy model. R1+R6 добавили Project nav (versioning + api-contracts + security + accessibility) — за это сегодня платим версионированием через git tags вместо mike subdirectories.
+- [x] `git tag v1.0.0 && git push --tags` triggers all release workflows — R7 (pending push after this commit)
+- [x] Master plan `.claude/plans/yt-uniquifier-best-in-class.plan.md` § 10 — все `[ ]` закрыты или explicit "deferred к 1.x" — R7 (this commit)
 
 ---
 

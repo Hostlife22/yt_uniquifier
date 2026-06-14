@@ -1,0 +1,76 @@
+name: Bug report
+description: Something does not behave as documented.
+title: "bug: <one-line summary>"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please fill in the boxes below so we
+        can reproduce locally without back-and-forth. If this is a
+        **security vulnerability**, do not file it here — see
+        [`SECURITY.md`](https://github.com/Hostlife22/yt-uniquifier/blob/main/SECURITY.md)
+        for the private disclosure channel.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear description of the unexpected behaviour.
+      placeholder: "When I run `yt-uniq run input.mp4 --profile soft`, the output is …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What you expected to happen, with a pointer to the doc that promised it if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: |
+        Exact command + flags, smallest input that triggers the bug.
+        Generate a synthetic input with
+        `ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=10" -f lavfi -i "sine=frequency=440:duration=10" -shortest sample.mp4`
+        if you cannot share the real file.
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Paste the output of `yt-uniq probe` (or `yt-uniq --version` plus
+        `ffmpeg -version | head -1`). Include OS, Python, and which install
+        method (pip / AppImage / .app.zip / .zip).
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / stacktrace
+      description: |
+        Re-run with `--verbose` or check `~/.config/yt_uniquifier/crash.log`
+        (GUI). Redact paths if needed.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I tested with the latest stable release (see `CHANGELOG.md`).
+          required: true
+        - label: This is not a security issue (those go through `SECURITY.md`).
+          required: true

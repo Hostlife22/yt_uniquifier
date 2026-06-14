@@ -1,0 +1,73 @@
+name: Feature request
+description: New functionality that does not change a stable contract.
+title: "feat: <one-line summary>"
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for **additive** features: new transforms,
+        new CLI flags that default to a no-op, new GUI panels, new
+        profiles. Changes that would alter `Plan`, `Profile`, `RunEvent`,
+        an existing CLI flag, or a shipped profile require an
+        [RFC](https://github.com/Hostlife22/yt-uniquifier/issues/new?template=rfc.yml)
+        instead — see `docs/api-contracts.md` for the stable surface.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: |
+        The user-facing pain point. Be concrete: "calibration takes
+        15 minutes on my dataset" is actionable; "I want it faster"
+        is not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How you'd like it to work — example commands, screenshots,
+        or pseudo-code. We don't need a complete design, just enough
+        for triage to grasp the shape.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Workarounds you tried, other tools that do this, or other
+        approaches you weighed and rejected. Helps us avoid
+        reinventing prior art.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Surface area
+      description: Which layer does this touch?
+      options:
+        - "Core (pipeline / transforms / orchestrator)"
+        - "CLI"
+        - "GUI"
+        - "Web UI"
+        - "Profiles / preflight"
+        - "QA / calibration"
+        - "Docs / examples"
+        - "Build / packaging / CI"
+        - "Multiple / not sure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I confirmed this is additive (no stable-contract change). Otherwise I'd open an RFC.
+          required: true
+        - label: I searched existing issues for duplicates.
+          required: true

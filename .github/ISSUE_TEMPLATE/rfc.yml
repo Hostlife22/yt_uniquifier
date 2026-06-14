@@ -1,0 +1,101 @@
+name: RFC (Request For Comments)
+description: Propose a change to a stable contract (Plan / Profile / RunEvent / CLI flag / shipped profile).
+title: "rfc: <one-line summary>"
+labels: ["rfc", "needs-discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for any change to a **stable contract** (see
+        [`docs/api-contracts.md`](https://github.com/Hostlife22/yt-uniquifier/blob/main/docs/api-contracts.md)):
+        adding/removing/renaming/retyping fields on pydantic models,
+        changing CLI flag semantics, removing shipped profiles, adding
+        new `RunEvent.kind` literals.
+
+        **Minimum 7-day comment window** before acceptance. Two
+        maintainer `LGTM` + zero `Block` → ready to merge. The
+        process is described in
+        [`CONTRIBUTING.md § RFC process`](https://github.com/Hostlife22/yt-uniquifier/blob/main/CONTRIBUTING.md#rfc-process).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: |
+        What is broken or missing today? Concrete failure modes, not
+        wishes. Cite the file/line or doc section that makes the
+        current behaviour insufficient.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: |
+        The proposed change in enough detail that a reviewer can
+        evaluate it without reading your branch. Include the new
+        field/flag signature, default value, validation rules, and
+        anything observable from outside the codebase.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: |
+        At least two alternatives you considered and why you ruled
+        them out. "Do nothing" is always a valid alternative —
+        explain why the cost of the status quo exceeds the cost of
+        the change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: migration
+    attributes:
+      label: Migration plan
+      description: |
+        How existing users move from before to after. Cover:
+        deprecation window, `extra=forbid` behaviour, snapshot
+        goldens regeneration, CHANGELOG wording, profile YAML
+        backward compatibility.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bump
+    attributes:
+      label: SemVer classification
+      description: Which version bump does this require?
+      options:
+        - "PATCH (bug fix, no observable contract change)"
+        - "MINOR (additive, backward-compatible new field/flag)"
+        - "MAJOR (breaking change — batched for next major)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Affected stable surfaces
+      description: |
+        List every stable contract this RFC touches. Use the
+        identifiers from `docs/api-contracts.md` (e.g. `Plan.segments`,
+        `RunEvent.kind="progress"`, `cli.run --workers`, profile
+        `cid_aware.yaml`).
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I read `docs/versioning.md` and confirm this is an RFC-required change.
+          required: true
+        - label: I am willing to update `docs/api-contracts.md` + regen snapshot goldens as part of the implementation PR.
+          required: true
+        - label: I understand the 7-day minimum comment window.
+          required: true
