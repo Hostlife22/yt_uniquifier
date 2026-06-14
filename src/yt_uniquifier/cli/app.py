@@ -9,6 +9,7 @@ from yt_uniquifier.cli.cmd_profile import profile_app
 from yt_uniquifier.cli.cmd_qa import qa_cmd
 from yt_uniquifier.cli.cmd_queue import queue_app
 from yt_uniquifier.cli.cmd_run import run_cmd
+from yt_uniquifier.cli.cmd_subtitles import subtitles_app
 from yt_uniquifier.cli.cmd_worker import worker_cmd
 
 app = typer.Typer(
@@ -39,3 +40,4 @@ app.command("worker")(worker_cmd)
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(queue_app, name="queue")
 app.add_typer(profile_app, name="profile")
+app.add_typer(subtitles_app, name="subtitles")

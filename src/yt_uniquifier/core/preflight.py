@@ -54,6 +54,7 @@ def preflight(
     findings.extend(_check_tonemap_order(plan))
     findings.extend(_check_tonemap_sdr_input(plan, source))
     findings.extend(_check_blend_b_input(plan))
+    findings.extend(_check_subtitle_burnin(plan))
     return findings
 
 
@@ -119,6 +120,56 @@ def _check_blend_b_input(plan: Plan) -> list[PreflightFinding]:
                 code="blend_b.path.not_found", severity="fail",
                 message=f"video.blend_b.b_video_path does not exist: {b_path}",
                 suggestion="Fix the path, or disable video.blend_b in the profile.",
+            ))
+    return out
+
+
+def _check_subtitle_burnin(plan: Plan) -> list[PreflightFinding]:
+    """Verify the burn-in subtitle file exists for every enabled video.subtitles.
+
+    v0.9.0 R2 / F14 — the transform itself is pure (no I/O at build
+    time); the SRT must be on disk before run_full starts so a missing
+    or mistyped path is caught at preflight rather than mid-encode.
+    Use `yt-uniq subtitles generate` to produce one via whisper.cpp.
+    """
+    from pathlib import Path as _Path
+    out: list[PreflightFinding] = []
+    for tc in plan.profile.transforms:
+        if not tc.enabled or tc.id != "video.subtitles":
+            continue
+        params = tc.params or {}
+        sub_path = params.get("subtitle_path")
+        if not sub_path:
+            out.append(PreflightFinding(
+                code="subtitles.path.missing", severity="fail",
+                message="video.subtitles is enabled but subtitle_path is empty.",
+                suggestion=(
+                    "Set subtitle_path to an existing SRT/ASS file, or run "
+                    "`yt-uniq subtitles generate <source>` to auto-create one."
+                ),
+            ))
+            continue
+        p = _Path(str(sub_path))
+        if not p.exists():
+            out.append(PreflightFinding(
+                code="subtitles.path.not_found", severity="fail",
+                message=f"video.subtitles.subtitle_path does not exist: {sub_path}",
+                suggestion=(
+                    "Fix the path, or run `yt-uniq subtitles generate "
+                    "<source>` to produce it."
+                ),
+            ))
+            continue
+        # Light-touch extension check. ffmpeg's ``subtitles`` filter
+        # accepts srt/ass/ssa/sbv/vtt; anything else is a hard fail.
+        if p.suffix.lower() not in {".srt", ".ass", ".ssa", ".sbv", ".vtt"}:
+            out.append(PreflightFinding(
+                code="subtitles.path.bad_extension", severity="fail",
+                message=(
+                    f"video.subtitles.subtitle_path has an unsupported "
+                    f"extension: {p.suffix!r}"
+                ),
+                suggestion="Use .srt, .ass, .ssa, .sbv, or .vtt.",
             ))
     return out
 

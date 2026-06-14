@@ -53,6 +53,7 @@ _BUILTIN_TRANSFORMS: tuple[str, ...] = (
     "video_noise",
     "video_speed",
     "video_subpixel_sharpen",
+    "video_subtitles",
     "video_temporal_jitter",
     "video_tonemap",
 )
