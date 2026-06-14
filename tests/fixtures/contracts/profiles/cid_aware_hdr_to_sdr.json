@@ -1,0 +1,81 @@
+{
+  "audio_tracks": "first",
+  "description": "HDR (PQ / HLG) source → SDR (BT.709) output with CID-divergence transforms\napplied AFTER tonemapping. Output is plain yuv420p; any libx264-class\nencoder works.\n\nIMPORTANT: video.tonemap_sdr must be the first enabled transform — the\npreflight emits a warning if not. All subsequent transforms then operate\nin plain pixel-space (no zscale roundtrips needed).\n",
+  "keep_hdr": false,
+  "name": "cid_aware_hdr_to_sdr",
+  "output_container": "mp4",
+  "seed": null,
+  "seed_strategy": "per_run",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -14.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.tonemap_sdr",
+      "params": {
+        "algorithm": "hable",
+        "desat": 0.0,
+        "peak": 1000.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.04
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.015,
+        "contrast": 1.022,
+        "gamma": 0.99,
+        "saturation": 1.04
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 5
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "pitch": 1.012,
+        "randomize_within": 0.003
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.eq",
+      "params": {
+        "randomize_bands": true
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.resample",
+      "params": {
+        "intermediate_sr": 47999
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {}
+    }
+  ]
+}

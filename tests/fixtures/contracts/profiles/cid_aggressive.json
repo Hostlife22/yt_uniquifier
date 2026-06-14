@@ -1,0 +1,152 @@
+{
+  "audio_tracks": "first",
+  "description": "Strong fingerprint shifts for content that tolerates more change. Adds a\nsubtle chorus to audio and a -1% playback speed. video.mirror is NOT\nenabled here — opt in manually for B-roll / abstract content.\n",
+  "keep_hdr": false,
+  "name": "cid_aggressive",
+  "output_container": "mp4",
+  "seed": null,
+  "seed_strategy": "divergent",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -14.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.09
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.035,
+        "contrast": 1.04,
+        "gamma": 0.99,
+        "saturation": 1.07
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 10
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.subpixel_sharpen",
+      "params": {
+        "luma_amount": 0.1,
+        "radius": 5
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.temporal_jitter",
+      "params": {
+        "blackout_blur": true,
+        "blackout_prob": 0.05,
+        "drop_prob": 0.04
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.speed",
+      "params": {
+        "rate": 0.99
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "method": "rubberband",
+        "pitch": 1.08,
+        "randomize_within": 0.01,
+        "tempo": 0.99
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.eq",
+      "params": {
+        "bands": [
+          [
+            110.0,
+            -0.9
+          ],
+          [
+            3800.0,
+            0.6
+          ]
+        ],
+        "jitter_db": 2.0,
+        "randomize_bands": true
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.haas_stereo",
+      "params": {
+        "delay_ms": 25.0,
+        "randomize_within_ms": 8.0
+      }
+    },
+    {
+      "enabled": false,
+      "id": "audio.resample",
+      "params": {
+        "intermediate_sr": 47997
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.compand",
+      "params": {
+        "randomize_within": true,
+        "ratio": 3.0,
+        "threshold_db": -18.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.spectral_smear",
+      "params": {
+        "intensity": 0.025
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.reverb",
+      "params": {
+        "intensity": 0.1,
+        "style": "small_room"
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.noise_overlay",
+      "params": {
+        "color": "pink",
+        "noise_db": -12.0,
+        "randomize_within_db": 2.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {
+        "target_jitter_lufs": 2.0
+      }
+    }
+  ]
+}

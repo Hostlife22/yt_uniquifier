@@ -1,0 +1,30 @@
+{
+  "properties": {
+    "end_sec": {
+      "title": "End Sec",
+      "type": "number"
+    },
+    "start_sec": {
+      "title": "Start Sec",
+      "type": "number"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    }
+  },
+  "required": [
+    "start_sec",
+    "end_sec"
+  ],
+  "title": "Chapter",
+  "type": "object"
+}

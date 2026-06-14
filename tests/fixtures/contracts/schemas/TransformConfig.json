@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "One entry in a Profile: a transform id with overridden params.",
+  "properties": {
+    "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "TransformConfig",
+  "type": "object"
+}

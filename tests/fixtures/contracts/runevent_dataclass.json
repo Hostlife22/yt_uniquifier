@@ -1,0 +1,12 @@
+[
+  {
+    "has_default": false,
+    "name": "kind",
+    "type": "EventKind"
+  },
+  {
+    "has_default": true,
+    "name": "payload",
+    "type": "dict[str, object]"
+  }
+]

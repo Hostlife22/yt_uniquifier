@@ -1,0 +1,263 @@
+{
+  "description": "Aggregated QA metrics for one (input, output) pair.",
+  "properties": {
+    "audio_fp_hamming_per_frame": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Hamming Per Frame"
+    },
+    "audio_fp_hamming_per_window": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Hamming Per Window"
+    },
+    "audio_fp_hamming_variance": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Hamming Variance"
+    },
+    "audio_fp_match_confidence": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Match Confidence"
+    },
+    "audio_fp_similarity": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Similarity"
+    },
+    "chunk_similarities": {
+      "items": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "type": "object"
+      },
+      "title": "Chunk Similarities",
+      "type": "array"
+    },
+    "cid_predict_self": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cid Predict Self"
+    },
+    "corpus_matches": {
+      "items": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "type": "object"
+      },
+      "title": "Corpus Matches",
+      "type": "array"
+    },
+    "duration_match": {
+      "title": "Duration Match",
+      "type": "boolean"
+    },
+    "input_duration_sec": {
+      "title": "Input Duration Sec",
+      "type": "number"
+    },
+    "input_md5": {
+      "title": "Input Md5",
+      "type": "string"
+    },
+    "input_size_bytes": {
+      "title": "Input Size Bytes",
+      "type": "integer"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "output_duration_sec": {
+      "title": "Output Duration Sec",
+      "type": "number"
+    },
+    "output_md5": {
+      "title": "Output Md5",
+      "type": "string"
+    },
+    "output_size_bytes": {
+      "title": "Output Size Bytes",
+      "type": "integer"
+    },
+    "phash_distance_max": {
+      "title": "Phash Distance Max",
+      "type": "integer"
+    },
+    "phash_distance_mean": {
+      "title": "Phash Distance Mean",
+      "type": "number"
+    },
+    "phash_distance_min": {
+      "title": "Phash Distance Min",
+      "type": "integer"
+    },
+    "phash_samples": {
+      "title": "Phash Samples",
+      "type": "integer"
+    },
+    "phash_similarity": {
+      "title": "Phash Similarity",
+      "type": "number"
+    },
+    "sscd_mean": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sscd Mean"
+    },
+    "sscd_min": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sscd Min"
+    },
+    "sscd_per_frame": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sscd Per Frame"
+    },
+    "ssim_mean": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ssim Mean"
+    },
+    "vmaf_mean": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vmaf Mean"
+    },
+    "weakest_chunk_sec": {
+      "anyOf": [
+        {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Weakest Chunk Sec"
+    }
+  },
+  "required": [
+    "input_md5",
+    "output_md5",
+    "input_size_bytes",
+    "output_size_bytes",
+    "input_duration_sec",
+    "output_duration_sec",
+    "phash_samples",
+    "phash_distance_min",
+    "phash_distance_mean",
+    "phash_distance_max",
+    "phash_similarity",
+    "duration_match"
+  ],
+  "title": "QAReport",
+  "type": "object"
+}

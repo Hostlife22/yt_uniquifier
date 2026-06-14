@@ -1,0 +1,62 @@
+{
+  "description": "An ffmpeg encoder we considered for use, with the outcome of a test-run.",
+  "properties": {
+    "codec": {
+      "enum": [
+        "h264",
+        "hevc",
+        "av1"
+      ],
+      "title": "Codec",
+      "type": "string"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "max_parallel": {
+      "default": 1,
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Max Parallel",
+      "type": "integer"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "vendor": {
+      "enum": [
+        "nvenc",
+        "qsv",
+        "amf",
+        "videotoolbox",
+        "vulkan",
+        "x264",
+        "x265"
+      ],
+      "title": "Vendor",
+      "type": "string"
+    },
+    "works": {
+      "title": "Works",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "vendor",
+    "codec",
+    "works"
+  ],
+  "title": "EncoderCandidate",
+  "type": "object"
+}

@@ -1,0 +1,613 @@
+{
+  "$defs": {
+    "AudioStream": {
+      "properties": {
+        "bit_rate": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bit Rate"
+        },
+        "channel_layout": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel Layout"
+        },
+        "channels": {
+          "title": "Channels",
+          "type": "integer"
+        },
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "sample_rate": {
+          "title": "Sample Rate",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "codec",
+        "sample_rate",
+        "channels"
+      ],
+      "title": "AudioStream",
+      "type": "object"
+    },
+    "Chapter": {
+      "properties": {
+        "end_sec": {
+          "title": "End Sec",
+          "type": "number"
+        },
+        "start_sec": {
+          "title": "Start Sec",
+          "type": "number"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "start_sec",
+        "end_sec"
+      ],
+      "title": "Chapter",
+      "type": "object"
+    },
+    "EncoderCandidate": {
+      "description": "An ffmpeg encoder we considered for use, with the outcome of a test-run.",
+      "properties": {
+        "codec": {
+          "enum": [
+            "h264",
+            "hevc",
+            "av1"
+          ],
+          "title": "Codec",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "max_parallel": {
+          "default": 1,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Max Parallel",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "vendor": {
+          "enum": [
+            "nvenc",
+            "qsv",
+            "amf",
+            "videotoolbox",
+            "vulkan",
+            "x264",
+            "x265"
+          ],
+          "title": "Vendor",
+          "type": "string"
+        },
+        "works": {
+          "title": "Works",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "vendor",
+        "codec",
+        "works"
+      ],
+      "title": "EncoderCandidate",
+      "type": "object"
+    },
+    "HDRInfo": {
+      "description": "Color characteristics of a video stream.",
+      "properties": {
+        "bit_depth": {
+          "default": 8,
+          "title": "Bit Depth",
+          "type": "integer"
+        },
+        "color_range": {
+          "default": "unknown",
+          "enum": [
+            "tv",
+            "pc",
+            "unknown"
+          ],
+          "title": "Color Range",
+          "type": "string"
+        },
+        "is_hdr": {
+          "title": "Is Hdr",
+          "type": "boolean"
+        },
+        "primaries": {
+          "default": "unknown",
+          "enum": [
+            "bt709",
+            "bt2020",
+            "bt470bg",
+            "smpte170m",
+            "smpte432",
+            "unknown"
+          ],
+          "title": "Primaries",
+          "type": "string"
+        },
+        "space": {
+          "default": "unknown",
+          "enum": [
+            "bt709",
+            "bt2020nc",
+            "bt2020c",
+            "bt470bg",
+            "smpte170m",
+            "unknown"
+          ],
+          "title": "Space",
+          "type": "string"
+        },
+        "transfer": {
+          "default": "unknown",
+          "enum": [
+            "bt709",
+            "smpte2084",
+            "arib-std-b67",
+            "bt470bg",
+            "smpte170m",
+            "iec61966-2-1",
+            "unknown"
+          ],
+          "title": "Transfer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "is_hdr"
+      ],
+      "title": "HDRInfo",
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "description": "User-facing recipe loaded from YAML.",
+      "properties": {
+        "audio_tracks": {
+          "anyOf": [
+            {
+              "enum": [
+                "first",
+                "all"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          ],
+          "default": "first",
+          "title": "Audio Tracks"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "keep_hdr": {
+          "default": false,
+          "title": "Keep Hdr",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "output_container": {
+          "default": "mp4",
+          "enum": [
+            "mp4",
+            "mov",
+            "mkv"
+          ],
+          "title": "Output Container",
+          "type": "string"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "seed_strategy": {
+          "default": "per_run",
+          "enum": [
+            "fixed",
+            "per_run",
+            "per_file",
+            "divergent"
+          ],
+          "title": "Seed Strategy",
+          "type": "string"
+        },
+        "segmentation": {
+          "$ref": "#/$defs/SegmentationConfig"
+        },
+        "target_codec": {
+          "default": "h264",
+          "enum": [
+            "h264",
+            "hevc",
+            "av1"
+          ],
+          "title": "Target Codec",
+          "type": "string"
+        },
+        "target_loudness_lufs": {
+          "default": -14.0,
+          "title": "Target Loudness Lufs",
+          "type": "number"
+        },
+        "target_vmaf": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Vmaf"
+        },
+        "target_vmaf_max_retries": {
+          "default": 2,
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Target Vmaf Max Retries",
+          "type": "integer"
+        },
+        "target_vmaf_step": {
+          "default": 2,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Target Vmaf Step",
+          "type": "integer"
+        },
+        "transforms": {
+          "items": {
+            "$ref": "#/$defs/TransformConfig"
+          },
+          "title": "Transforms",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Profile",
+      "type": "object"
+    },
+    "SegmentationConfig": {
+      "additionalProperties": false,
+      "description": "How ``plan_segments`` decides where to cut a long source.\n\nv0.8.0 R3 — adds an opt-in PySceneDetect path. Default is unchanged\n(``keyframe``) so every shipping profile keeps the same segment\nlayout. The two scene parameters are PySceneDetect-native; see\n``core/scene_detect.py`` for the mapping into ``ContentDetector``.",
+      "properties": {
+        "mode": {
+          "default": "keyframe",
+          "enum": [
+            "keyframe",
+            "scene"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "scene_min_length_sec": {
+          "default": 2.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Scene Min Length Sec",
+          "type": "number"
+        },
+        "scene_threshold": {
+          "default": 27.0,
+          "exclusiveMinimum": 0.0,
+          "maximum": 255.0,
+          "title": "Scene Threshold",
+          "type": "number"
+        }
+      },
+      "title": "SegmentationConfig",
+      "type": "object"
+    },
+    "SourceMeta": {
+      "description": "Result of probing one input file.",
+      "properties": {
+        "audio": {
+          "items": {
+            "$ref": "#/$defs/AudioStream"
+          },
+          "title": "Audio",
+          "type": "array"
+        },
+        "chapters": {
+          "items": {
+            "$ref": "#/$defs/Chapter"
+          },
+          "title": "Chapters",
+          "type": "array"
+        },
+        "container": {
+          "title": "Container",
+          "type": "string"
+        },
+        "duration_sec": {
+          "title": "Duration Sec",
+          "type": "number"
+        },
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "subtitle": {
+          "items": {
+            "$ref": "#/$defs/SubtitleStream"
+          },
+          "title": "Subtitle",
+          "type": "array"
+        },
+        "video": {
+          "items": {
+            "$ref": "#/$defs/VideoStream"
+          },
+          "title": "Video",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "container",
+        "duration_sec",
+        "size_bytes"
+      ],
+      "title": "SourceMeta",
+      "type": "object"
+    },
+    "SubtitleStream": {
+      "properties": {
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "is_image_based": {
+          "default": false,
+          "title": "Is Image Based",
+          "type": "boolean"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        }
+      },
+      "required": [
+        "index",
+        "codec"
+      ],
+      "title": "SubtitleStream",
+      "type": "object"
+    },
+    "TransformConfig": {
+      "additionalProperties": false,
+      "description": "One entry in a Profile: a transform id with overridden params.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "TransformConfig",
+      "type": "object"
+    },
+    "VideoStream": {
+      "description": "One video stream in the source container.",
+      "properties": {
+        "bit_rate": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bit Rate"
+        },
+        "codec": {
+          "title": "Codec",
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/$defs/HDRInfo"
+        },
+        "duration_sec": {
+          "title": "Duration Sec",
+          "type": "number"
+        },
+        "fps": {
+          "title": "Fps",
+          "type": "number"
+        },
+        "height": {
+          "title": "Height",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "pix_fmt": {
+          "title": "Pix Fmt",
+          "type": "string"
+        },
+        "width": {
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "codec",
+        "width",
+        "height",
+        "fps",
+        "duration_sec",
+        "pix_fmt",
+        "color"
+      ],
+      "title": "VideoStream",
+      "type": "object"
+    }
+  },
+  "description": "Concrete plan: source + profile + chosen encoder + deterministic hash.\n\nplan_hash is the resume key. Two runs with identical source content + profile\n+ encoder should produce the same hash.",
+  "properties": {
+    "encoder": {
+      "$ref": "#/$defs/EncoderCandidate"
+    },
+    "plan_hash": {
+      "title": "Plan Hash",
+      "type": "string"
+    },
+    "profile": {
+      "$ref": "#/$defs/Profile"
+    },
+    "run_seed": {
+      "default": 0,
+      "title": "Run Seed",
+      "type": "integer"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceMeta"
+    }
+  },
+  "required": [
+    "source",
+    "profile",
+    "encoder",
+    "plan_hash"
+  ],
+  "title": "Plan",
+  "type": "object"
+}

@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "SegmentationConfig": {
+      "additionalProperties": false,
+      "description": "How ``plan_segments`` decides where to cut a long source.\n\nv0.8.0 R3 — adds an opt-in PySceneDetect path. Default is unchanged\n(``keyframe``) so every shipping profile keeps the same segment\nlayout. The two scene parameters are PySceneDetect-native; see\n``core/scene_detect.py`` for the mapping into ``ContentDetector``.",
+      "properties": {
+        "mode": {
+          "default": "keyframe",
+          "enum": [
+            "keyframe",
+            "scene"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "scene_min_length_sec": {
+          "default": 2.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Scene Min Length Sec",
+          "type": "number"
+        },
+        "scene_threshold": {
+          "default": 27.0,
+          "exclusiveMinimum": 0.0,
+          "maximum": 255.0,
+          "title": "Scene Threshold",
+          "type": "number"
+        }
+      },
+      "title": "SegmentationConfig",
+      "type": "object"
+    },
+    "TransformConfig": {
+      "additionalProperties": false,
+      "description": "One entry in a Profile: a transform id with overridden params.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "TransformConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "User-facing recipe loaded from YAML.",
+  "properties": {
+    "audio_tracks": {
+      "anyOf": [
+        {
+          "enum": [
+            "first",
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "default": "first",
+      "title": "Audio Tracks"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "keep_hdr": {
+      "default": false,
+      "title": "Keep Hdr",
+      "type": "boolean"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "output_container": {
+      "default": "mp4",
+      "enum": [
+        "mp4",
+        "mov",
+        "mkv"
+      ],
+      "title": "Output Container",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    },
+    "seed_strategy": {
+      "default": "per_run",
+      "enum": [
+        "fixed",
+        "per_run",
+        "per_file",
+        "divergent"
+      ],
+      "title": "Seed Strategy",
+      "type": "string"
+    },
+    "segmentation": {
+      "$ref": "#/$defs/SegmentationConfig"
+    },
+    "target_codec": {
+      "default": "h264",
+      "enum": [
+        "h264",
+        "hevc",
+        "av1"
+      ],
+      "title": "Target Codec",
+      "type": "string"
+    },
+    "target_loudness_lufs": {
+      "default": -14.0,
+      "title": "Target Loudness Lufs",
+      "type": "number"
+    },
+    "target_vmaf": {
+      "anyOf": [
+        {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Vmaf"
+    },
+    "target_vmaf_max_retries": {
+      "default": 2,
+      "maximum": 5,
+      "minimum": 0,
+      "title": "Target Vmaf Max Retries",
+      "type": "integer"
+    },
+    "target_vmaf_step": {
+      "default": 2,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Target Vmaf Step",
+      "type": "integer"
+    },
+    "transforms": {
+      "items": {
+        "$ref": "#/$defs/TransformConfig"
+      },
+      "title": "Transforms",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "Profile",
+  "type": "object"
+}

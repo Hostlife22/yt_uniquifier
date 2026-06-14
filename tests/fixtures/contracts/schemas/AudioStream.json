@@ -1,0 +1,69 @@
+{
+  "properties": {
+    "bit_rate": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bit Rate"
+    },
+    "channel_layout": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Channel Layout"
+    },
+    "channels": {
+      "title": "Channels",
+      "type": "integer"
+    },
+    "codec": {
+      "title": "Codec",
+      "type": "string"
+    },
+    "index": {
+      "title": "Index",
+      "type": "integer"
+    },
+    "is_default": {
+      "default": false,
+      "title": "Is Default",
+      "type": "boolean"
+    },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
+    "sample_rate": {
+      "title": "Sample Rate",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "index",
+    "codec",
+    "sample_rate",
+    "channels"
+  ],
+  "title": "AudioStream",
+  "type": "object"
+}

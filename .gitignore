@@ -9,7 +9,11 @@ dist/
 .venv/
 venv/
 env/
-tests/fixtures
+tests/fixtures/*
+# v1.0.0 R2 — committed contract goldens (the SemVer freeze fixtures)
+# must escape the blanket tests/fixtures/* ignore. Everything else under
+# tests/fixtures stays out (session-generated mp4s, scratch dirs).
+!tests/fixtures/contracts/
 
 .pytest_cache/
 .mypy_cache/

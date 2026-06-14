@@ -1,0 +1,17 @@
+[
+  {
+    "has_default": false,
+    "name": "returncode",
+    "type": "int"
+  },
+  {
+    "has_default": false,
+    "name": "duration_sec",
+    "type": "float"
+  },
+  {
+    "has_default": false,
+    "name": "output_path",
+    "type": "Path"
+  }
+]

@@ -1,0 +1,69 @@
+{
+  "description": "Color characteristics of a video stream.",
+  "properties": {
+    "bit_depth": {
+      "default": 8,
+      "title": "Bit Depth",
+      "type": "integer"
+    },
+    "color_range": {
+      "default": "unknown",
+      "enum": [
+        "tv",
+        "pc",
+        "unknown"
+      ],
+      "title": "Color Range",
+      "type": "string"
+    },
+    "is_hdr": {
+      "title": "Is Hdr",
+      "type": "boolean"
+    },
+    "primaries": {
+      "default": "unknown",
+      "enum": [
+        "bt709",
+        "bt2020",
+        "bt470bg",
+        "smpte170m",
+        "smpte432",
+        "unknown"
+      ],
+      "title": "Primaries",
+      "type": "string"
+    },
+    "space": {
+      "default": "unknown",
+      "enum": [
+        "bt709",
+        "bt2020nc",
+        "bt2020c",
+        "bt470bg",
+        "smpte170m",
+        "unknown"
+      ],
+      "title": "Space",
+      "type": "string"
+    },
+    "transfer": {
+      "default": "unknown",
+      "enum": [
+        "bt709",
+        "smpte2084",
+        "arib-std-b67",
+        "bt470bg",
+        "smpte170m",
+        "iec61966-2-1",
+        "unknown"
+      ],
+      "title": "Transfer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "is_hdr"
+  ],
+  "title": "HDRInfo",
+  "type": "object"
+}

@@ -1,0 +1,64 @@
+{
+  "audio_tracks": "first",
+  "description": "Balanced uniqueness vs quality. Target VMAF ~92.",
+  "keep_hdr": false,
+  "name": "medium",
+  "output_container": "mp4",
+  "seed": 42,
+  "seed_strategy": "per_run",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -14.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.025,
+        "rng_seed": 42
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.012,
+        "contrast": 1.018,
+        "gamma": 0.995,
+        "saturation": 1.03
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 4
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "pitch": 1.0008,
+        "tempo": 1.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.eq",
+      "params": {}
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {}
+    }
+  ]
+}

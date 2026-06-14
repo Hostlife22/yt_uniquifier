@@ -1,0 +1,9 @@
+[
+  "progress",
+  "log",
+  "done",
+  "error",
+  "divergence_sample",
+  "target_vmaf",
+  "target_vmaf_failed"
+]

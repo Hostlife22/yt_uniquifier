@@ -1,0 +1,73 @@
+{
+  "audio_tracks": "first",
+  "description": "Instagram Reels (1080x1920 9:16) with Instagram-style blurred-background pad — the source is centered with a defocused copy of itself filling the empty area.  -16 LUFS (Instagram target).",
+  "keep_hdr": false,
+  "name": "instagram_reels",
+  "output_container": "mp4",
+  "seed": 42,
+  "seed_strategy": "per_run",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -16.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.fit_aspect",
+      "params": {
+        "blur_sigma": 25.0,
+        "mode": "pad_blur",
+        "target_aspect": "9:16"
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.02,
+        "rng_seed": 42
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.01,
+        "contrast": 1.018,
+        "gamma": 0.996,
+        "saturation": 1.025
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 3
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "pitch": 1.0008,
+        "tempo": 1.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.eq",
+      "params": {}
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {}
+    }
+  ]
+}

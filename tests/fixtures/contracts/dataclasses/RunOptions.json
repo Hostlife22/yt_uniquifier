@@ -1,0 +1,67 @@
+[
+  {
+    "has_default": false,
+    "name": "work_dir",
+    "type": "Path"
+  },
+  {
+    "has_default": false,
+    "name": "output",
+    "type": "Path"
+  },
+  {
+    "has_default": true,
+    "name": "encoder_override",
+    "type": "str | None"
+  },
+  {
+    "has_default": true,
+    "name": "title_template",
+    "type": "str | None"
+  },
+  {
+    "has_default": true,
+    "name": "target_segment_sec",
+    "type": "float"
+  },
+  {
+    "has_default": true,
+    "name": "keep_segments",
+    "type": "bool"
+  },
+  {
+    "has_default": true,
+    "name": "enforce_preflight",
+    "type": "bool"
+  },
+  {
+    "has_default": true,
+    "name": "force_new_variant",
+    "type": "bool"
+  },
+  {
+    "has_default": true,
+    "name": "workers",
+    "type": "int"
+  },
+  {
+    "has_default": true,
+    "name": "sanitize_bitstream",
+    "type": "bool"
+  },
+  {
+    "has_default": true,
+    "name": "sample_phash",
+    "type": "Literal['off', 'light', 'full']"
+  },
+  {
+    "has_default": true,
+    "name": "notifications",
+    "type": "NotificationConfig | None"
+  },
+  {
+    "has_default": true,
+    "name": "telemetry",
+    "type": "TelemetryConfig | None"
+  }
+]

@@ -1,0 +1,35 @@
+{
+  "properties": {
+    "codec": {
+      "title": "Codec",
+      "type": "string"
+    },
+    "index": {
+      "title": "Index",
+      "type": "integer"
+    },
+    "is_image_based": {
+      "default": false,
+      "title": "Is Image Based",
+      "type": "boolean"
+    },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    }
+  },
+  "required": [
+    "index",
+    "codec"
+  ],
+  "title": "SubtitleStream",
+  "type": "object"
+}

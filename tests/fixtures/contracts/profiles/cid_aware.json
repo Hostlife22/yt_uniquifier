@@ -1,0 +1,110 @@
+{
+  "audio_tracks": "first",
+  "description": "Calibrated for Content ID divergence on owned / licensed content. Each\nrun randomizes within safe bounds (variability for batch uploads of N\nvariants). Visually clean — no mirror, no speed change.\n\nv0.3.1: pitch bumped 1.012 → 1.04 (~70 cents, past CID audio threshold)\nvia the formant-preserving rubberband filter (voice stays natural).\nAdds loudnorm target jitter (±1.5 LUFS) and compand dynamic-range jitter\nto break audio-envelope fingerprinting.\n\nv0.3.2: pitch bumped 1.04 → 1.06 (Smitelli 2010 documented ±5% as the CID\nmatch boundary — 1.04 was inside the match zone). Adds audio.haas_stereo\nfor mono-compatible cross-channel phase shift.\n\nv0.4.0: weak defaults bumped (crop 0.04→0.06, color brightness 0.015→0.025,\nsaturation 1.04→1.06, noise 5→8, audio.eq jitter_db 0.2→1.5). placebo\naudio.resample disabled. New video.subpixel_sharpen for neural-FP work.\n",
+  "keep_hdr": false,
+  "name": "cid_aware",
+  "output_container": "mp4",
+  "seed": null,
+  "seed_strategy": "divergent",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -14.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.06
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.025,
+        "contrast": 1.022,
+        "gamma": 0.99,
+        "saturation": 1.06
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 8
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.subpixel_sharpen",
+      "params": {
+        "luma_amount": 0.05,
+        "radius": 5
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.temporal_jitter",
+      "params": {
+        "blackout_blur": true,
+        "blackout_prob": 0.033,
+        "drop_prob": 0.02
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "method": "rubberband",
+        "pitch": 1.06,
+        "randomize_within": 0.005
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.eq",
+      "params": {
+        "jitter_db": 1.5,
+        "randomize_bands": true
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.haas_stereo",
+      "params": {
+        "delay_ms": 15.0,
+        "randomize_within_ms": 4.0
+      }
+    },
+    {
+      "enabled": false,
+      "id": "audio.resample",
+      "params": {
+        "intermediate_sr": 47999
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.compand",
+      "params": {
+        "randomize_within": true,
+        "ratio": 2.5,
+        "threshold_db": -20.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {
+        "target_jitter_lufs": 1.5
+      }
+    }
+  ]
+}

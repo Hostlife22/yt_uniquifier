@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "description": "How ``plan_segments`` decides where to cut a long source.\n\nv0.8.0 R3 — adds an opt-in PySceneDetect path. Default is unchanged\n(``keyframe``) so every shipping profile keeps the same segment\nlayout. The two scene parameters are PySceneDetect-native; see\n``core/scene_detect.py`` for the mapping into ``ContentDetector``.",
+  "properties": {
+    "mode": {
+      "default": "keyframe",
+      "enum": [
+        "keyframe",
+        "scene"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "scene_min_length_sec": {
+      "default": 2.0,
+      "exclusiveMinimum": 0.0,
+      "title": "Scene Min Length Sec",
+      "type": "number"
+    },
+    "scene_threshold": {
+      "default": 27.0,
+      "exclusiveMinimum": 0.0,
+      "maximum": 255.0,
+      "title": "Scene Threshold",
+      "type": "number"
+    }
+  },
+  "title": "SegmentationConfig",
+  "type": "object"
+}

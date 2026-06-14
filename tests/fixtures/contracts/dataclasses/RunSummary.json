@@ -1,0 +1,22 @@
+[
+  {
+    "has_default": false,
+    "name": "output",
+    "type": "Path"
+  },
+  {
+    "has_default": false,
+    "name": "plan",
+    "type": "Plan"
+  },
+  {
+    "has_default": false,
+    "name": "segments_done",
+    "type": "int"
+  },
+  {
+    "has_default": false,
+    "name": "preflight_findings",
+    "type": "list[PreflightFinding]"
+  }
+]

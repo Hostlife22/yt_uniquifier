@@ -1,0 +1,59 @@
+{
+  "audio_tracks": "first",
+  "description": "Minimal changes. Highest quality, lowest uniqueness.",
+  "keep_hdr": false,
+  "name": "soft",
+  "output_container": "mp4",
+  "seed": 42,
+  "seed_strategy": "per_run",
+  "segmentation": {
+    "mode": "keyframe",
+    "scene_min_length_sec": 2.0,
+    "scene_threshold": 27.0
+  },
+  "target_codec": "h264",
+  "target_loudness_lufs": -14.0,
+  "target_vmaf": null,
+  "target_vmaf_max_retries": 2,
+  "target_vmaf_step": 2,
+  "transforms": [
+    {
+      "enabled": true,
+      "id": "video.crop_resize",
+      "params": {
+        "max_strength": 0.015,
+        "rng_seed": 42
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.color_eq",
+      "params": {
+        "brightness": 0.006,
+        "contrast": 1.01,
+        "gamma": 0.998,
+        "saturation": 1.015
+      }
+    },
+    {
+      "enabled": true,
+      "id": "video.noise",
+      "params": {
+        "strength": 2
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.pitch_tempo",
+      "params": {
+        "pitch": 1.0004,
+        "tempo": 1.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "audio.loudnorm",
+      "params": {}
+    }
+  ]
+}
