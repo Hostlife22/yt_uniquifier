@@ -10,7 +10,67 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
-## [Unreleased] — v1.0.1 (in progress)
+## [Unreleased] — v1.1.0 (in progress)
+
+Distribution trust + observability + UX. Backwards-compatible. MINOR.
+See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
+
+### Added
+
+- **Tasks 8–9: zero-cost code-signing & bypass docs**
+  - `installers/macos/codesign-adhoc.sh` ad-hoc-signs the PyInstaller
+    `.app` bundle (`codesign --deep --force --sign -`) so the bundle
+    stabilises across macOS updates. `release.yml` invokes it on the
+    macOS build leg.
+  - Windows stays unsigned (zero registrations); `docs/install.md`
+    walks users through SmartScreen Path A (More info → Run anyway)
+    and Path B (`Unblock-File`).
+- **Task 10: CycloneDX SBOM** — `release.yml` runs `cyclonedx-py
+  environment` and ships `sbom.cdx.json` next to the archives.
+- **Task 11: cosign release signing** — every artifact (AppImage,
+  `.app.zip`, `.exe.zip`, SBOM, SHA256SUMS) gets a `.cosign.bundle`
+  via GitHub OIDC. `docs/install.md` ships the verify-blob recipe.
+- **Task 12: multi-arch Docker** — new `.github/workflows/docker.yml`
+  builds linux/amd64 + linux/arm64 images on every `v*.*.*` tag,
+  pushes to ghcr.io, attaches provenance + SBOM, and cosign-signs
+  the digest-pinned image reference.
+- **Task 13: structured logging** — new `core/logging_config.py`
+  centralises structlog setup. `YT_UNIQ_LOG_FORMAT=json` flips to
+  JSON renderer; `YT_UNIQ_LOG_LEVEL` controls level. Stdlib root
+  logger is wired through structlog's `ProcessorFormatter` so
+  existing `_log.warning` calls render through the same renderer
+  without a big-bang rewrite.
+- **Task 14: correlation IDs** — `RunOptions.run_id` auto-populates
+  with `uuid7` (3.13+) / `uuid4` fallback. `run_full` wraps the
+  caller's `on_event` to inject the ID into every `RunEvent.payload`.
+  Web layer passes its locally-generated ID to `RunOptions.run_id`
+  so HTTP response, SSE stream, and structured log all share one ID.
+- **Task 15: `/readyz` + `/metrics`** — Prometheus families:
+  `yt_uniq_segments_total{status}`, `yt_uniq_ffmpeg_failures_total`,
+  `yt_uniq_runs_total`, segment + run duration histograms, active
+  runs gauge, last pHash divergence gauge. `/readyz` returns 503 when
+  no working encoder OR `work_dir` is read-only.
+- **Task 16: rate limit + upload cap + audit log** — `slowapi`
+  limiter keyed on basic-auth principal or client IP (default
+  `30/minute` on `POST /api/run`); `ContentLengthLimitMiddleware`
+  rejects >5 GiB requests with 413; `web/audit.py` appends JSONL
+  lines on every state-changing request to `WebConfig.audit_log_path`.
+- **Task 20: `yt-uniq run --dry-run`** — builds Plan + preflight +
+  segment plan, prints encoder + ETA + disk estimate + first segment
+  `filter_complex`, exits 0 without spawning ffmpeg.
+- **Task 21: `--profile auto`** — `core/recommender.py` picks a
+  shipped profile slug from source resolution + aspect ratio + HDR
+  flag. Deterministic; CLI prints slug + one-line reason.
+
+### Removed
+
+- **Tasks 17–19** (Homebrew tap, winget manifest, Flathub manifest)
+  intentionally dropped — distribution stays via GitHub Releases only
+  per maintainer preference. Original tasks can be reinstated from
+  git history of `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` if
+  the position changes.
+
+## [v1.0.1] — 2026-06-14
 
 Hotfix release. Backwards-compatible (no Plan/Profile field changes).
 See `specs/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
