@@ -13,7 +13,10 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    import datetime
 
 from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
@@ -93,6 +96,15 @@ class RunOptions:
     # ``info`` finding and proceeds.  CLI flag:
     # ``--accept-watermark-risk``.
     accept_watermark_risk: bool = False
+    # v1.3.0 Task 32 — run-level audit log path.  When set, every
+    # completed / failed run appends a JSONL summary (run_id, plan_hash,
+    # input_sha256, segments accounting).  ``None`` keeps the CLI default
+    # quiet; operators can also set ``YT_UNIQ_AUDIT_LOG=/path`` in the
+    # environment via ``audit.resolve_audit_log_path``.
+    audit_log_path: Path | None = None
+    # v1.3.0 Task 32 — operator label stamped on the run-level audit
+    # entry.  Defaults to ``YT_UNIQ_AUDIT_PRINCIPAL`` env var.
+    audit_principal: str | None = None
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -187,6 +199,8 @@ def run_full(
 
     log.info("run.started", input=str(plan.source.path), encoder=plan.encoder.name)
     start_ts = time.time()
+    import datetime as _dt
+    started_at_dt = _dt.datetime.now(tz=_dt.UTC)
     try:
         summary = _run_full_impl(
             plan, options, emit, cancel_token, pause_token,
@@ -208,6 +222,19 @@ def run_full(
             wall_clock_sec=time.time() - start_ts,
             extra_message=f"{type(exc).__name__}: {exc}",
         )
+        # v1.3.0 Task 32 — run-level audit on failure.  Wrapped in its
+        # own try/except so an audit-path misconfiguration never masks
+        # the original raise.
+        try:
+            _maybe_record_audit(
+                options, plan, "failed",
+                run_id=run_id, started_at=started_at_dt,
+                segments_total=0, segments_failed=0,
+                extra={"error_type": type(exc).__name__,
+                       "error_message": str(exc)[:500]},
+            )
+        except Exception as audit_exc:  # noqa: BLE001 — defensive
+            log.warning("audit record on failure failed: %s", audit_exc)
         raise
     wall_clock_sec = time.time() - start_ts
     log.info(
@@ -241,7 +268,51 @@ def run_full(
             segment_sec=options.target_segment_sec,
             wall_clock_sec=wall_clock_sec,
         )
+    # v1.3.0 Task 32 — run-level audit on success.
+    try:
+        _maybe_record_audit(
+            options, plan, "completed",
+            run_id=run_id, started_at=started_at_dt,
+            segments_total=summary.segments_done,
+            segments_failed=0,
+        )
+    except Exception as audit_exc:  # noqa: BLE001 — defensive
+        log.warning("audit record on completion failed: %s", audit_exc)
     return summary
+
+
+def _maybe_record_audit(
+    options: RunOptions,
+    plan: Plan,
+    result: Literal["completed", "failed"],
+    *,
+    run_id: str,
+    started_at: datetime.datetime,
+    segments_total: int,
+    segments_failed: int,
+    extra: dict[str, object] | None = None,
+) -> None:
+    """Resolve the effective audit log path + call core.audit.record_run."""
+    import datetime as _dt
+
+    from yt_uniquifier.core import audit as _audit
+    path = _audit.resolve_audit_log_path(options.audit_log_path)
+    if path is None:
+        return
+    _audit.record_run(
+        audit_log_path=path,
+        run_id=run_id,
+        started_at=started_at,
+        ended_at=_dt.datetime.now(tz=_dt.UTC),
+        input_path=plan.source.path,
+        output_path=options.output,
+        plan_hash=plan.plan_hash,
+        result=result,
+        segments_total=segments_total,
+        segments_failed=segments_failed,
+        principal=options.audit_principal,
+        extra=extra,
+    )
 
 
 def _ensure_run_id(options: RunOptions) -> RunOptions:
