@@ -45,6 +45,12 @@ def preflight(
 ) -> list[PreflightFinding]:
     findings: list[PreflightFinding] = []
 
+    # v1.3.0 Task 31 — DRM guardrail.  Runs FIRST, before every other
+    # check, because an encrypted source is unsupported regardless of
+    # codec / profile / encoder — no other finding adds information.
+    # No override exists; encrypted content is by definition not the
+    # operator's to re-encode (see docs/architecture.md § ethics).
+    findings.extend(_check_input_drm(source))
     # v1.3.0 Task 30 — watermark guardrail.  Runs before YouTube-target
     # checks so the operator confronts ownership/licensing attestation
     # before any time is spent on profile fit.  Returns an empty list
@@ -898,5 +904,55 @@ def _check_input_watermark(
             "re-upload, pass --accept-watermark-risk (or set "
             "skip_watermark_check: true in the profile) to attest and "
             "proceed."
+        ),
+    )]
+
+
+def _check_input_drm(source: SourceMeta) -> list[PreflightFinding]:
+    """v1.3.0 Task 31 — DRM-encrypted-source rejection.
+
+    No override exists.  An encrypted source is by definition not the
+    operator's to re-encode; an opt-out would invite abuse.  Operators
+    who genuinely own the content must obtain unencrypted copies
+    through licensed channels.
+    """
+    from yt_uniquifier.core.guardrails.drm import detect_drm
+    try:
+        result = detect_drm(source.path)
+    except Exception as exc:  # noqa: BLE001 — defensive against probe errors
+        _log.warning("DRM guardrail probe failed: %s", exc)
+        return [PreflightFinding(
+            code="drm.probe_failed", severity="warn",
+            message=f"DRM probe could not run ({exc}); proceeding without check.",
+            suggestion="Verify ffprobe is on PATH; re-run preflight.",
+        )]
+    if result.probe_failed:
+        return [PreflightFinding(
+            code="drm.probe_failed", severity="warn",
+            message=(
+                f"DRM probe could not inspect the source ({result.note}). "
+                "Proceeding without an encryption verdict."
+            ),
+            suggestion=(
+                "If the file is corrupt or truncated, repair it first; "
+                "if it's an encrypted DRM container, the decode will "
+                "fail with a different error during the run."
+            ),
+        )]
+    if not result.is_encrypted:
+        return []
+    detail = (
+        f" (marker: {result.matched_marker!r})"
+        if result.matched_marker else (f" ({result.note})" if result.note else "")
+    )
+    return [PreflightFinding(
+        code="drm.encrypted", severity="fail",
+        message=(
+            "Source appears to be DRM-encrypted" + detail + "."
+            "  yt-uniquifier refuses to process encrypted content."
+        ),
+        suggestion=(
+            "Obtain an unencrypted, licensed copy of the content through "
+            "the rights-holder's official distribution channel."
         ),
     )]
