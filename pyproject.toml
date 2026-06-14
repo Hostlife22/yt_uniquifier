@@ -88,6 +88,12 @@ dev = [
     "ruff~=0.5",
     "mypy~=1.10",
     "types-PyYAML~=6.0",
+    # v1.2.0 Task 27 — Hypothesis property tests over Profile / Plan
+    # invariants (plan-hash stability, label allocator uniqueness, even-
+    # dims tail) and mutmut-driven mutation testing of core/.  Both
+    # ship dev-only — production installs don't need them.
+    "hypothesis~=6.108",
+    "mutmut~=2.5",
 ]
 
 [project.scripts]
