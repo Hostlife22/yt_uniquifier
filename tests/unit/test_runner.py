@@ -86,8 +86,16 @@ class _FakePopen:
         return None
 
     def communicate(
-        self, timeout: float | None = None,  # noqa: ARG002
+        self,
+        input: str | None = None,  # noqa: A002, ARG002
+        timeout: float | None = None,  # noqa: ARG002
     ) -> tuple[str, str]:
+        # v0.7 R9 round-5 — must accept ``input`` as a positional arg
+        # because ``subprocess.run`` calls ``process.communicate(input,
+        # timeout=timeout)`` and the Windows tree-kill path now routes
+        # through it. Without this the watcher thread raises
+        # ``TypeError: got multiple values for argument 'timeout'`` and
+        # pytest surfaces a noisy PytestUnhandledThreadExceptionWarning.
         self.communicate_calls += 1
         self._done = True
         return "", self._stderr_text
