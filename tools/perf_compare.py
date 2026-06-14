@@ -31,6 +31,7 @@ runner before the package itself is installed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from collections.abc import Iterable
@@ -40,13 +41,11 @@ from typing import Any
 # Force UTF-8 on stdout so the ⚠️ / ✅ glyphs survive Windows' default
 # cp1252 codec when stdout is piped (e.g. subprocess capture in CI tests
 # or a redirected log file). Python 3.11+'s `reconfigure` is the official
-# API; older interpreters silently fall through (we ship 3.11+ minimum
-# but the try-guard keeps the script self-contained — it must run on a
-# bare CI runner before the package itself is installed).
-try:
+# API; the suppress() keeps the script self-contained if stdout is a
+# stream type without reconfigure or rejects the encoding switch (must
+# run on a bare CI runner before the package itself is installed).
+with contextlib.suppress(AttributeError, OSError):
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-except (AttributeError, OSError):
-    pass
 
 LOWER_IS_BETTER = {"wall_sec", "rss_peak_kb"}
 """Top-level metrics where a higher value than baseline is a regression."""
