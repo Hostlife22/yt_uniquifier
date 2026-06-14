@@ -147,6 +147,31 @@ class TransformConfig(BaseModel):
     params: dict[str, object] = Field(default_factory=dict)
 
 
+SegmentationMode = Literal["keyframe", "scene"]
+
+
+class SegmentationConfig(BaseModel):
+    """How ``plan_segments`` decides where to cut a long source.
+
+    v0.8.0 R3 — adds an opt-in PySceneDetect path. Default is unchanged
+    (``keyframe``) so every shipping profile keeps the same segment
+    layout. The two scene parameters are PySceneDetect-native; see
+    ``core/scene_detect.py`` for the mapping into ``ContentDetector``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: SegmentationMode = "keyframe"
+    # ContentDetector.threshold — content-difference value in [0, 255]
+    # that triggers a cut. 27.0 is the PySceneDetect documented default
+    # and is a good middle ground for film/TV content.
+    scene_threshold: float = Field(default=27.0, gt=0.0, le=255.0)
+    # Minimum scene length in seconds. Avoids per-shot micro-segments
+    # in fast-cut sequences (music videos, trailers) that would defeat
+    # the resume-granularity benefit and balloon ffmpeg fork overhead.
+    scene_min_length_sec: float = Field(default=2.0, gt=0.0)
+
+
 class Profile(BaseModel):
     """User-facing recipe loaded from YAML."""
 
@@ -161,6 +186,11 @@ class Profile(BaseModel):
     target_codec: EncoderKind = "h264"
     target_loudness_lufs: float = -14.0
     seed: int | None = None
+    # v0.8.0 R3 — segment boundary strategy. Default keyframe matches
+    # behaviour from v0.7 and earlier; ``scene`` switches to
+    # PySceneDetect with snap-to-keyframe to keep the stream-copy
+    # invariant in segmenter.stream_copy_extract.
+    segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     # NEW (v0.2): controls run-time randomization of transform parameters.
     #   fixed     — `seed` used verbatim, every run identical.
     #   per_run   — fresh random seed on each invocation (default).

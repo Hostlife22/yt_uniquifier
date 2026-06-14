@@ -194,11 +194,20 @@ def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
 
 
 def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
-    """Greedy: walk keyframes, cut whenever the running span >= target.
+    """Decide segment boundaries for a Plan, using the profile's mode.
 
-    For short inputs (< target) we return a single segment covering [0, duration].
-    Boundaries are always exact keyframe timestamps so per-segment stream-copy
-    extraction is clean.
+    Modes (see ``Profile.segmentation.mode``):
+      * ``keyframe`` — greedy walk over the source's keyframe list,
+        cutting whenever the running span reaches ``target_size_sec``.
+        This is the v0.7 and earlier behaviour and remains the default.
+      * ``scene`` — opt-in PySceneDetect (``[scene]`` extra). Each scene
+        boundary is snapped DOWN to the nearest keyframe so the
+        downstream ``stream_copy_extract`` invariant (cuts on keyframes)
+        is preserved. Multiple scene cuts inside one keyframe interval
+        collapse to a single boundary.
+
+    For short inputs (< target_size_sec, or scene mode with no detected
+    cuts) we return a single segment covering [0, duration].
     """
     duration = plan.source.duration_sec
     if duration <= 0:
@@ -212,6 +221,16 @@ def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
     if keyframes[-1] < duration - 0.001:
         keyframes = [*keyframes, duration]
 
+    mode = plan.profile.segmentation.mode
+    if mode == "scene":
+        return _plan_scene_segments(plan, keyframes, duration)
+    return _plan_keyframe_segments(keyframes, duration, target_size_sec)
+
+
+def _plan_keyframe_segments(
+    keyframes: list[float], duration: float, target_size_sec: float
+) -> list[Segment]:
+    """Original v0.7 logic: greedy keyframe accumulation up to target_size_sec."""
     segments: list[Segment] = []
     start = keyframes[0]
     last = keyframes[0]
@@ -226,9 +245,57 @@ def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
             start = kf
         last = kf
 
-    # Final segment closes on duration / last keyframe.
     end = max(last, duration)
     segments.append(Segment(idx=idx, start_sec=start, end_sec=end, status="pending"))
+    return segments
+
+
+def _plan_scene_segments(
+    plan: Plan, keyframes: list[float], duration: float
+) -> list[Segment]:
+    """Scene-detected boundaries, snapped to the nearest keyframe ≤ cut."""
+    from yt_uniquifier.core.scene_detect import (
+        detect_scene_boundaries,
+        snap_to_keyframes,
+    )
+
+    seg_cfg = plan.profile.segmentation
+    raw = detect_scene_boundaries(
+        plan.source.path,
+        threshold=seg_cfg.scene_threshold,
+        min_length_sec=seg_cfg.scene_min_length_sec,
+    )
+    snapped = snap_to_keyframes(
+        raw,
+        keyframes,
+        min_length_sec=seg_cfg.scene_min_length_sec,
+    )
+    # If nothing survived (e.g. very short clip or all cuts collapsed
+    # into the same keyframe interval), fall back to one whole-source
+    # segment — matches the keyframe-mode short-input behaviour and
+    # keeps resume working sensibly.
+    if not snapped:
+        return [
+            Segment(idx=0, start_sec=0.0, end_sec=duration, status="pending")
+        ]
+
+    segments: list[Segment] = []
+    start = 0.0
+    idx = 0
+    for b in snapped:
+        # Defensive: snap_to_keyframes already excludes <=0, but a
+        # malformed keyframe list could still surface a boundary at or
+        # beyond duration.
+        if b <= start or b >= duration:
+            continue
+        segments.append(
+            Segment(idx=idx, start_sec=start, end_sec=b, status="pending")
+        )
+        idx += 1
+        start = b
+    segments.append(
+        Segment(idx=idx, start_sec=start, end_sec=duration, status="pending")
+    )
     return segments
 
 
