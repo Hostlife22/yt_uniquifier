@@ -82,6 +82,7 @@ nav:
       - Versioning & compatibility: versioning.md
       - API contracts: api-contracts.md
       - Security policy: security.md
+      - Accessibility: accessibility.md
 
 markdown_extensions:
   - admonition

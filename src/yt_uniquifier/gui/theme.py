@@ -188,4 +188,21 @@ QGroupBox::title {{
 }}
 
 QStatusBar {{ background: {bg_deep}; color: {fg_dim}; }}
+
+/* v1.0.0 R6 — WCAG 2.1 SC 2.4.7 Focus Visible.
+ * Qt's default focus indicator is a 1px dotted outline that disappears
+ * on dark themes against the accent fill. Explicit 2px solid outline in
+ * `accent_warm` (the same hue used for the primary Run button) guarantees
+ * keyboard-only users see *which* control has focus on every screen.
+ * Offset:1 keeps the ring outside the widget's painted background so it
+ * never overlaps text or icon glyphs. */
+QPushButton:focus,
+QLineEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus,
+QCheckBox:focus, QRadioButton:focus,
+QListWidget:focus, QTreeWidget:focus, QTableWidget:focus,
+QTabBar::tab:focus {{
+    outline: 2px solid {accent_warm};
+    outline-offset: 1px;
+}}
 """
