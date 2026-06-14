@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -50,13 +51,22 @@ _log = logging.getLogger(__name__)
 def _pid_alive(pid: int) -> bool:
     """Cross-platform live-PID probe (POSIX + Windows).
 
-    ``os.kill(pid, 0)`` is the canonical liveness check on POSIX: it
-    delivers no signal but raises ``ProcessLookupError`` for dead PIDs.
-    On Windows the same call raises ``OSError`` with errno ESRCH for
-    a dead PID and ``PermissionError`` for a live foreign-owned PID.
+    POSIX: ``os.kill(pid, 0)`` delivers no signal but raises
+    ``ProcessLookupError`` for dead PIDs and ``PermissionError`` for a
+    live foreign-owned PID.
+
+    Windows: ``os.kill(pid, 0)`` is unsafe — it calls ``OpenProcess``
+    with ``PROCESS_ALL_ACCESS`` and then ``TerminateProcess(handle, 0)``,
+    which would actually try to kill the process. We use a ctypes
+    ``OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`` + ``GetExitCodeProcess``
+    probe instead: handle == 0 means the PID doesn't exist or we lack
+    even query rights (the latter is treated as alive — conservative),
+    STILL_ACTIVE (259) means running, any other exit code means reaped.
     """
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -67,6 +77,49 @@ def _pid_alive(pid: int) -> bool:
         # Conservative: don't steal the lock when uncertain.
         return True
     return True
+
+
+def _pid_alive_windows(pid: int) -> bool:
+    """Windows-specific safe liveness probe via OpenProcess + GetExitCodeProcess.
+
+    Lazy-imports ctypes so the POSIX path stays import-fast. Differentiates
+    "PID doesn't exist" (ERROR_INVALID_PARAMETER on OpenProcess) from
+    "access denied to a live foreign PID" (ERROR_ACCESS_DENIED).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    STILL_ACTIVE = 259
+
+    # ``ctypes.WinDLL`` is Windows-only and not in the cross-platform
+    # stubs; this branch only runs under win32 so it's safe at runtime.
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # ``ctypes.get_last_error`` is Windows-only and not in the
+        # cross-platform stubs; the call only runs under win32 so
+        # it's safe at runtime.
+        err = ctypes.get_last_error()  # type: ignore[attr-defined]
+        # Live foreign-owned PIDs land here on a non-admin token —
+        # be conservative and treat as alive.
+        return bool(err == ERROR_ACCESS_DENIED)
+    try:
+        exit_code = wintypes.DWORD()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        if not ok:
+            return True  # conservative
+        return bool(exit_code.value == STILL_ACTIVE)
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 class CheckpointStore:

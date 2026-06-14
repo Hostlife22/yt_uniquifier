@@ -41,6 +41,12 @@ class _FakePopen:
         self.killed = False
         self.signalled = False
         self.communicate_calls = 0
+        # v0.7 R9 — ``_terminate`` now routes through ``_signal_proc``
+        # which reads ``proc.pid`` to call ``os.killpg(os.getpgid(pid))``
+        # on POSIX. A real subprocess always has one; the fake needs a
+        # plausible value so the watcher's cancel branch doesn't crash.
+        # Os syscalls are stubbed below.
+        self.pid = 12345
 
     def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002
         self._done = True

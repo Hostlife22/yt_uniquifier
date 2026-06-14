@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -284,6 +286,17 @@ def _run_once(
         text=True,
         bufsize=1,
         env=proc_env,
+        # v0.7 R9 — give the child its own POSIX session so we can kill
+        # the whole process group via ``os.killpg`` from ``_terminate``.
+        # Without this, ``sh -c "sleep 30"`` (or any ffmpeg invocation
+        # via a wrapper script) leaves grandchildren running after the
+        # leader dies; the inherited stdout fd keeps the parent pipe
+        # open and the main loop's ``for line in proc.stdout`` blocks
+        # until the grandchild exits naturally. This was hidden in
+        # local dev because real ffmpeg invocations run as a direct
+        # child of Python — the Linux CI ``test_cancel_during_silent
+        # _subprocess_terminates_fast`` test surfaces it via a shell.
+        start_new_session=sys.platform != "win32",
     )
 
     # A5 (v0.5.5): watcher thread for cancel during silent ffmpeg.
@@ -430,18 +443,46 @@ def _run_once(
 
 
 def _terminate(proc: subprocess.Popen[str], wait_sec: float = 5.0) -> None:
-    """Try SIGINT, wait, then SIGKILL."""
+    """Try SIGINT, wait, then SIGKILL.
+
+    On POSIX we signal the entire process group (Popen above sets
+    ``start_new_session=True``) so silent grandchildren — typically
+    a shell wrapper around the real binary — die alongside the leader.
+    Killing only the leader leaves grandchildren attached to the
+    inherited stdout pipe, which keeps the parent's
+    ``for line in proc.stdout`` loop blocked until they exit naturally.
+    On Windows there's no process group concept here; ``send_signal``
+    and ``proc.kill`` behave as before.
+    """
     if proc.poll() is not None:
         return
-    with contextlib.suppress(OSError):
-        proc.send_signal(signal.SIGINT)
+    _signal_proc(proc, signal.SIGINT)
     deadline = time.monotonic() + wait_sec
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             return
         time.sleep(0.1)
     if proc.poll() is None:
-        proc.kill()
+        _signal_proc(proc, signal.SIGKILL if sys.platform != "win32" else signal.SIGTERM)
+
+
+def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
+    """Send ``sig`` to the proc's process group on POSIX, direct on Windows.
+
+    On POSIX we try ``os.killpg`` first so silent grandchildren die with
+    the leader; if that fails (process gone, or the proc wasn't actually
+    spawned with ``start_new_session=True`` — e.g. a unit-test fake Popen)
+    we fall back to ``proc.send_signal`` so the legacy single-process
+    path still works.
+    """
+    if sys.platform != "win32":
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+            return
+        except (OSError, ProcessLookupError):
+            pass
+    with contextlib.suppress(OSError, ProcessLookupError):
+        proc.send_signal(sig)
 
 
 def _suspend_pid_safe(pid: int) -> bool:
