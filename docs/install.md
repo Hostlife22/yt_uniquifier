@@ -131,7 +131,7 @@ xdg-open /tmp/uniq.mp4.qa.html      # Linux
 start /tmp/uniq.mp4.qa.html         # Windows
 ```
 
-Полный CLI reference — [README §CLI reference](../README.md#cli-reference)
+Полный CLI reference — [README §CLI reference](https://github.com/Hostlife22/yt_uniquifier#cli-reference)
 или `yt-uniq <команда> --help` для любой подкоманды.
 
 ---

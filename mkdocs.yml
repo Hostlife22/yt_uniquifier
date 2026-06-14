@@ -1,0 +1,112 @@
+# yt-uniquifier documentation site (v0.9.0 R6).
+#
+# Build locally:
+#   pip install -e ".[docs]"
+#   mkdocs serve              # live-reload on http://127.0.0.1:8000
+#   mkdocs build --strict     # CI / pre-deploy check
+#
+# Deploy:
+#   The GH Actions workflow .github/workflows/docs.yml pushes the
+#   built site to gh-pages on tag releases (v*.*.*). Local `mkdocs
+#   gh-deploy --force` works too but requires push rights to the
+#   gh-pages branch.
+
+site_name: yt-uniquifier
+site_description: >
+  Production-grade re-encoder with controlled micro-transforms for
+  owned/licensed video content. Re-upload your own work; never
+  evade rights-holder detection.
+site_url: https://hostlife22.github.io/yt_uniquifier/
+repo_url: https://github.com/Hostlife22/yt_uniquifier
+repo_name: Hostlife22/yt_uniquifier
+edit_uri: edit/main/docs/
+
+# Strict mode promotes warnings (missing-from-nav files, broken
+# refs, unrecognised markdown) into errors. CI runs `mkdocs build
+# --strict` so a stale link breaks the build before publish.
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Install: install.md
+  - GUI walkthrough: gui-walkthrough.md
+  - Web UI & Docker: web.md
+  - Profiles:
+      - Schema & transforms: profiles.md
+      - Community marketplace: marketplace.md
+      - Plugin transforms: plugins.md
+  - Pipeline:
+      - Architecture: architecture.md
+      - Filter graph: filter_graph.md
+      - Seed strategy: seed_strategy.md
+      - Distributed batch: distributed.md
+  - QA:
+      - QA report: qa_report.md
+      - SSCD copy detection: sscd.md
+      - Corpus index: corpus.md
+      - Validation harness: validation_harness.md
+  - Operations:
+      - Calibration: calibrate.md
+      - YouTube targets: youtube_targets.md
+      - Telemetry: telemetry.md
+      - Localization: i18n.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+# Internal / developer-only artefacts that live under docs/ but
+# do not belong on the published site. mkdocs (≥ 1.6) honours
+# the glob list and skips them entirely.
+exclude_docs: |
+  bug-triage-*.md
+  gui.md
+  gui_sweep.md
+  gui-test-coverage.md
+  manual_gui_checklist.md
+  runbook_scale_test.md
+  test-report-*.md

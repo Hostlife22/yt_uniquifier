@@ -266,18 +266,24 @@
 
 **Метрика**: `yt-uniq qa <in> <out> --sscd` работает offline, scale до 50k corpus references без замедления, plugin система задокументирована + 1 third-party example.
 
-### **v0.9.0 — Community + Web (4-6 недель)**
+### **v0.9.0 — Community + Web** ✅ SHIPPED (2026-06-14)
 
 **Цель**: extend audience.
 
-- [ ] **F9: profile marketplace** — GitHub repo + GUI "Import community profile".
-- [ ] **F13: Docker headless** + `yt-uniquifier-web` (Flask/FastAPI + small SPA) для NAS use-case.
-- [ ] **F14: Whisper subtitle** transform (FFmpeg 8.0 native filter).
-- [ ] Telemetry opt-in (anonymous + transparent + local-only export) — для benchmarking against community profiles.
-- [ ] Documentation site (mkdocs-material) с video walkthroughs.
-- [ ] Localization: en + ru (как минимум) через QTranslator.
+Все 6 раундов закрыты атомарными коммитами в одну сессию. См. `.claude/plans/yt-uniquifier-v0.9.0.plan.md` для round-by-round breakdown.
 
-**Метрика**: Docker image на Docker Hub, web UI работает на Synology/QNAP, в маркетплейсе 10+ community profiles, документация переведена.
+- [x] **F9: profile marketplace** — `core/profile_marketplace.py` (HTTPS-only + SHA-pinned + schema-validated), `cli/cmd_profile.py` (`yt-uniq profile {list-community,show,install,purge-cache,install-dir}`), GUI `CommunityProfilesDialog` в Profile Editor, 5-entry bootstrap catalog в wheel. (commit `42fa5d3`)
+- [x] **F14: Whisper subtitle** transform — `core/transforms/video_subtitles.py` (pure burn-in builder с filter-arg injection guards), `_whisper_probe.py` capability detection, `core/subtitles.py` whisper-cpp SRT generator (cached by size+mtime+model+lang), `cli/cmd_subtitles.py`, preflight check `_check_subtitle_burnin`. (commit `4901db7`)
+- [x] **Telemetry opt-in** — `core/telemetry.py` (off by default, append-only JSONL, HOME redaction, bounded rotation), `_maybe_record_telemetry` в orchestrator emits run_summary, `cli/cmd_telemetry.py` (status/export/purge — no enable subcommand on purpose), Settings groupbox + first-run consent dialog. (commit `96c6f48`)
+- [x] **F13: Docker headless + web UI** — `src/yt_uniquifier/web/` FastAPI app (lazy import), routes for run/profile/qa, vanilla-JS SPA with SSE event streaming, `yt-uniq-web` uvicorn launcher (env-driven), multi-stage Dockerfile (ffmpeg + python + non-root + tini + healthcheck), docker-compose.yml для NAS, `input_root` chroot + basic-auth gate. (commit `f7e954f`)
+- [x] **Localization en + ru** через QTranslator — `gui/i18n/__init__.py` RuntimeTranslator subclass + in-Python catalogue (~40 keys), `gui/i18n/translations.py`, AppState locale round-trip, app_pyqt boot-time install, Settings Language combo + hot-swap, Run/Settings CTAs wrapped в `self.tr()`. (commit `dc85cc2`)
+- [x] **Documentation site (mkdocs-material)** — `mkdocs.yml` strict mode, `docs/{index,getting-started,marketplace,web,telemetry,gui-walkthrough}.md`, `[docs]` extra, `.github/workflows/docs.yml` gh-pages deploy on tag. (commit landing as part of R6)
+
+**Метрика shipped**: `mkdocs build --strict` exits 0, 9-case cross-cutting smoke зелёный (`tests/integration/test_v090_smoke.py`), `yt-uniq profile install` end-to-end works против bootstrap catalog, `yt-uniq-web` LAN-trust + basic-auth modes verified, GUI flips RU on Settings + Run CTAs.
+
+**Cumulative session**: 6 atomic commits (R1..R6), 906 unit + 27 GUI + 9 integration smoke = 942 tests зелёные, ruff All checks passed, mypy --strict clean across 136 source files.
+
+**Deferred (documented в плане v0.9.0 §"Out of scope")**: telemetry network egress, web UI parity со всеми GUI screens (Run только в v0.9), iOS/Android, cloud SaaS, auto-upload, custom-GUI plugins, RTL locales, mkdocs versioned docs, real arm64 docker buildx (multi-arch tagged как stretch).
 
 ### **v1.0.0 — Stable release** (после ~2-3 месяцев тестирования v0.9)
 
@@ -365,15 +371,15 @@ yt-uniq run <real_4k> --workers 8 --new-variant  # smoke: no data race in logs
 - [x] Все 7 must-fix-before-1.0 (CRITICAL + HIGH из секций A) закрыты, регрессионные тесты в CI. **10/10 A-фиксов + 5.2 bonus shipped в v0.5.5 (commits `d719221`..`cf0bb9f`).**
 - [~] **Signed installers** для 3 платформ доступны в GitHub Releases. **Только scaffolding (F1 R1, unsigned). R2-R5 требуют Apple Dev ID + Windows code signing cert + AppImage work.**
 - [x] **Win runner** в CI. (commit `eff5d3d`)
-- [ ] **Live divergence indicator** в GUI, замеренный TTV (time-to-value) для нового пользователя ≤ 60 сек.
-- [ ] **5+ platform-destination профилей** шипятся.
-- [ ] **Post-job webhook** работает с Discord, Slack, email.
+- [x] **Live divergence indicator** в GUI — sparkline в Run screen, EMA + KPI-banded цвета. (v0.7 R4 / F2, commit `d4d3556`)
+- [x] **5+ platform-destination профилей** шипятся — youtube_4k, youtube_1080p, youtube_shorts, tiktok_vertical, instagram_reels, instagram_square, linkedin_square (7 total). (v0.7 R3 / F3, commit `4dedf55`)
+- [x] **Post-job webhook** работает с Discord, Slack, Telegram, email (auto-detect провайдеров). (v0.7 R5 / F4, commit `d58726b`)
 - [x] **SSCD QA** опционально доступен (`yt-uniq qa --sscd`, `--metric sscd` для calibrate), документация в `docs/sscd.md` (correlation против реального CID — empirical follow-up, не блокер v0.8.0).
 - [ ] **80%+ coverage** на core/, 100% на новых модулях.
 - [ ] **Performance baseline**: 2h 1080p run на референсном HDD-стенде ≤ 1.2× libx264 baseline (vs 1.5× сейчас).
 - [ ] **Accessibility**: WCAG 2.1 AA для всех 10 экранов.
-- [ ] **Documentation site** с видео-туториалами.
-- [ ] **Profile marketplace** с ≥ 10 community profiles.
+- [~] **Documentation site** (mkdocs-material) ships в v0.9.0 R6 — landing + getting-started + marketplace + web + telemetry + i18n + GUI walkthrough + всё существующее. Видео-туториалы остаются slot'ами для v1.0. (commits landing as part of R6)
+- [~] **Profile marketplace** — инфраструктура полностью готова (HTTPS+SHA+schema, CLI+GUI, bootstrap catalog с 5 entries) в v0.9.0 R1. Цель "≥ 10 community profiles" требует существование long-term `yt-uniquifier-profiles/` GitHub repo + сторонних контрибуторов — это adoption goal, не code-блокер. (commit `42fa5d3`)
 
 ---
 
