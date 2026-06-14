@@ -297,6 +297,13 @@ def _run_once(
         # child of Python — the Linux CI ``test_cancel_during_silent
         # _subprocess_terminates_fast`` test surfaces it via a shell.
         start_new_session=sys.platform != "win32",
+        # v0.7 R9 round-3 — Windows analogue. ``CREATE_NEW_PROCESS_GROUP``
+        # lets us tree-kill via ``taskkill /T`` from ``_signal_proc``
+        # without taking down the parent Python interpreter.
+        creationflags=(
+            subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            if sys.platform == "win32" else 0
+        ),
     )
 
     # A5 (v0.5.5): watcher thread for cancel during silent ffmpeg.
@@ -488,8 +495,25 @@ def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
         with contextlib.suppress(OSError, ProcessLookupError):
             proc.send_signal(sig)
         return
-    # Windows path: collapse POSIX signal vocabulary to terminate/kill.
-    with contextlib.suppress(OSError, ProcessLookupError):
+    # Windows path: tree-kill via ``taskkill /T`` so silent grand-
+    # children (sh.exe → sleep.exe inside Git-Bash) actually die.
+    # ``proc.terminate()`` alone takes down only the leader, leaving
+    # the stdout pipe held by the surviving grandchild — the same
+    # POSIX bug ``start_new_session=True`` solves on Linux/macOS.
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True, timeout=5,
+        )
+        return
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # Fallbacks for unit-test fake Popens that don't have a real PID
+    # tree behind them: proc.terminate() for graceful, proc.kill()
+    # for hard. ``contextlib.suppress`` swallows the AttributeError
+    # path so a fake without these methods still doesn't crash the
+    # watcher thread.
+    with contextlib.suppress(OSError, ProcessLookupError, AttributeError):
         if sig == signal.SIGINT:
             proc.terminate()
         else:

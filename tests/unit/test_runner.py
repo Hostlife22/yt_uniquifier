@@ -59,6 +59,14 @@ class _FakePopen:
         self.signalled = True
         self._done = True
 
+    def terminate(self) -> None:
+        # v0.7 R9 — runner's ``_signal_proc`` on Windows routes SIGINT
+        # via ``proc.terminate()`` (Windows ``send_signal`` won't take
+        # arbitrary signals). Mirror the stub for the kill path so the
+        # cancel-token watcher's exception handler stays quiet.
+        self.signalled = True
+        self._done = True
+
     def kill(self) -> None:
         self.killed = True
         self._done = True

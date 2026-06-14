@@ -8,6 +8,7 @@ source for clean loudnorm / pitch behaviour.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
@@ -114,21 +115,42 @@ def _dedup_keyframes(sorted_ks: list[float], tol_sec: float = 1e-3) -> list[floa
 def _keyframe_cache_path(source: Path) -> Path:
     """Return the on-disk cache key for ``source``'s keyframe list.
 
-    B1 (v0.6.0): the key is ``(st_size, st_mtime_ns)`` rather than a
-    full-file MD5. On a 180 GB 4K HDR master at 500 MB/s SSD read
-    speed, the MD5 took 60-360 s before the first ffmpeg fork. ``stat``
-    is microseconds.
+    B1 (v0.6.0): the key is ``(st_size, st_mtime_ns, head+tail md5)``
+    rather than a full-file MD5. On a 180 GB 4K HDR master at 500 MB/s
+    SSD read speed, the full MD5 took 60-360 s before the first ffmpeg
+    fork. ``stat`` + 8 KB of disk I/O is microseconds.
+
+    R9 (v0.7): the original ``(st_size, st_mtime_ns)`` key collided
+    on Windows for two distinct small files written in the same NTFS
+    timer tick — surfaced by the
+    ``test_different_file_different_cache`` unit test once R8
+    unblocked the matrix. Added a 12-char prefix of MD5 over the
+    first 4 KB and the last 4 KB so any content difference outside the
+    interior of a giant file is captured cheaply.
 
     Trade-off: a file rewritten in place with bit-identical contents
     but a fresh mtime triggers a cache miss (acceptable false
-    invalidation). A file replaced with identical-size content and a
-    forced-set mtime would hit the cache (acceptable false hit — same
-    duration and stream layout means same keyframe set in practice).
+    invalidation). A file replaced with identical-size content, a
+    forced-set mtime, AND matching head + tail is a deliberately
+    pathological case we accept hitting the cache for.
     Path-independent by construction, so the cache survives moving a
     source across mounts.
     """
     st = source.stat()
-    return _keyframe_cache_dir() / f"{st.st_size}_{st.st_mtime_ns}.json"
+    h = hashlib.md5()
+    try:
+        with source.open("rb") as fh:
+            h.update(fh.read(4096))
+            if st.st_size > 8192:
+                fh.seek(-4096, os.SEEK_END)
+                h.update(fh.read(4096))
+    except OSError:
+        # Surface as "no fingerprint"; the (size, mtime_ns) prefix is
+        # still distinct enough for the common case, and a re-probe is
+        # always safe.
+        pass
+    fp = h.hexdigest()[:12]
+    return _keyframe_cache_dir() / f"{st.st_size}_{st.st_mtime_ns}_{fp}.json"
 
 
 def _load_keyframe_cache(source: Path) -> list[float] | None:

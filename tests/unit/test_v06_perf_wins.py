@@ -30,9 +30,13 @@ def test_keyframe_cache_key_uses_stat_not_md5(tmp_path: Path) -> None:
 
     cache_path = seg_mod._keyframe_cache_path(src)
 
-    # Cache filename encodes size + mtime_ns exactly.
+    # Cache filename starts with size + mtime_ns. R9 (v0.7) appended a
+    # 12-char head+tail MD5 fingerprint to disambiguate identical
+    # (size, mtime_ns) tuples that NTFS coarse-grained mtime allows on
+    # Windows — still O(1) cost (≤ 8 KB read), still no full-file MD5.
     st = src.stat()
-    assert cache_path.name == f"{st.st_size}_{st.st_mtime_ns}.json"
+    assert cache_path.name.startswith(f"{st.st_size}_{st.st_mtime_ns}_")
+    assert cache_path.name.endswith(".json")
 
     # md5_file is no longer imported by segmenter (was the heavy
     # cold-start cost). If a future regression re-imports it, this

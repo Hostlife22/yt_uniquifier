@@ -168,9 +168,13 @@ def test_correlate_worker_emits_correlated(tmp_path: Path) -> None:
     from yt_uniquifier.gui.workers.correlate_worker import CorrelateWorker
 
     script = tmp_path / "correlate.py"
-    # Explicit UTF-8 — Windows default ``cp1252`` can't encode ↔ (U+2194).
+    # ASCII-only — the worker spawns this script as a real subprocess
+    # (the test's ``subprocess.run`` mock targets a different attribute);
+    # printing U+2194 (↔) crashes the Windows child whose stdout is
+    # cp1252 by default. The assertion only needs the word
+    # ``correlation`` in stdout, so the unicode arrow is decorative.
     script.write_text(
-        "print('phash↔CID correlation: 0.42')", encoding="utf-8",
+        "print('phash CID correlation: 0.42')", encoding="utf-8",
     )
     csv = tmp_path / "validation_log.csv"
     csv.write_text("src,delta,vmaf\n", encoding="utf-8")

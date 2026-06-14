@@ -198,7 +198,11 @@ class FileQueue:
                     os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                     0o600,
                 )
-            except FileExistsError:
+            except (FileExistsError, PermissionError):
+                # Windows can return ``PermissionError`` instead of
+                # ``FileExistsError`` if a peer's lock handle is still
+                # being closed when we hit O_EXCL. Both mean "someone
+                # else owns this candidate" — skip.
                 continue
             os.close(lock_fd)
             try:
