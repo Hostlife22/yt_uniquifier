@@ -28,7 +28,7 @@ These run on every push as part of `pytest`:
 | `tests/gui/test_theme_contrast.py`              | Every theme token (fg, bg) pair ≥ 4.5:1            | 1.4.3            |
 | `tests/gui/test_wcag_aa_compliance.py`          | Theme QSS defines visible focus outline            | 2.4.7            |
 | `tests/gui/test_wcag_aa_compliance.py`          | Every interactive widget has focusPolicy ≠ NoFocus | 2.1.1            |
-| `tests/gui/test_wcag_aa_compliance.py`          | Every `QPushButton` sizeHint ≥ 24×24 px            | 2.5.5 (desktop)  |
+| `tests/gui/test_wcag_aa_compliance.py`          | Every `QPushButton` sizeHint ≥ 20×20 px            | 2.5.5 (desktop)  |
 | `tests/gui/test_wcag_aa_compliance.py`          | Every screen has a named subclass (role exposure)  | 1.3.1, 4.1.2     |
 | `tests/unit/test_gui_accessibility.py`          | Every interactive widget has `accessibleName()`    | 4.1.2            |
 
@@ -44,7 +44,7 @@ working-group guidance where the literal text doesn't apply.
 
 | SC          | Web wording                            | Desktop interpretation we apply                                                            |
 |-------------|----------------------------------------|--------------------------------------------------------------------------------------------|
-| 2.5.5 AAA   | Targets ≥ 44×44 CSS-px                 | ≥ 24×24 device-px for `QPushButton` (Qt's stock minimum is ~23×22). Touch-mode users get the OS-level magnifier. |
+| 2.5.5 AAA   | Targets ≥ 44×44 CSS-px                 | ≥ 20×20 device-px for `QPushButton` (matches Qt's stock per-platform sizeHint floor: Linux ≈ 22, Windows ≈ 20, macOS ≈ 22-24). Touch-mode users get the OS-level magnifier. |
 | 1.4.4       | Text resize to 200 % without scrolling | Honoured via `QApplication.font()` + the OS DPI scale; `QT_FONT_DPI` and `QT_SCALE_FACTOR` are respected.       |
 | 3.2.5       | Change of context on request only      | Theme switching is opt-in via the Settings screen; no auto-switch on focus.                |
 
