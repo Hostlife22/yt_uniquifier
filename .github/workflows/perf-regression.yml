@@ -65,18 +65,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Generate 60s 720p24 fixture (testsrc2+sine)
+      - name: Generate 20s 720p24 fixture (testsrc2+sine)
+        # Originally 60s, but `cid_aware` on a 2-vCPU GitHub runner
+        # (2-pass loudnorm + rubberband pitch + ~12 transforms) was
+        # taking 7-10 minutes per nightly. 20s keeps the fixture
+        # realistic enough to surface regressions (it still splits
+        # into multiple keyframe segments + runs both audio passes)
+        # while bringing wall-clock under 4 minutes.
         run: |
           mkdir -p .perf
           ffmpeg -y -hide_banner -loglevel error \
-            -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=60" \
-            -f lavfi -i "sine=frequency=440:duration=60" \
+            -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=20" \
+            -f lavfi -i "sine=frequency=440:duration=20" \
             -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
             -c:a aac -b:a 128k \
             .perf/fixture_720p.mp4
           ls -la .perf/
 
       - name: Run benchmark → JSON
+        # 15-min cap: hard-stop a genuine hang so the workflow doesn't
+        # burn the runner's default 6-hour ceiling. A real cid_aware
+        # run on the 20s fixture lands at 2-4 minutes; anything north
+        # of 15 means something is wedged.
+        timeout-minutes: 15
         run: |
           python tools/benchmark.py .perf/fixture_720p.mp4 \
             --profile src/yt_uniquifier/profiles/cid_aware.yaml \
