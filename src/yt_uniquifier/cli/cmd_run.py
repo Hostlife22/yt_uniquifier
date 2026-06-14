@@ -22,7 +22,13 @@ def run_cmd(
     input: Path = typer.Argument(  # noqa: A002
         ..., exists=True, dir_okay=False, readable=True, help="Source media file."
     ),
-    profile: Path = typer.Option(..., "--profile", help="YAML profile file."),
+    profile: str = typer.Option(
+        ..., "--profile",
+        help=(
+            "YAML profile file path, OR ``auto`` to pick a shipped "
+            "profile from the source's resolution/aspect/HDR fingerprint."
+        ),
+    ),
     output: Path = typer.Option(..., "--out", help="Destination file path."),
     encoder_override: str | None = typer.Option(
         None, "--encoder", help="Force a specific ffmpeg encoder (e.g. libx264)."
@@ -65,10 +71,17 @@ def run_cmd(
              "~30-60 min wall time + ~3 VMAF points drop on long sources. "
              "No-op for libx264 source. Refused on HDR/HEVC paths.",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Build the Plan, run preflight, print the segment shape, "
+             "filter_complex, encoder pick, disk estimate, and ETA — "
+             "then exit without spawning ffmpeg.",
+    ),
 ) -> None:
     """Run uniquification on an input."""
     try:
-        prof = load_profile(profile)
+        profile_path = _resolve_profile_option(input, profile, console)
+        prof = load_profile(profile_path)
         if b_video is not None:
             prof = _inject_b_video(prof, b_video)
         plan = build_plan(input, prof, encoder_override)
@@ -87,6 +100,10 @@ def run_cmd(
             workers=workers,
             sanitize_bitstream=sanitize_bitstream,
         )
+
+        if dry_run:
+            _print_dry_run_report(plan, options, console)
+            return
 
         if no_progress:
             run_full(plan, options, on_event=lambda _e: None, cancel_token=cancel)
@@ -122,6 +139,130 @@ def run_cmd(
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+
+
+def _resolve_profile_option(
+    input_path: Path, profile_arg: str, console: Console,
+) -> Path:
+    """v1.1.0 Task 21: resolve ``--profile auto`` to a shipped YAML.
+
+    ``profile_arg`` is one of:
+      * ``"auto"``  — probe the source and pick via core.recommender;
+      * any other string — treated as a path to a YAML profile file.
+
+    Returns the resolved ``Path`` ready to hand to ``load_profile``.
+    Raises a Typer Exit with a clear error if ``auto`` is requested but
+    the shipped slug doesn't exist (would only happen on a corrupted
+    install).
+    """
+    if profile_arg != "auto":
+        return Path(profile_arg)
+
+    from yt_uniquifier.core.probe import probe as probe_file
+    from yt_uniquifier.core.recommender import explain
+
+    console.print("[dim]profile auto: probing source…[/dim]")
+    source = probe_file(input_path)
+    rec = explain(source)
+    console.print(f"[dim]profile auto: picked [/dim][cyan]{rec.slug}[/cyan]"
+                  f"[dim] — {rec.reason}[/dim]")
+
+    shipped = (
+        Path(__file__).resolve().parents[1] / "profiles" / f"{rec.slug}.yaml"
+    )
+    if not shipped.exists():
+        console.print(
+            f"[red]profile auto: shipped slug {rec.slug!r} not found "
+            f"at {shipped} (corrupted install?)[/red]",
+        )
+        raise typer.Exit(code=1)
+    return shipped
+
+
+def _print_dry_run_report(
+    plan: Plan, options: RunOptions, console: Console,
+) -> None:
+    """v1.1.0 Task 20: print the run shape without spawning ffmpeg.
+
+    Pulls in preflight, segment plan, filter_complex shape, and a rough
+    ETA so the user can sanity-check a long run before committing the
+    disk space and wall clock to it.
+    """
+    from yt_uniquifier.core.pipeline import build_video_segment_command_fused
+    from yt_uniquifier.core.preflight import preflight
+    from yt_uniquifier.core.segmenter import plan_segments
+
+    findings = preflight(
+        plan.source, plan, plan.encoder, work_dir=options.work_dir,
+    )
+    blocking = [f for f in findings if f.severity == "fail"]
+    warnings = [f for f in findings if f.severity == "warn"]
+
+    console.print("[bold]dry-run summary[/bold]")
+    console.print(f"  input         : {plan.source.path}")
+    console.print(f"  duration      : {plan.source.duration_sec:.1f} s")
+    console.print(f"  encoder       : {plan.encoder.name} ({plan.encoder.vendor})")
+    console.print(f"  profile       : {plan.profile.name}")
+    console.print(f"  output        : {options.output}")
+    console.print(f"  work_dir      : {options.work_dir}")
+    console.print(f"  plan_hash     : {plan.plan_hash}")
+
+    try:
+        segments = plan_segments(plan, options.target_segment_sec)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]segment plan failed:[/red] {exc}")
+        return
+    console.print(f"  segments      : {len(segments)} "
+                  f"(target {options.target_segment_sec:.0f} s each)")
+    if segments:
+        first = segments[0]
+        console.print(
+            f"  first seg     : [{first.start_sec:.2f}, {first.end_sec:.2f}] "
+            f"({first.end_sec - first.start_sec:.2f} s)",
+        )
+
+    # Disk estimate — same heuristic as preflight (bitrate × duration × 1.3).
+    bitrate = (
+        plan.source.video[0].bit_rate
+        if plan.source.video and plan.source.video[0].bit_rate
+        else 8_000_000
+    )
+    est_bytes = int(plan.source.duration_sec * (bitrate / 8.0) * 1.3)
+    console.print(f"  disk estimate : ~{est_bytes / (1024**3):.2f} GiB")
+
+    # ETA. Best-effort: assume real-time encoding for hardware encoders,
+    # 0.5× real-time for libx264 -preset medium. The real PGO cache lands
+    # in v1.2.0 Task 28; this is a stopgap.
+    if plan.encoder.vendor in {"nvenc", "qsv", "amf", "videotoolbox", "vulkan"}:
+        eta_sec = plan.source.duration_sec * 0.7
+    else:
+        eta_sec = plan.source.duration_sec * 2.0
+    console.print(f"  eta (rough)   : ~{eta_sec / 60:.1f} min")
+
+    # filter_complex of the first segment — identical shape across all
+    # segments, so one sample is enough for the user to eyeball.
+    if segments:
+        try:
+            cmd = build_video_segment_command_fused(
+                plan, segments[0], plan.source.path,
+                options.work_dir / "dryrun_seg.mkv",
+            )
+            console.print("  filter_complex:")
+            console.print(f"    {cmd.filter_complex}")
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"  filter_complex: [yellow]build failed: {exc}[/yellow]")
+
+    if warnings:
+        console.print(f"[yellow]preflight warnings ({len(warnings)}):[/yellow]")
+        for f in warnings:
+            console.print(f"  - {f.code}: {f.message}")
+    if blocking:
+        console.print(f"[red]preflight blockers ({len(blocking)}):[/red]")
+        for f in blocking:
+            console.print(f"  - {f.code}: {f.message}")
+    else:
+        console.print("[green]preflight: no blockers[/green]")
+    console.print("[dim]dry-run: no ffmpeg processes spawned[/dim]")
 
 
 def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
