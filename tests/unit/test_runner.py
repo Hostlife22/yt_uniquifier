@@ -71,6 +71,20 @@ class _FakePopen:
         self.killed = True
         self._done = True
 
+    # v0.7 R9 round-4 — ``_patch_popen`` swaps the module-level
+    # ``subprocess.Popen``, which means even ``subprocess.run`` (used
+    # by the runner's Windows ``taskkill`` tree-kill path) routes
+    # through this fake. ``subprocess.run`` opens its process with a
+    # ``with Popen(...) as proc:`` block, so the fake must support the
+    # context-manager protocol — without these dunders the cancel
+    # path raises ``TypeError`` and the unit test inherits a noisy
+    # unhandled-thread-exception warning.
+    def __enter__(self) -> _FakePopen:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
     def communicate(
         self, timeout: float | None = None,  # noqa: ARG002
     ) -> tuple[str, str]:
