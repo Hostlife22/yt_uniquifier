@@ -326,9 +326,46 @@ def _maybe_prompt_telemetry_consent(parent: QMainWindow | None = None) -> None:
             pass
 
 
+def _resolve_boot_locale() -> str:
+    """Persisted locale wins; env-derived hint is the first-launch fallback.
+
+    Reads state.json ahead of widget construction so the translator
+    is in place before any ``tr()`` call. A missing or unreadable
+    state.json falls back to the system hint and ultimately to
+    en_US — the i18n layer accepts an unknown locale by emitting
+    source strings, so this never blocks startup.
+    """
+    import json
+
+    from yt_uniquifier.gui.i18n import (
+        SOURCE_LOCALE,
+        available_locales,
+        system_locale_hint,
+    )
+    from yt_uniquifier.gui.state import STATE_PATH
+    locale: str | None = None
+    try:
+        if STATE_PATH.exists():
+            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            persisted = data.get("locale")
+            if isinstance(persisted, str) and persisted:
+                locale = persisted
+    except (OSError, json.JSONDecodeError):
+        locale = None
+    if locale is None:
+        locale = system_locale_hint()
+    if locale is None or locale not in available_locales():
+        locale = SOURCE_LOCALE
+    return locale
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     _install_global_excepthook()
+    # v0.9 R5 — install the translator BEFORE MainWindow constructs
+    # any widget so the first paint already shows the right language.
+    from yt_uniquifier.gui.i18n import install_translator
+    install_translator(app, _resolve_boot_locale())
     win = MainWindow()
     win.show()
     _maybe_prompt_telemetry_consent(win)

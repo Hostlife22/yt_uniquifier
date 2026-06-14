@@ -44,12 +44,12 @@ class SettingsScreen(ScreenBase):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        title = QLabel("Settings")
+        title = QLabel(self.tr("Settings"))
         title.setObjectName("title")
         layout.addWidget(title)
 
         # Appearance
-        appear = QGroupBox("Appearance")
+        appear = QGroupBox(self.tr("Appearance"))
         f = QFormLayout(appear)
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["dark", "light", "system"])
@@ -57,7 +57,26 @@ class SettingsScreen(ScreenBase):
         self.theme_combo.currentTextChanged.connect(self._on_theme_change)
         mark(self.theme_combo, "Theme",
              "Switch between dark, light, and system color schemes.")
-        f.addRow("Theme (live switch):", self.theme_combo)
+        f.addRow(self.tr("Theme") + ":", self.theme_combo)
+
+        # v0.9 R5 — Language combo. Lists every locale with a
+        # shipped catalogue (plus the source). Switching is hot:
+        # we re-install the translator + emit ``locale_changed`` so
+        # screens that have cached strings can re-render. Most
+        # screens repaint on next show; an in-flight session
+        # finishes in the original language.
+        from yt_uniquifier.gui.i18n import available_locales
+        self.language_combo = QComboBox()
+        for loc in available_locales():
+            self.language_combo.addItem(loc, loc)
+        idx = self.language_combo.findData(self.state.locale)
+        if idx >= 0:
+            self.language_combo.setCurrentIndex(idx)
+        self.language_combo.currentIndexChanged.connect(self._on_language_change)
+        mark(self.language_combo, "Language",
+             "Switch the GUI display language. Unrecognised strings "
+             "fall back to English.")
+        f.addRow(self.tr("Language") + ":", self.language_combo)
         layout.addWidget(appear)
 
         # Defaults
@@ -274,7 +293,7 @@ class SettingsScreen(ScreenBase):
         # Save
         save_row = QHBoxLayout()
         save_row.addStretch(1)
-        self.save_btn = QPushButton("&Save")
+        self.save_btn = QPushButton(self.tr("&Save"))
         self.save_btn.clicked.connect(self._on_save)
         mark(self.save_btn, "Save settings",
              "Persist preferences to state.json.", shortcut="Ctrl+S")
@@ -289,6 +308,34 @@ class SettingsScreen(ScreenBase):
     def _on_theme_change(self, theme: str) -> None:
         """Apply immediately — MainWindow listens to state.theme_changed."""
         self.state.set_theme(theme)
+
+    def _on_language_change(self, _idx: int) -> None:
+        """Re-install the QTranslator and persist the choice.
+
+        Existing widgets keep their already-rendered strings until
+        next paint; we tell the user by flashing the status line
+        rather than tearing down + rebuilding every screen. A
+        future v1.0 may add per-screen ``retranslate_ui`` hooks.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        from yt_uniquifier.gui.i18n import install_translator
+        loc = self.language_combo.currentData()
+        if not isinstance(loc, str):
+            return
+        app = QApplication.instance()
+        # ``QApplication.instance()`` is typed as
+        # ``QCoreApplication | None`` though in a GUI process it is
+        # always the QApplication subclass — narrow explicitly so
+        # mypy --strict accepts the install_translator call.
+        if isinstance(app, QApplication):
+            install_translator(app, loc)
+        self.state.set_locale(loc)
+        if hasattr(self, "status_label"):
+            self.status_label.setText(
+                self.tr("Language switched to {loc} — reopen screens to refresh.")
+                .replace("{loc}", loc),
+            )
 
     # ---- helpers --------------------------------------------------------
     @staticmethod

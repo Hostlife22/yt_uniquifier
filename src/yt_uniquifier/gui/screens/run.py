@@ -159,7 +159,10 @@ class RunScreen(ScreenBase):
         )
         controls.addWidget(self.preflight_btn)
 
-        self.run_btn = QPushButton("▶ &Run")
+        # v0.9 R5 — leading glyph stays outside ``tr()`` so the
+        # translation key is just the action verb, not a glyph
+        # composition; the runtime concatenates them at paint time.
+        self.run_btn = QPushButton("▶ " + self.tr("&Run"))
         self.run_btn.setObjectName("run")
         self.run_btn.clicked.connect(self._on_run)
         mark(
@@ -186,7 +189,7 @@ class RunScreen(ScreenBase):
         # v0.7 R6 / F5 — Pause / Resume toggle, surfaced next to Cancel
         # so the two long-running controls live together. Disabled
         # until the worker is alive; label flips on paused_changed.
-        self.pause_btn = QPushButton("&Pause")
+        self.pause_btn = QPushButton(self.tr("&Pause"))
         self.pause_btn.setObjectName("pause")
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self._on_pause_toggle)
@@ -199,7 +202,7 @@ class RunScreen(ScreenBase):
         )
         controls.addWidget(self.pause_btn)
 
-        self.cancel_btn = QPushButton("&Cancel")
+        self.cancel_btn = QPushButton(self.tr("&Cancel"))
         self.cancel_btn.setObjectName("cancel")
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.cancel_btn.setEnabled(False)

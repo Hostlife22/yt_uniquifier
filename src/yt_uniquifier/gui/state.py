@@ -112,6 +112,7 @@ class AppState(QObject):
     history_changed = pyqtSignal(list)                   # list[HistoryEntry]
     notifications_changed = pyqtSignal(object)           # NotificationConfig | None
     telemetry_changed = pyqtSignal(object)               # TelemetryConfig | None
+    locale_changed = pyqtSignal(str)                     # 'en_US' | 'ru_RU' | …
 
     def __init__(self) -> None:
         # Lazy local import to keep this module importable without the
@@ -132,6 +133,7 @@ class AppState(QObject):
         self._history: list[HistoryEntry] = []
         self._notifications: NotificationConfig | None = None
         self._telemetry: TelemetryConfig | None = None
+        self._locale: str = "en_US"
         self._load()
 
     # ---- read-only accessors (test-friendly) ----
@@ -162,6 +164,11 @@ class AppState(QObject):
     @property
     def history(self) -> list[HistoryEntry]:
         return list(self._history)
+
+    @property
+    def locale(self) -> str:
+        """Currently-active GUI locale (e.g. ``en_US`` or ``ru_RU``)."""
+        return self._locale
 
     @property
     def telemetry(self) -> object:
@@ -207,6 +214,23 @@ class AppState(QObject):
     def set_theme(self, theme: str) -> None:
         self._theme = theme
         self.theme_changed.emit(theme)
+
+    def set_locale(self, locale: str) -> None:
+        """Replace the active locale, emit signal, persist.
+
+        Unknown locales are accepted at this layer — the i18n
+        translator clamps to a known catalogue at install time so a
+        stray value here at most renders English. Persisting any
+        value keeps state.json round-trippable across versions even
+        if a locale was added by a newer release.
+        """
+        if locale == self._locale:
+            return
+        self._locale = locale
+        self.locale_changed.emit(locale)
+        import contextlib
+        with contextlib.suppress(OSError):
+            self.save()
 
     def set_telemetry(self, config: object) -> None:
         """Replace the telemetry config and persist immediately.
@@ -275,6 +299,9 @@ class AppState(QObject):
             if STATE_PATH.exists():
                 data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
                 self._theme = data.get("theme", "dark")
+                loc = data.get("locale")
+                if isinstance(loc, str) and loc:
+                    self._locale = loc
                 self._recents = list(data.get("recents", []))[:RECENTS_CAP]
                 # Default selections may be absent.
                 for attr, key in (
@@ -324,6 +351,7 @@ class AppState(QObject):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         data: dict[str, object] = {
             "theme": self._theme,
+            "locale": self._locale,
             "recents": list(self._recents),
             "profile_path": str(self._profile_path) if self._profile_path else None,
             "encoder_name": self._encoder_name,
