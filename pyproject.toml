@@ -53,6 +53,15 @@ dev = [
 yt-uniq = "yt_uniquifier.cli.app:app"
 yt-uniq-gui = "yt_uniquifier.gui.app_pyqt:main"
 
+# v0.8.0 R1 — third-party transform plugins register here. A plugin package
+# advertises an entry point whose value is an import path to a module that
+# calls ``yt_uniquifier.core.transforms.register(TransformSpec(...))`` at
+# import time. See ``docs/plugins.md`` for a worked example. The stub below
+# is documentation, not a real entry point — uncomment in your own package.
+#
+# [project.entry-points."yt_uniquifier.transforms"]
+# my_transform = "my_pkg.my_transform"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
