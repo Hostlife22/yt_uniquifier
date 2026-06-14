@@ -37,6 +37,8 @@ from yt_uniquifier.core.segmenter import (
     process_main_audio,
     process_video_segments_parallel,
 )
+from yt_uniquifier.core.telemetry import TelemetryConfig
+from yt_uniquifier.core.telemetry import record as record_telemetry
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,11 @@ class RunOptions:
     # Telegram / generic webhook + optional SMTP). None = silent.
     # Dispatch is best-effort and never propagates errors.
     notifications: NotificationConfig | None = None
+    # v0.9 R3 — opt-in local telemetry. None = disabled; passing an
+    # explicit TelemetryConfig with enabled=True records one summary
+    # event per run (completed or failed). Never network egress in
+    # v0.9; see ``core/telemetry.py``.
+    telemetry: TelemetryConfig | None = None
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -133,6 +140,7 @@ def run_full(
     call through each early-return branch.
     """
     emit = on_event or (lambda _e: None)
+    start_ts = time.time()
     try:
         summary = _run_full_impl(
             plan, options, emit, cancel_token, pause_token,
@@ -143,10 +151,20 @@ def run_full(
             extra_message=f"{type(exc).__name__}: {exc}",
             emit=emit,
         )
+        _maybe_record_telemetry(
+            options, plan, "failed",
+            wall_clock_sec=time.time() - start_ts,
+            extra_message=f"{type(exc).__name__}: {exc}",
+        )
         raise
     _maybe_dispatch_notification(
         options, plan, "completed",
         summary=summary, emit=emit,
+    )
+    _maybe_record_telemetry(
+        options, plan, "completed",
+        wall_clock_sec=time.time() - start_ts,
+        summary=summary,
     )
     return summary
 
@@ -500,6 +518,57 @@ def _maybe_dispatch_notification(
             "level": "warn",
             "message": f"notification dispatch error: {exc}",
         }))
+
+
+def _maybe_record_telemetry(
+    options: RunOptions,
+    plan: Plan,
+    event_kind: Literal["completed", "failed"],
+    *,
+    wall_clock_sec: float,
+    summary: RunSummary | None = None,
+    extra_message: str | None = None,
+) -> None:
+    """Record one run-summary telemetry event when telemetry is enabled.
+
+    Deliberately narrow payload: profile id, encoder fingerprint,
+    segment count, wall-clock, OS / Python version. No paths, no
+    durations, no audio fingerprints. Path-redaction is still applied
+    inside ``telemetry.record`` for the few string fields that *could*
+    contain ``$HOME`` (output basename only, never the full path).
+    """
+    if options.telemetry is None or not options.telemetry.enabled:
+        return
+    try:
+        import platform
+        import sys
+        event: dict[str, object] = {
+            "kind": "run_summary",
+            "status": event_kind,
+            "profile_name": plan.profile.name,
+            "profile_codec": plan.profile.target_codec,
+            "encoder_name": plan.encoder.name,
+            "encoder_vendor": plan.encoder.vendor,
+            "wall_clock_sec": round(wall_clock_sec, 2),
+            "workers": options.workers,
+            "os": sys.platform,
+            "os_release": platform.release(),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+        }
+        if summary is not None:
+            event["segments_done"] = summary.segments_done
+            event["output_basename"] = summary.output.name
+        if extra_message is not None:
+            event["error_summary"] = extra_message[:200]
+        record_telemetry(event, options.telemetry)
+    except Exception as exc:  # noqa: BLE001 — never propagate
+        # Telemetry MUST NOT alter run outcomes. Log to the structured
+        # logger so a missing event is debuggable, but stay silent on
+        # the public RunEvent stream (notifications already do similar).
+        import logging
+        logging.getLogger(__name__).warning(
+            "telemetry record failed: %s", exc,
+        )
 
 
 # v0.7 R4 / F2 — exponential-moving-average half-life used by the

@@ -36,6 +36,8 @@ class SettingsScreen(ScreenBase):
         self._test_worker: NotificationsTestWorker | None = None
         self._build_ui()
         self._load_notifications_into_form()
+        self._load_telemetry_into_form()
+        self._refresh_telemetry_status()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -217,6 +219,58 @@ class SettingsScreen(ScreenBase):
 
         layout.addWidget(notif)
 
+        # v0.9 R3 — Local telemetry (opt-in, off by default, never
+        # network egress). Persists into ``state.telemetry``; the
+        # orchestrator reads it via RunOptions.telemetry.
+        tele = QGroupBox("Local telemetry (opt-in)")
+        tf = QFormLayout(tele)
+
+        self.telemetry_enabled_check = QCheckBox(
+            "Record one anonymous summary event per run",
+        )
+        self.telemetry_enabled_check.setChecked(False)
+        mark(self.telemetry_enabled_check, "Telemetry enabled",
+             "When checked, each completed or failed run appends one "
+             "JSONL event to the local telemetry directory. "
+             "No network egress in this release.")
+        tf.addRow("Enabled:", self.telemetry_enabled_check)
+
+        self.telemetry_redact_check = QCheckBox(
+            "Strip $HOME from any path-like field",
+        )
+        self.telemetry_redact_check.setChecked(True)
+        mark(self.telemetry_redact_check, "Redact paths",
+             "Replace the current user's home prefix with <HOME> in "
+             "every event before writing it.")
+        tf.addRow("Redact paths:", self.telemetry_redact_check)
+
+        self.telemetry_status_label = QLabel("")
+        self.telemetry_status_label.setObjectName("status")
+        self.telemetry_status_label.setWordWrap(True)
+        tf.addRow("Status:", self.telemetry_status_label)
+
+        tele_actions = QHBoxLayout()
+        self.telemetry_apply_btn = QPushButton("&Apply telemetry")
+        self.telemetry_apply_btn.clicked.connect(self._on_telemetry_apply)
+        mark(self.telemetry_apply_btn, "Apply telemetry",
+             "Persist the current telemetry config to state.json and "
+             "record the consent decision.")
+        tele_actions.addWidget(self.telemetry_apply_btn)
+        self.telemetry_open_btn = QPushButton("Open &events folder")
+        self.telemetry_open_btn.clicked.connect(self._on_telemetry_open)
+        mark(self.telemetry_open_btn, "Open telemetry folder",
+             "Reveal the on-disk telemetry directory in the OS file browser.")
+        tele_actions.addWidget(self.telemetry_open_btn)
+        self.telemetry_purge_btn = QPushButton("&Purge events")
+        self.telemetry_purge_btn.clicked.connect(self._on_telemetry_purge)
+        mark(self.telemetry_purge_btn, "Purge telemetry events",
+             "Delete every recorded event (irreversible).")
+        tele_actions.addWidget(self.telemetry_purge_btn)
+        tele_actions.addStretch(1)
+        tf.addRow("", self._row_widget(tele_actions))
+
+        layout.addWidget(tele)
+
         # Save
         save_row = QHBoxLayout()
         save_row.addStretch(1)
@@ -395,3 +449,68 @@ class SettingsScreen(ScreenBase):
             self.state.set_profile_path(Path(profile_data))
         self.state.save()
         self.status_label.setText("preferences saved")
+
+    # ---- telemetry (v0.9 R3) -------------------------------------------
+    def _load_telemetry_into_form(self) -> None:
+        cfg = self.state.telemetry
+        if cfg is None:
+            return
+        enabled = bool(getattr(cfg, "enabled", False))
+        redact = bool(getattr(cfg, "redact_paths", True))
+        self.telemetry_enabled_check.setChecked(enabled)
+        self.telemetry_redact_check.setChecked(redact)
+
+    def _refresh_telemetry_status(self) -> None:
+        from yt_uniquifier.core.telemetry import (
+            default_events_dir,
+            event_count,
+        )
+        try:
+            root = default_events_dir()
+            count = event_count(root)
+            self.telemetry_status_label.setText(
+                f"{count} event(s) recorded; dir: {root}",
+            )
+        except Exception as exc:  # noqa: BLE001 — never crash Settings
+            self.telemetry_status_label.setText(f"(status unavailable: {exc})")
+
+    def _on_telemetry_apply(self) -> None:
+        from yt_uniquifier.core.telemetry import (
+            TelemetryConfig,
+            write_consent_marker,
+        )
+        cfg = TelemetryConfig(
+            enabled=self.telemetry_enabled_check.isChecked(),
+            redact_paths=self.telemetry_redact_check.isChecked(),
+        )
+        self.state.set_telemetry(cfg)
+        try:
+            write_consent_marker(cfg.enabled)
+        except OSError as exc:
+            QMessageBox.warning(self, "Telemetry", f"could not write marker: {exc}")
+        self._refresh_telemetry_status()
+
+    def _on_telemetry_open(self) -> None:
+        from yt_uniquifier.core.telemetry import default_events_dir
+        root = default_events_dir()
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            webbrowser.open(root.as_uri())
+        except OSError as exc:
+            QMessageBox.warning(self, "Open folder", str(exc))
+
+    def _on_telemetry_purge(self) -> None:
+        from yt_uniquifier.core.telemetry import purge_events
+        answer = QMessageBox.question(
+            self,
+            "Purge telemetry?",
+            "Delete every recorded telemetry event? This cannot be undone.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            purge_events()
+        except OSError as exc:
+            QMessageBox.warning(self, "Purge failed", str(exc))
+            return
+        self._refresh_telemetry_status()

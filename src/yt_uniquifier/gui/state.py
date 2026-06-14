@@ -111,6 +111,7 @@ class AppState(QObject):
     recents_changed = pyqtSignal(list)                   # list[str]
     history_changed = pyqtSignal(list)                   # list[HistoryEntry]
     notifications_changed = pyqtSignal(object)           # NotificationConfig | None
+    telemetry_changed = pyqtSignal(object)               # TelemetryConfig | None
 
     def __init__(self) -> None:
         # Lazy local import to keep this module importable without the
@@ -118,7 +119,9 @@ class AppState(QObject):
         # (it pulls pydantic + urllib/smtplib paths that some headless
         # smoke tests stub).
         from yt_uniquifier.core.notifications import NotificationConfig
+        from yt_uniquifier.core.telemetry import TelemetryConfig
         self._NotificationConfig = NotificationConfig
+        self._TelemetryConfig = TelemetryConfig
         super().__init__()
         self._input_path: Path | None = None
         self._output_path: Path | None = None
@@ -128,6 +131,7 @@ class AppState(QObject):
         self._recents: list[str] = []
         self._history: list[HistoryEntry] = []
         self._notifications: NotificationConfig | None = None
+        self._telemetry: TelemetryConfig | None = None
         self._load()
 
     # ---- read-only accessors (test-friendly) ----
@@ -158,6 +162,17 @@ class AppState(QObject):
     @property
     def history(self) -> list[HistoryEntry]:
         return list(self._history)
+
+    @property
+    def telemetry(self) -> object:
+        """Return the current ``TelemetryConfig | None``.
+
+        Annotated as ``object`` for the same reason as
+        :py:attr:`notifications` — keep AppState importable without
+        materialising ``core.telemetry`` (which is harmless but
+        symmetric with notifications).
+        """
+        return self._telemetry
 
     @property
     def notifications(self) -> object:
@@ -192,6 +207,20 @@ class AppState(QObject):
     def set_theme(self, theme: str) -> None:
         self._theme = theme
         self.theme_changed.emit(theme)
+
+    def set_telemetry(self, config: object) -> None:
+        """Replace the telemetry config and persist immediately.
+
+        Accepts ``TelemetryConfig`` or ``None``; other types are
+        rejected silently so an accidental ``set_telemetry(True)`` from
+        a third-party screen can't poison state.json.
+        """
+        if config is None or isinstance(config, self._TelemetryConfig):
+            self._telemetry = config
+            self.telemetry_changed.emit(config)
+            import contextlib
+            with contextlib.suppress(OSError):
+                self.save()
 
     def set_notifications(self, config: object) -> None:
         """Replace the notifications config and persist immediately.
@@ -263,6 +292,12 @@ class AppState(QObject):
                         )
                     except Exception:  # noqa: BLE001 — stale schema → drop, don't crash
                         self._notifications = None
+                tele = data.get("telemetry")
+                if isinstance(tele, dict):
+                    try:
+                        self._telemetry = self._TelemetryConfig.model_validate(tele)
+                    except Exception:  # noqa: BLE001 — stale schema → drop, don't crash
+                        self._telemetry = None
         except json.JSONDecodeError:
             # File exists but isn't parseable — archive it so we don't
             # silently lose the user's recents/prefs on the next save.
@@ -296,6 +331,8 @@ class AppState(QObject):
         if self._notifications is not None:
             # mode="json" so HttpUrl / Path-style fields serialise as strings.
             data["notifications"] = self._notifications.model_dump(mode="json")
+        if self._telemetry is not None:
+            data["telemetry"] = self._telemetry.model_dump(mode="json")
         tmp = STATE_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(STATE_PATH)

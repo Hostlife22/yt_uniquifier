@@ -269,11 +269,69 @@ class MainWindow(QMainWindow):
             event.accept()
 
 
+def _maybe_prompt_telemetry_consent(parent: QMainWindow | None = None) -> None:
+    """v0.9 R3 — first-run-only opt-in dialog for local telemetry.
+
+    Runs at most once per user: the consent marker file (see
+    :func:`core.telemetry.default_consent_marker`) flips the gate
+    permanently. The default decision is *off*; the user must
+    deliberately click Enable. A dismissed dialog (close button)
+    records 'disabled' so we don't re-prompt forever.
+    """
+    from yt_uniquifier.core.telemetry import (
+        TelemetryConfig,
+        has_consent_marker,
+        write_consent_marker,
+    )
+    if has_consent_marker():
+        return
+    box = QMessageBox(parent)
+    box.setWindowTitle("Local telemetry")
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setText("Help improve yt-uniquifier with local-only telemetry?")
+    box.setInformativeText(
+        "When enabled, each completed or failed encode appends one "
+        "anonymous summary event (profile name, encoder, wall-clock, "
+        "segment count, OS) to a JSONL file in your per-user data "
+        "directory.\n\n"
+        "Telemetry is OFF by default. Nothing is sent over the "
+        "network in this release — you can review or export events "
+        "from Settings → Local telemetry, or via "
+        "`yt-uniq telemetry status`.\n\n"
+        "Your choice is remembered; change it any time in Settings."
+    )
+    from PyQt6.QtWidgets import QPushButton
+    enable_btn = box.addButton("&Enable", QMessageBox.ButtonRole.AcceptRole)
+    keep_disabled_btn = box.addButton(
+        "&Keep disabled", QMessageBox.ButtonRole.RejectRole,
+    )
+    if isinstance(keep_disabled_btn, QPushButton):
+        box.setDefaultButton(keep_disabled_btn)
+    box.exec()
+    enabled = box.clickedButton() is enable_btn
+    try:
+        write_consent_marker(enabled)
+    except OSError:
+        return
+    if enabled:
+        try:
+            from yt_uniquifier.gui.state import AppState
+            # Use a transient AppState only to persist — MainWindow
+            # may already have one; setting via that one syncs the
+            # signal subscribers. We avoid coupling here so this
+            # function can run before MainWindow exists.
+            state = AppState()
+            state.set_telemetry(TelemetryConfig(enabled=True))
+        except Exception:  # noqa: BLE001 — never block startup
+            pass
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     _install_global_excepthook()
     win = MainWindow()
     win.show()
+    _maybe_prompt_telemetry_consent(win)
     sys.exit(app.exec())
 
 
