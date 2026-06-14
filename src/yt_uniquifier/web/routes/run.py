@@ -111,6 +111,11 @@ def register(  # noqa: PLR0913
                     output=output_path,
                     encoder_override=req.encoder_override,
                     workers=req.workers,
+                    # v1.1.0 Task 14: hand the HTTP-layer correlation ID
+                    # to the orchestrator so the structured log emitted
+                    # from run_full carries the same `run_id` that's in
+                    # the HTTP response body and the SSE event stream.
+                    run_id=run_id,
                 )
                 run_full(plan, opts, on_event=_on_event, cancel_token=cancel_token)
                 record.status = (

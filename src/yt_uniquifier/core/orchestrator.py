@@ -7,6 +7,7 @@ progress events (RunEvent + custom phase markers).
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -17,6 +18,7 @@ from typing import Literal
 from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
+from yt_uniquifier.core.logging_config import get_logger
 from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.notifications import (
@@ -79,6 +81,12 @@ class RunOptions:
     # event per run (completed or failed). Never network egress in
     # v0.9; see ``core/telemetry.py``.
     telemetry: TelemetryConfig | None = None
+    # v1.1.0 Task 14: correlation ID for log / event / metric joins.
+    # Auto-populated at orchestrator entry when None (uuid7 → time-
+    # ordered, sortable, deduplicates well on log replay). Callers
+    # may pre-bind their own ID (e.g. the web layer wants the same
+    # value back in the HTTP response) by passing it explicitly.
+    run_id: str | None = None
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -139,13 +147,51 @@ def run_full(
     exception path — without forcing the impl to thread a dispatch
     call through each early-return branch.
     """
-    emit = on_event or (lambda _e: None)
+    # v1.1.0 Task 14: ensure a run_id exists exactly once per run and
+    # stamp it onto every event the wrapped emit() sees. Time-ordered
+    # so log/event/metric replays sort sensibly even on overlapping
+    # batches; ``uuid7`` is supplied by the stdlib in 3.11+ via the
+    # ``uuid.uuid8`` shim — fall back to ``uuid4`` if a host's libc
+    # is too old to provide the monotonic clock that uuid7 needs.
+    options = _ensure_run_id(options)
+    run_id = options.run_id
+    assert run_id is not None  # _ensure_run_id post-condition
+
+    # v1.1.0 Task 13: bind run_id + plan_hash so every structured log
+    # line emitted from the orchestrator and its callees carries the
+    # correlation IDs without per-call boilerplate.
+    log = get_logger(
+        "yt_uniquifier.orchestrator",
+        run_id=run_id,
+        plan_hash=plan.plan_hash,
+    )
+
+    raw_emit = on_event or (lambda _e: None)
+
+    def emit(event: RunEvent) -> None:
+        # v1.1.0 Task 14: weave run_id into every payload so downstream
+        # subscribers (web /api/run response, GUI run history,
+        # /metrics counters) can correlate without a separate hook.
+        if "run_id" not in event.payload:
+            event = RunEvent(
+                kind=event.kind,
+                payload={**event.payload, "run_id": run_id},
+            )
+        raw_emit(event)
+
+    log.info("run.started", input=str(plan.source.path), encoder=plan.encoder.name)
     start_ts = time.time()
     try:
         summary = _run_full_impl(
             plan, options, emit, cancel_token, pause_token,
         )
     except BaseException as exc:
+        log.error(
+            "run.failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            wall_clock_sec=round(time.time() - start_ts, 3),
+        )
         _maybe_dispatch_notification(
             options, plan, "failed",
             extra_message=f"{type(exc).__name__}: {exc}",
@@ -157,6 +203,12 @@ def run_full(
             extra_message=f"{type(exc).__name__}: {exc}",
         )
         raise
+    log.info(
+        "run.completed",
+        segments_done=summary.segments_done,
+        wall_clock_sec=round(time.time() - start_ts, 3),
+        output=str(summary.output),
+    )
     _maybe_dispatch_notification(
         options, plan, "completed",
         summary=summary, emit=emit,
@@ -167,6 +219,35 @@ def run_full(
         summary=summary,
     )
     return summary
+
+
+def _ensure_run_id(options: RunOptions) -> RunOptions:
+    """Return ``options`` with a populated ``run_id`` field.
+
+    No-op if the caller already supplied one. v1.1.0 Task 14: keeps the
+    web layer's flow simple — it pre-generates the ID so the HTTP
+    response can echo it back, and the orchestrator picks up the same
+    ID without overwriting. Standalone CLI / GUI runs use this fallback.
+    """
+    if options.run_id:
+        return options
+    return dataclasses.replace(options, run_id=_new_run_id())
+
+
+def _new_run_id() -> str:
+    """Return a time-sortable correlation ID.
+
+    Prefers ``uuid.uuid7`` (Python 3.13+); falls back to ``uuid4`` on
+    older runtimes so behaviour is consistent without forcing every
+    deployment onto 3.13. The first 12 chars of a uuid4 still give us
+    ~46 bits of entropy which is plenty to rule out collisions inside
+    one process.
+    """
+    import uuid
+    uuid7 = getattr(uuid, "uuid7", None)
+    if callable(uuid7):
+        return str(uuid7())
+    return str(uuid.uuid4())
 
 
 def _run_full_impl(
