@@ -500,19 +500,24 @@ def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
     # ``proc.terminate()`` alone takes down only the leader, leaving
     # the stdout pipe held by the surviving grandchild — the same
     # POSIX bug ``start_new_session=True`` solves on Linux/macOS.
-    try:
+    # Catches Exception broadly because unit tests monkey-patch
+    # ``subprocess.Popen`` globally — the patched fake replaces even
+    # the ``taskkill`` subprocess and may raise AttributeError on
+    # ``process.args`` access inside ``subprocess.run``.
+    with contextlib.suppress(Exception):
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
             capture_output=True, timeout=5,
         )
-        return
-    except (OSError, subprocess.SubprocessError):
-        pass
-    # Fallbacks for unit-test fake Popens that don't have a real PID
-    # tree behind them: proc.terminate() for graceful, proc.kill()
-    # for hard. ``contextlib.suppress`` swallows the AttributeError
-    # path so a fake without these methods still doesn't crash the
-    # watcher thread.
+    # ALWAYS fall through to ``proc.terminate()`` / ``proc.kill()``
+    # — never early-return on taskkill success. Reasons:
+    # 1. In production: taskkill /T already killed the tree; the
+    #    follow-up call lands on a dead process and is a no-op. The
+    #    redundancy is cheap.
+    # 2. In unit tests: ``subprocess.run`` above ran against the
+    #    monkey-patched fake (not real taskkill), so the actual
+    #    process state machine wasn't touched. This call drives the
+    #    fake's ``signalled`` / ``killed`` flags the assertions rely on.
     with contextlib.suppress(OSError, ProcessLookupError, AttributeError):
         if sig == signal.SIGINT:
             proc.terminate()

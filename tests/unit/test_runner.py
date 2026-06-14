@@ -47,6 +47,13 @@ class _FakePopen:
         # plausible value so the watcher's cancel branch doesn't crash.
         # Os syscalls are stubbed below.
         self.pid = 12345
+        # v0.7 R9 round-6 — ``subprocess.run`` (called from the runner's
+        # Windows ``taskkill`` tree-kill path, which routes through this
+        # fake under monkey-patch) terminates with
+        # ``CompletedProcess(process.args, ...)``. Without an ``args``
+        # attribute that raised AttributeError on the watcher daemon
+        # thread.
+        self.args: list[str] = ["fake-popen"]
 
     def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002
         self._done = True
