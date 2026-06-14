@@ -23,12 +23,15 @@ import sys
 import types
 from collections.abc import Iterator
 from importlib import metadata as importlib_metadata
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 from pydantic import BaseModel
 
 import yt_uniquifier.core.transforms as transforms_pkg
+from yt_uniquifier.core import plugins as plugins_mod
+from yt_uniquifier.core.plugins import MANIFEST_FILENAME
 from yt_uniquifier.core.transforms import (
     ENTRY_POINT_GROUP,
     FilterChain,
@@ -38,6 +41,25 @@ from yt_uniquifier.core.transforms import (
     get,
     register,
 )
+
+
+# v1.2.0 Task 23 — every third-party EntryPoint now must ship a
+# yt_uniquifier_plugin.toml manifest.  Fake entry points used by the
+# v0.8.0 tests below were created before the manifest gate existed;
+# this helper attaches the smallest valid manifest so discovery
+# proceeds to the loader.
+def _attach_video_manifest(ep: object) -> None:
+    class _F:
+        name = MANIFEST_FILENAME
+
+        @staticmethod
+        def read_text(encoding: str | None = None, errors: str | None = None) -> str:
+            return (
+                '[plugin]\nname="auto"\nversion="0"\n'
+                'capabilities=["video_transform"]\n'
+            )
+
+    ep.dist = SimpleNamespace(files=[_F()], metadata={"Name": "auto"})  # type: ignore[attr-defined]
 
 
 class _Params(BaseModel):
@@ -110,9 +132,10 @@ def test_third_party_plugin_registers_via_entry_points(
     _register_on_import()
 
     fake_ep = _fake_entry_point("ok_plugin", "synthetic_plugin_ok", loader_module=mod)
+    _attach_video_manifest(fake_ep)
 
     with mock.patch.object(
-        transforms_pkg.importlib_metadata,
+        plugins_mod.importlib_metadata,
         "entry_points",
         return_value=[fake_ep],
     ):
@@ -146,12 +169,15 @@ def test_broken_third_party_plugin_logs_warning_and_continues(
             raise ImportError("intentional plugin failure")
 
     good_ep = _fake_entry_point("good_plugin", "synthetic_plugin_good", loader_module=good_mod)
+    broken_ep = _BrokenEP()
+    _attach_video_manifest(good_ep)
+    _attach_video_manifest(broken_ep)
 
     caplog.set_level(logging.WARNING, logger="yt_uniquifier.core.transforms")
     with mock.patch.object(
-        transforms_pkg.importlib_metadata,
+        plugins_mod.importlib_metadata,
         "entry_points",
-        return_value=[_BrokenEP(), good_ep],
+        return_value=[broken_ep, good_ep],
     ):
         transforms_pkg._discover_third_party()
 
@@ -216,9 +242,14 @@ def test_entry_points_lookup_failure_is_logged_not_raised(
     def boom(*_a: object, **_kw: object) -> object:
         raise RuntimeError("metadata backend unhappy")
 
-    caplog.set_level(logging.WARNING, logger="yt_uniquifier.core.transforms")
+    # v1.2.0 Task 23 — entry-points lookup is now wrapped inside
+    # ``plugins.list_entry_points`` and the WARN logger is the plugins
+    # module, not transforms.  Capture from the new logger but keep
+    # asserting on the same message text so a future refactor that
+    # silently swallowed the WARN still fails this regression.
+    caplog.set_level(logging.WARNING, logger="yt_uniquifier.core.plugins")
     with mock.patch.object(
-        transforms_pkg.importlib_metadata,
+        plugins_mod.importlib_metadata,
         "entry_points",
         side_effect=boom,
     ):

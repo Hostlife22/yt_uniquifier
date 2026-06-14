@@ -1,6 +1,7 @@
 # Transform plugins
 
-> Added in v0.8.0. See `specs/v0.8-plan.md` § R1.
+> Added in v0.8.0. Hardened in v1.2.0 with manifest + capability gate + audit-hook
+> sandbox (Task 23). See `specs/v0.8-plan.md` § R1 and the v1.2.0 roadmap.
 
 Built-in transforms (crop+rescale, color jitter, loudnorm, pitch+tempo …) live in
 `src/yt_uniquifier/core/transforms/` and self-register via `register(TransformSpec(…))`
@@ -12,12 +13,71 @@ discovers it automatically.
 No fork is needed. No changes to `core/`. A plugin published to PyPI becomes
 visible to every yt-uniquifier install in the same virtualenv after `pip install`.
 
-## Trust model
+## Manifest (v1.2.0)
+
+Every third-party plugin distribution MUST ship a `yt_uniquifier_plugin.toml`
+file at the package root. The manifest declares which transform kinds the plugin
+is allowed to register; trying to register a kind the manifest didn't opt in to
+raises `PluginViolation` at load time.
+
+```toml
+[plugin]
+name = "my-uniq-pingpong"
+version = "0.1.0"
+capabilities = ["video_transform"]   # add "audio_transform" to register audio
+# sha256 = "…"                       # optional self-declared wheel hash
+```
+
+`name` and `version` are required.  `capabilities` is a list of:
+
+| Capability         | Permits `TransformSpec.kind` | Notes |
+|--------------------|------------------------------|-------|
+| `video_transform`  | `"video"`                    | Required for any `video.*` ID |
+| `audio_transform`  | `"audio"`                    | Required for any `audio.*` ID |
+
+A plugin omitting `capabilities` is loadable (its manifest is valid) but cannot
+register any transform — useful as a no-op probe to verify discovery wiring.
+
+Ship the manifest as package data so `importlib.metadata.distribution(...).files`
+includes it.  Example `pyproject.toml` snippet:
+
+```toml
+[tool.setuptools.package-data]
+my_uniq_pingpong = ["yt_uniquifier_plugin.toml"]
+```
+
+## Trust model (v1.2.0)
 
 Plugins are ordinary Python packages, so loading one runs arbitrary code from a
-third party. Trust them the same way you'd trust any dependency you `pip install`.
-yt-uniquifier wraps every plugin import in `try/except` so a broken plugin logs a
-warning and is skipped (it cannot brick the tool), but it does **not** sandbox.
+third party. v1.2.0 adds two defence-in-depth layers on top of the entry-point
+`try/except` introduced in v0.8.0:
+
+1. **Manifest capability gate** — `register()` calls from a plugin without a
+   manifest, or whose manifest doesn't list the matching capability, are
+   rejected before the transform reaches the registry.
+2. **Audit-hook sandbox** — every plugin's import-time code and every
+   transform builder it ships runs inside a `sys.addaudithook` gate.
+   Denylisted operations (filesystem writes — `os.unlink`/`os.remove`/`os.rename`,
+   network egress — `socket.connect`/`socket.bind`, subprocess spawns —
+   `subprocess.Popen`/`os.exec*`, dynamic `exec`/`compile`) raise
+   `PluginViolation` instead of silently succeeding.
+
+The sandbox is implemented via [PEP 578 audit hooks](https://peps.python.org/pep-0578/)
+and is cross-platform (CPython, no OS-specific code).  It catches anything that
+flows through the CPython runtime; a plugin that ships a C extension and issues
+raw syscalls bypasses this layer.  Linux `seccomp` is a candidate for a stronger
+second layer in a future release.
+
+### Operator controls
+
+| Flag / env var | Effect |
+|---|---|
+| `--no-plugins`  /  `YT_UNIQ_NO_PLUGINS=1`               | Skip all third-party plugins. The env var is fully pre-import; the CLI flag post-filters the registry so import-time side effects have already run. |
+| `--plugins-allowlist a,b`  /  `YT_UNIQ_PLUGINS_ALLOWLIST=a,b` | Keep only plugins whose `[plugin].name` is in the comma-separated list. |
+| `--unsafe-plugins`                                       | Disable the audit-hook sandbox.  Use only with trusted internal plugins; do not use with PyPI installs. |
+
+Prefer the env-var form in production deployments: it takes effect before any
+plugin import, so a malicious plugin's `__init__.py` never runs.
 
 ## Minimal plugin (hello-world)
 

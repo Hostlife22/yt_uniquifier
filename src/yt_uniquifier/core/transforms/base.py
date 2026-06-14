@@ -107,12 +107,34 @@ class TransformSpec:
 
 
 _REGISTRY: dict[str, TransformSpec] = {}
+# v1.2.0 Task 23 — spec ids registered while a plugin manifest was
+# active.  ``call_build`` consults this set to decide whether to wrap
+# the builder invocation in the audit-hook sandbox; built-in transforms
+# bypass the sandbox so legitimate IO (e.g. video.subtitles reading a
+# .srt file) keeps working unchanged.
+_PLUGIN_SPEC_IDS: set[str] = set()
 
 
 def register(spec: TransformSpec) -> None:
+    # v1.2.0 Task 23 — capability gate: if a plugin manifest is active
+    # (set by ``_discover_third_party`` before importing the plugin's
+    # entry point), the plugin's capabilities must include the kind
+    # being registered.  Built-ins and tests run with no active
+    # manifest and pass through unchanged.  Imported here rather than
+    # at module top to avoid a hard import cycle: plugins ↔ transforms.
+    from yt_uniquifier.core.plugins import (
+        assert_kind_allowed,
+        get_active_manifest,
+        record_plugin_spec,
+    )
+    assert_kind_allowed(spec.kind)
     if spec.id in _REGISTRY:
         raise ValueError(f"transform {spec.id!r} already registered")
     _REGISTRY[spec.id] = spec
+    active = get_active_manifest()
+    if active is not None:
+        _PLUGIN_SPEC_IDS.add(spec.id)
+        record_plugin_spec(active.name, spec.id)
 
 
 def get(transform_id: str) -> TransformSpec:
@@ -128,6 +150,7 @@ def all_ids() -> list[str]:
 def reset_for_tests() -> None:
     """Clear the registry. Only call from tests that need a clean slate."""
     _REGISTRY.clear()
+    _PLUGIN_SPEC_IDS.clear()
 
 
 @functools.cache
@@ -164,7 +187,24 @@ def call_build(
     with `**_` boilerplate. Signature is inspected once and cached, so a
     real TypeError raised inside the builder propagates instead of being
     masked by a try/except fallback.
+
+    v1.2.0 Task 23 — if ``spec`` was registered by a third-party plugin
+    (tracked in :data:`_PLUGIN_SPEC_IDS`), the builder runs inside the
+    audit-hook sandbox so denylisted syscalls (filesystem writes,
+    network egress, subprocess spawns) raise ``PluginViolation``
+    instead of silently succeeding.  Built-ins skip the sandbox so
+    legitimate IO (``video.subtitles`` reading a .srt file) keeps
+    working.
     """
+    is_plugin = spec.id in _PLUGIN_SPEC_IDS
+    if is_plugin:
+        # Local import — keeps ``base.py`` free of a hard plugin_sandbox
+        # dependency for the built-in code paths that never need the gate.
+        from yt_uniquifier.core.plugin_sandbox import in_plugin_code
+        with in_plugin_code():
+            if _builder_accepts_rng(spec.build):
+                return spec.build(params, alloc, in_label, rng=rng)
+            return spec.build(params, alloc, in_label)
     if _builder_accepts_rng(spec.build):
         return spec.build(params, alloc, in_label, rng=rng)
     return spec.build(params, alloc, in_label)

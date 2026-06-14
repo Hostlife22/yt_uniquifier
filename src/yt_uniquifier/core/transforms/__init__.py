@@ -20,8 +20,15 @@ from __future__ import annotations
 
 import importlib
 import logging
-from importlib import metadata as importlib_metadata
 
+from yt_uniquifier.core.plugin_sandbox import in_plugin_code, install_sandbox
+from yt_uniquifier.core.plugins import (
+    PluginViolation,
+    list_entry_points,
+    read_manifest,
+    reset_active_manifest,
+    set_active_manifest,
+)
 from yt_uniquifier.core.transforms.base import (
     FilterChain,
     LabelAllocator,
@@ -78,24 +85,59 @@ def _discover_third_party() -> None:
     ``value`` is the import path (e.g. ``mypkg.my_transform``); the
     ``name`` is informational and surfaces only in WARNING logs.
 
+    v1.2.0 Task 23 — every plugin distribution must ship a
+    ``yt_uniquifier_plugin.toml`` manifest declaring its capabilities.
+    The manifest is read first (a missing or malformed manifest causes
+    the plugin to be skipped with a WARN); the entry point is then
+    imported with the manifest installed as the active context, so
+    ``register()`` can enforce capability gating.  The audit-hook
+    sandbox is active for the duration of plugin import + every plugin
+    ``build()`` call so denylisted syscalls (filesystem mutation,
+    network egress, subprocess spawn) raise ``PluginViolation`` instead
+    of silently succeeding.
+
+    Environment-variable overrides handled by ``list_entry_points``:
+
+      * ``YT_UNIQ_NO_PLUGINS=1`` skips discovery entirely (used by the
+        CLI's ``--no-plugins`` flag).
+      * ``YT_UNIQ_PLUGINS_ALLOWLIST=a,b,c`` filters to named plugins.
+
     A broken plugin is logged and skipped — it must not prevent successful
     plugins or built-ins from loading.
     """
-    try:
-        entries = importlib_metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except Exception as exc:  # noqa: BLE001 — defensive against custom metadata backends
-        _log.warning("entry-points lookup failed for %r: %s", ENTRY_POINT_GROUP, exc)
-        return
-    for ep in entries:
+    # Installing the sandbox is idempotent and cheap; we do it eagerly
+    # so even the manifest-read path (which doesn't import plugin code
+    # directly but does call into TOML and pydantic) runs under the
+    # same gate as the eventual plugin import.
+    install_sandbox()
+    for ep in list_entry_points(ENTRY_POINT_GROUP):
         try:
-            ep.load()
+            manifest = read_manifest(ep)
+        except PluginViolation as exc:
+            _log.warning(
+                "third-party transform plugin %r (%s) rejected at manifest: %s",
+                ep.name, ep.value, exc,
+            )
+            continue
+        token = set_active_manifest(manifest)
+        try:
+            with in_plugin_code():
+                ep.load()
+        except PluginViolation as exc:
+            # Capability mismatch or sandbox catch — log explicitly so
+            # operators see WHICH plugin and WHY (the WARN above for
+            # missing manifest is distinct).
+            _log.warning(
+                "third-party transform plugin %r (%s) rejected at load: %s",
+                ep.name, ep.value, exc,
+            )
         except Exception as exc:  # noqa: BLE001 — third-party code is untrusted-by-default
             _log.warning(
                 "third-party transform plugin %r (%s) failed to load: %s",
-                ep.name,
-                ep.value,
-                exc,
+                ep.name, ep.value, exc,
             )
+        finally:
+            reset_active_manifest(token)
 
 
 _load_builtins()
