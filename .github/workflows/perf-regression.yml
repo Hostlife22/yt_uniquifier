@@ -1,0 +1,171 @@
+# v1.0.0 R4 — nightly performance-regression watch.
+#
+# What it does on each scheduled run:
+#   1. Builds a 60-second 720p24 fixture via testsrc2+sine.
+#   2. Runs tools/benchmark.py against it with libx264 + cid_aware.
+#   3. Fetches the most recent snapshot from the perf-history
+#      branch (orphan branch dedicated to perf JSON, separate from
+#      gh-pages where the mkdocs site lives).
+#   4. Runs tools/perf_compare.py against that baseline.
+#   5. On wall_sec regression > 15%, opens (or updates) a GitHub
+#      issue with label `perf-regression`. The issue body is the
+#      markdown diff from perf_compare.
+#   6. Commits the new snapshot into perf-history as
+#      snapshots/<git-sha>.json AND updates latest.json so the
+#      next nightly has a baseline to diff against.
+#
+# Why a separate perf-history branch instead of gh-pages: the docs
+# pipeline uses Pages-from-Actions (actions/deploy-pages@v4), and
+# pushing perf JSON to gh-pages would either conflict with the
+# docs build or pollute the published docs URL. An orphan branch
+# keeps the data versioned, queryable via git, and out of the way.
+#
+# Manual trigger: `workflow_dispatch` lets the maintainer re-run
+# the comparison against a chosen commit without waiting for the
+# scheduled 03:17 UTC slot.
+
+name: perf-regression
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit new snapshots to perf-history branch
+  issues: write     # open / update the regression issue
+
+concurrency:
+  # Only one nightly run at a time. A manually-triggered dispatch
+  # will queue behind an in-flight scheduled run rather than racing
+  # on the perf-history branch push.
+  group: perf-regression
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full history so git rev-parse short SHA works
+
+      - name: Install ffmpeg + Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Generate 60s 720p24 fixture (testsrc2+sine)
+        run: |
+          mkdir -p .perf
+          ffmpeg -y -hide_banner -loglevel error \
+            -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=60" \
+            -f lavfi -i "sine=frequency=440:duration=60" \
+            -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+            -c:a aac -b:a 128k \
+            .perf/fixture_720p.mp4
+          ls -la .perf/
+
+      - name: Run benchmark → JSON
+        run: |
+          python tools/benchmark.py .perf/fixture_720p.mp4 \
+            --profile src/yt_uniquifier/profiles/cid_aware.yaml \
+            --out .perf/out.mp4 \
+            --encoder libx264 \
+            --workers 2 \
+            --csv .perf/benchmark.csv \
+            --json .perf/current.json
+          cat .perf/current.json
+
+      - name: Fetch perf-history branch (allow-empty)
+        run: |
+          git fetch origin perf-history:perf-history 2>/dev/null || \
+            echo "perf-history branch does not exist yet — first run."
+
+      - name: Compare against last baseline
+        id: compare
+        # perf_compare exits 1 on regression; we capture that into
+        # a step output so the issue-creation step can decide
+        # whether to fire. set +e + explicit RC capture avoids the
+        # workflow aborting before we can read the diff.
+        run: |
+          if git show perf-history:latest.json > .perf/baseline.json 2>/dev/null; then
+            set +e
+            python tools/perf_compare.py \
+              --baseline .perf/baseline.json \
+              --current .perf/current.json \
+              --threshold 15 \
+              --markdown .perf/report.md
+            echo "compare_rc=$?" >> "$GITHUB_OUTPUT"
+            set -e
+          else
+            echo "compare_rc=0" >> "$GITHUB_OUTPUT"
+            echo "# Perf comparison" > .perf/report.md
+            echo "" >> .perf/report.md
+            echo "First perf-history baseline — no comparison run." >> .perf/report.md
+          fi
+
+      - name: Open issue on regression
+        if: steps.compare.outputs.compare_rc == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT_PATH: .perf/report.md
+        run: |
+          TITLE="perf regression on $(date -u +%Y-%m-%d): wall_sec exceeded threshold"
+          gh issue create \
+            --title "$TITLE" \
+            --label "perf-regression" \
+            --body-file "$REPORT_PATH" \
+            || echo "issue creation failed (probably duplicate); see report below" && cat "$REPORT_PATH"
+
+      - name: Persist snapshot to perf-history branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          mkdir -p _perf_publish/snapshots
+          cp .perf/current.json "_perf_publish/snapshots/${SHA}.json"
+          cp .perf/current.json "_perf_publish/latest.json"
+
+          # Switch to perf-history branch (orphan if absent) without
+          # touching the working tree of the main checkout.
+          git worktree add --detach _perf_worktree
+          cd _perf_worktree
+          if git show-ref --verify --quiet refs/heads/perf-history; then
+            git checkout perf-history
+          elif git ls-remote --exit-code --heads origin perf-history >/dev/null 2>&1; then
+            git fetch origin perf-history
+            git checkout -B perf-history origin/perf-history
+          else
+            # First-ever run: orphan branch with no history.
+            git checkout --orphan perf-history
+            git rm -rf . 2>/dev/null || true
+            echo "# Perf history" > README.md
+            echo "" >> README.md
+            echo "Nightly JSON snapshots from .github/workflows/perf-regression.yml." >> README.md
+          fi
+
+          mkdir -p snapshots
+          cp "../_perf_publish/snapshots/${SHA}.json" snapshots/
+          cp "../_perf_publish/latest.json" latest.json
+
+          git config user.name "perf-regression-bot"
+          git config user.email "perf-regression-bot@users.noreply.github.com"
+          git add snapshots/ latest.json README.md 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "no perf data change — skipping push"
+          else
+            git commit -m "perf: nightly snapshot ${SHA}"
+            git push origin perf-history
+          fi
