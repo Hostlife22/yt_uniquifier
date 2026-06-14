@@ -111,4 +111,140 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Yes": "Да",
         "No": "Нет",
     },
+    # v1.3.0 Task 35 — Simplified Chinese.  Mainland-form punctuation
+    # ("：" rather than ":") so the screen reader cadence reads cleanly
+    # for zh-CN users.  Mnemonics: the trailing "&" is preserved; Qt
+    # ignores it when the next character has no underline-able glyph
+    # (Chinese ideographs are non-mnemonic in Qt's renderer), so the
+    # accelerator falls back to the canonical menu position.
+    "zh_CN": {
+        # ---- Run screen ----
+        "&Run": "&运行",
+        "&Cancel": "&取消",
+        "&Pause": "&暂停",
+        "Auto-tune for this source": "为此源自动调优",
+        "Input file": "输入文件",
+        "Output file": "输出文件",
+        "Profile": "配置",
+        "Encoder": "编码器",
+        "Workers": "工作进程",
+        "Status: idle": "状态：空闲",
+        "Status: running": "状态：运行中",
+        "Status: completed": "状态：已完成",
+        "Status: failed": "状态：失败",
+        "Status: cancelled": "状态：已取消",
+
+        # ---- Settings screen ----
+        "Settings": "设置",
+        "Appearance": "外观",
+        "Defaults": "默认值",
+        "Maintenance": "维护",
+        "Language": "语言",
+        "Theme": "主题",
+        "Default profile": "默认配置",
+        "Local telemetry (opt-in)": "本地遥测（自愿加入）",
+        "Post-job notifications (webhook + SMTP)":
+            "任务结束通知（webhook + SMTP）",
+        "&Save": "&保存",
+        "&Reset encoder cache": "&重置编码器缓存",
+        "Open &log folder": "打开&日志文件夹",
+        "Open &config folder": "打开&配置文件夹",
+
+        # ---- Common dialogs ----
+        "OK": "确定",
+        "Cancel": "取消",
+        "Apply": "应用",
+        "Close": "关闭",
+        "Yes": "是",
+        "No": "否",
+    },
+    # v1.3.0 Task 35 — Spanish (neutral / Spain).  Verb forms use the
+    # imperative-formal usted register for CTAs ("Ejecute", "Cancele")
+    # so the strings read appropriately on enterprise installs; status
+    # nouns stay in the passive participle ("completado", "fallido").
+    "es": {
+        # ---- Run screen ----
+        "&Run": "&Ejecutar",
+        "&Cancel": "&Cancelar",
+        "&Pause": "&Pausar",
+        "Auto-tune for this source": "Auto-ajustar para esta fuente",
+        "Input file": "Archivo de entrada",
+        "Output file": "Archivo de salida",
+        "Profile": "Perfil",
+        "Encoder": "Codificador",
+        "Workers": "Procesos paralelos",
+        "Status: idle": "Estado: inactivo",
+        "Status: running": "Estado: en ejecución",
+        "Status: completed": "Estado: completado",
+        "Status: failed": "Estado: fallido",
+        "Status: cancelled": "Estado: cancelado",
+
+        # ---- Settings screen ----
+        "Settings": "Configuración",
+        "Appearance": "Apariencia",
+        "Defaults": "Valores predeterminados",
+        "Maintenance": "Mantenimiento",
+        "Language": "Idioma",
+        "Theme": "Tema",
+        "Default profile": "Perfil predeterminado",
+        "Local telemetry (opt-in)": "Telemetría local (voluntaria)",
+        "Post-job notifications (webhook + SMTP)":
+            "Notificaciones al finalizar (webhook + SMTP)",
+        "&Save": "&Guardar",
+        "&Reset encoder cache": "&Restablecer caché del codificador",
+        "Open &log folder": "Abrir carpeta de &registros",
+        "Open &config folder": "Abrir carpeta de &configuración",
+
+        # ---- Common dialogs ----
+        "OK": "Aceptar",
+        "Cancel": "Cancelar",
+        "Apply": "Aplicar",
+        "Close": "Cerrar",
+        "Yes": "Sí",
+        "No": "No",
+    },
+    # v1.3.0 Task 35 — Portuguese (Brazil).  Distinct from European
+    # Portuguese in tense and lexicon: "salvar" (BR) vs "guardar" (PT),
+    # gerundive present ("em execução") common in BR enterprise UIs.
+    "pt_BR": {
+        # ---- Run screen ----
+        "&Run": "&Executar",
+        "&Cancel": "&Cancelar",
+        "&Pause": "&Pausar",
+        "Auto-tune for this source": "Auto-ajustar para esta fonte",
+        "Input file": "Arquivo de entrada",
+        "Output file": "Arquivo de saída",
+        "Profile": "Perfil",
+        "Encoder": "Codificador",
+        "Workers": "Processos paralelos",
+        "Status: idle": "Status: ocioso",
+        "Status: running": "Status: em execução",
+        "Status: completed": "Status: concluído",
+        "Status: failed": "Status: falhou",
+        "Status: cancelled": "Status: cancelado",
+
+        # ---- Settings screen ----
+        "Settings": "Configurações",
+        "Appearance": "Aparência",
+        "Defaults": "Padrões",
+        "Maintenance": "Manutenção",
+        "Language": "Idioma",
+        "Theme": "Tema",
+        "Default profile": "Perfil padrão",
+        "Local telemetry (opt-in)": "Telemetria local (opcional)",
+        "Post-job notifications (webhook + SMTP)":
+            "Notificações pós-execução (webhook + SMTP)",
+        "&Save": "&Salvar",
+        "&Reset encoder cache": "&Limpar cache do codificador",
+        "Open &log folder": "Abrir pasta de &logs",
+        "Open &config folder": "Abrir pasta de &configuração",
+
+        # ---- Common dialogs ----
+        "OK": "OK",
+        "Cancel": "Cancelar",
+        "Apply": "Aplicar",
+        "Close": "Fechar",
+        "Yes": "Sim",
+        "No": "Não",
+    },
 }

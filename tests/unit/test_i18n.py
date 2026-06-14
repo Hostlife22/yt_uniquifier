@@ -216,3 +216,33 @@ def test_install_translator_unknown_locale_falls_back_silently() -> None:
     install_translator(app, "xx_XX")
     # Unknown locale → silently treated as source; no exception.
     assert active_locale() == SOURCE_LOCALE
+
+
+# ---------------------------------------------------------------------------
+# v1.3.0 Task 35 — zh_CN, es, pt_BR coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("locale", ["zh_CN", "es", "pt_BR"])
+def test_v1_3_locale_present_and_non_empty(locale: str) -> None:
+    table = TRANSLATIONS[locale]
+    for key, val in table.items():
+        assert isinstance(val, str) and val.strip(), (
+            f"{locale}: empty translation for {key!r}: {val!r}"
+        )
+
+
+@pytest.mark.parametrize("locale", ["zh_CN", "es", "pt_BR"])
+def test_v1_3_locale_meets_30_key_floor(locale: str) -> None:
+    """v1.3.0 roadmap demands ≥30 keys covered per new locale (parity
+    with the en/ru baseline)."""
+    table = TRANSLATIONS[locale]
+    covered = sum(1 for k in SOURCE_KEYS if k in table)
+    assert covered >= 30, f"{locale} covers {covered}/{len(SOURCE_KEYS)} keys; need ≥30"
+
+
+def test_available_locales_includes_v1_3_set() -> None:
+    locales = available_locales()
+    assert "zh_CN" in locales
+    assert "es" in locales
+    assert "pt_BR" in locales
