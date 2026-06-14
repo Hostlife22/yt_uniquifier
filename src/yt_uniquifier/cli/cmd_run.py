@@ -77,6 +77,13 @@ def run_cmd(
              "filter_complex, encoder pick, disk estimate, and ETA — "
              "then exit without spawning ffmpeg.",
     ),
+    accept_watermark_risk: bool = typer.Option(
+        False, "--accept-watermark-risk",
+        help="Attest that you own / are licensed to re-upload this "
+             "content. Skips the watermark / station-ID guardrail "
+             "added in v1.3.0 Task 30. Equivalent profile-level "
+             "opt-out: skip_watermark_check: true.",
+    ),
 ) -> None:
     """Run uniquification on an input."""
     try:
@@ -99,6 +106,7 @@ def run_cmd(
             force_new_variant=new_variant,
             workers=workers,
             sanitize_bitstream=sanitize_bitstream,
+            accept_watermark_risk=accept_watermark_risk,
         )
 
         if dry_run:
@@ -194,6 +202,7 @@ def _print_dry_run_report(
 
     findings = preflight(
         plan.source, plan, plan.encoder, work_dir=options.work_dir,
+        accept_watermark_risk=options.accept_watermark_risk,
     )
     blocking = [f for f in findings if f.severity == "fail"]
     warnings = [f for f in findings if f.severity == "warn"]

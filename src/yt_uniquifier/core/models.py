@@ -217,6 +217,13 @@ class Profile(BaseModel):
     #               Adjacent segments get distinct transform-param phases, so
     #               a temporal-aware detector can't lock onto run-level uniformity.
     seed_strategy: SeedStrategy = "per_run"
+    # v1.3.0 Task 30 — opt out of the watermark/station-ID guardrail
+    # for sources the operator has already audited (e.g. corpus of
+    # owned material with a known broadcaster bug overlay that the
+    # operator licenses).  Default False so first-time users hit the
+    # gate.  Mirrors the CLI's --accept-watermark-risk at the profile
+    # level; either path attests legitimate use.
+    skip_watermark_check: bool = False
 
 
 class Plan(BaseModel):

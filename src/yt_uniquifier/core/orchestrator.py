@@ -87,6 +87,12 @@ class RunOptions:
     # may pre-bind their own ID (e.g. the web layer wants the same
     # value back in the HTTP response) by passing it explicitly.
     run_id: str | None = None
+    # v1.3.0 Task 30 — operator attestation that they own / are
+    # licensed to re-upload this content.  When True the watermark
+    # guardrail in ``preflight()`` records the attestation as an
+    # ``info`` finding and proceeds.  CLI flag:
+    # ``--accept-watermark-risk``.
+    accept_watermark_risk: bool = False
 
     def __post_init__(self) -> None:
         # Validate bounds at the public contract level. Without these:
@@ -276,6 +282,7 @@ def _run_full_impl(
 ) -> RunSummary:
     findings = preflight(
         plan.source, plan, plan.encoder, work_dir=options.work_dir,
+        accept_watermark_risk=options.accept_watermark_risk,
     )
     if options.enforce_preflight and has_fail(findings):
         emit(RunEvent(kind="error", payload={"phase": "preflight",

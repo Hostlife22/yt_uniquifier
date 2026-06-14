@@ -15,7 +15,7 @@ from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
 
 _log = _logging.getLogger(__name__)
 
-Severity = Literal["ok", "warn", "fail"]
+Severity = Literal["ok", "info", "warn", "fail"]
 
 
 class PreflightFinding(BaseModel):
@@ -41,9 +41,18 @@ def preflight(
     encoder: EncoderCandidate,
     *,
     work_dir: Path | None = None,
+    accept_watermark_risk: bool = False,
 ) -> list[PreflightFinding]:
     findings: list[PreflightFinding] = []
 
+    # v1.3.0 Task 30 — watermark guardrail.  Runs before YouTube-target
+    # checks so the operator confronts ownership/licensing attestation
+    # before any time is spent on profile fit.  Returns an empty list
+    # when OpenCV isn't installed (the guardrail then becomes opt-in
+    # via the [scene] extra).
+    findings.extend(_check_input_watermark(
+        source, plan, accept_watermark_risk=accept_watermark_risk,
+    ))
     # v1.0.1: disk-space check runs before encoder/bitrate so a thin-margin
     # warning sits at the top of the report. Skipped when work_dir is None
     # (callers that build a Plan without committing to a run dir — e.g.
@@ -825,3 +834,69 @@ def _check_bitrate(source: SourceMeta) -> list[PreflightFinding]:
             ),
         )]
     return []
+
+
+def _check_input_watermark(
+    source: SourceMeta,
+    plan: Plan,
+    *,
+    accept_watermark_risk: bool = False,
+) -> list[PreflightFinding]:
+    """v1.3.0 Task 30 — broadcaster watermark / station-ID guardrail.
+
+    Three short-circuits:
+      * ``accept_watermark_risk=True`` (operator attested ownership /
+        license via CLI flag) — skip with an ``info`` finding so the
+        attestation appears in the report for the audit log.
+      * Profile-level opt-out (``skip_watermark_check: true``) — same
+        skip, different rationale tag.
+      * OpenCV unavailable — guardrail short-circuits at the detector;
+        we surface an ``info`` finding pointing operators at the
+        ``[scene]`` extra.
+
+    Otherwise we sample frames + template-match.  A positive detection
+    is severity ``error`` by default so the run aborts unless overridden.
+    """
+    if accept_watermark_risk:
+        return [PreflightFinding(
+            code="watermark.attested", severity="info",
+            message=(
+                "Watermark guardrail skipped per --accept-watermark-risk "
+                "(operator attested ownership / licensed use)."
+            ),
+        )]
+    if getattr(plan.profile, "skip_watermark_check", False):
+        return [PreflightFinding(
+            code="watermark.skipped_by_profile", severity="info",
+            message=(
+                "Watermark guardrail skipped per profile setting "
+                "skip_watermark_check=true."
+            ),
+        )]
+    from yt_uniquifier.core.guardrails.watermark import detect_watermark
+    result = detect_watermark(source.path)
+    if result is None:
+        return [PreflightFinding(
+            code="watermark.unavailable", severity="info",
+            message=(
+                "Watermark guardrail skipped — install the [scene] "
+                "extra (pip install yt-uniquifier[scene]) to enable."
+            ),
+        )]
+    if not result.detected:
+        return []
+    return [PreflightFinding(
+        code="watermark.detected", severity="fail",
+        message=(
+            f"Likely broadcaster watermark / station ID detected "
+            f"({result.matched_frames}/{result.sampled_frames} sampled "
+            f"frames matched; max confidence {result.confidence:.2f}). "
+            "yt-uniquifier is for owned/licensed content only."
+        ),
+        suggestion=(
+            "If you own the content or have a fair-use / license to "
+            "re-upload, pass --accept-watermark-risk (or set "
+            "skip_watermark_check: true in the profile) to attest and "
+            "proceed."
+        ),
+    )]
