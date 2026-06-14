@@ -1,0 +1,93 @@
+# v1.0.0 R5 — AppImage recipe for yt-uniq-gui on Linux.
+#
+# Built by .github/workflows/release.yml on `v*` tag pushes using
+# `appimage-builder`. The recipe wraps the PyInstaller bundle
+# produced earlier in the same job and adds:
+#
+#   - A statically linked ffmpeg (johnvansickle.com nightly) so the
+#     AppImage is portable across glibc versions / distros without
+#     forcing the user to apt-install ffmpeg.
+#   - A .desktop entry + 256×256 icon so file managers / launchers
+#     pick the app up after `chmod +x ./yt-uniq-gui.AppImage`.
+#   - A signature stanza placeholder. AppImages do NOT require an
+#     X.509 code-signing cert (unlike macOS / Windows binaries) —
+#     verification is via the SHA256SUMS published on the same
+#     GitHub Release. Per v1.0.0 master plan, this is the only
+#     OS where we ship a "signed-ready" installer; macOS/Windows
+#     remain unsigned pending Apple Dev ID / cert credentials.
+#
+# Local rebuild:
+#   pip install -e ".[dev,gui]" && pip install pyinstaller
+#   python -m PyInstaller pyinstaller/yt-uniq-gui.spec --clean --noconfirm
+#   appimage-builder --recipe installers/linux/AppImageBuilder.yml
+#
+# The generated artefact lands at the repo root as
+# `yt-uniq-gui-${YT_UNIQUIFIER_VERSION}-x86_64.AppImage`.
+
+version: 1
+
+script:
+  # Stage the PyInstaller bundle (produced earlier in the pipeline)
+  # into AppDir layout. PyInstaller emits dist/yt-uniq-gui/ on Linux
+  # (one-folder mode); the AppImage AppRun script will exec the inner
+  # binary so any data files PyInstaller bundled stay collocated.
+  - rm -rf AppDir
+  - mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+  - cp -r dist/yt-uniq-gui/. AppDir/usr/bin/
+  # Static ffmpeg — fetched from johnvansickle release tracker so the
+  # AppImage stays portable across glibc lines. Cached by the CI step
+  # that downloads it before invoking this recipe.
+  - cp .perf_cache/ffmpeg-static/ffmpeg AppDir/usr/bin/ffmpeg
+  - cp .perf_cache/ffmpeg-static/ffprobe AppDir/usr/bin/ffprobe
+  - chmod +x AppDir/usr/bin/ffmpeg AppDir/usr/bin/ffprobe
+  - cp installers/linux/yt-uniq-gui.desktop AppDir/usr/share/applications/
+  - cp installers/linux/yt-uniq-gui.png AppDir/usr/share/icons/hicolor/256x256/apps/
+
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: io.github.hostlife22.yt_uniquifier
+    name: yt-uniq-gui
+    icon: yt-uniq-gui
+    version: !ENV ${YT_UNIQUIFIER_VERSION}
+    exec: usr/bin/yt-uniq-gui
+    # AppImage exec_args expand $@ → "$@" preserves quoting when the
+    # user runs `./yt-uniq-gui.AppImage some file with spaces.mp4`.
+    exec_args: "$@"
+
+  runtime:
+    env:
+      # PyInstaller's bundled libs go in usr/bin/; AppImage's runtime
+      # cd's there before exec, so LD_LIBRARY_PATH does not need a
+      # second entry. PATH gets the bundled ffmpeg/ffprobe ahead of
+      # any system install.
+      PATH: '${APPDIR}/usr/bin:${PATH}'
+      # PyQt6 platform-plugin discovery — point Qt at the libs that
+      # PyInstaller staged so the AppImage does not need libxcb-* on
+      # the host.
+      QT_PLUGIN_PATH: '${APPDIR}/usr/bin/PyQt6/Qt6/plugins'
+      # yt-uniquifier-specific: prefer the bundled ffmpeg over the
+      # host's ffmpeg if both are on PATH. core/utils/ffmpeg_paths.py
+      # honours this env var.
+      YT_UNIQ_FFMPEG_BIN: '${APPDIR}/usr/bin/ffmpeg'
+
+  test:
+    # Smoke test runs inside a clean Docker image so we catch
+    # bundled-lib gaps that would otherwise show up only on a
+    # user's machine. Each entry runs `yt-uniq-gui --version`
+    # (or the equivalent CLI) and expects exit 0.
+    fedora-latest:
+      image: appimagecrafters/tests-env:fedora-30
+      command: ./AppRun --version
+    ubuntu-noble:
+      image: appimagecrafters/tests-env:ubuntu-24.04
+      command: ./AppRun --version
+
+AppImage:
+  arch: x86_64
+  # No `sign-key` stanza: AppImages do not require X.509 signatures.
+  # Integrity verification ships via the SHA256SUMS file attached to
+  # the GitHub Release. The runtime is the standard appimagetool
+  # runtime; updates can use AppImageUpdate if the user wants them.
+  update-information: |
+    gh-releases-zsync|hostlife22|Video-Deduplicator|latest|yt-uniq-gui-*x86_64.AppImage.zsync

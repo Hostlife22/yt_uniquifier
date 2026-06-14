@@ -7,6 +7,115 @@ desktop-бинарника.
 > `python -m venv .venv` → `.venv\Scripts\activate` → дальше всё то же
 > самое.
 
+## 0. Готовые сборки (рекомендуется для большинства)
+
+Начиная с **v1.0.0**, каждый релиз на
+[GitHub Releases](https://github.com/hostlife22/Video-Deduplicator/releases)
+несёт три desktop-бинарника + `SHA256SUMS` для проверки:
+
+| Файл                                | OS              | Подпись                | Что внутри                                             |
+|-------------------------------------|-----------------|------------------------|--------------------------------------------------------|
+| `yt-uniq-gui-*.AppImage`            | Linux (x86_64)  | ✅ self-contained       | PyInstaller бандл + **bundled static ffmpeg/ffprobe**  |
+| `yt-uniq-gui-macOS.zip` (`.app`)    | macOS 12+       | ❌ unsigned (см. ниже)  | `.app` бандл; ffmpeg = system (brew install ffmpeg)    |
+| `yt-uniq-gui-Windows.zip` (`.exe`)  | Windows 10/11   | ❌ unsigned (см. ниже)  | PyInstaller бандл; ffmpeg = system (`choco install`)   |
+| `SHA256SUMS`                        | все             | —                       | стандартный `sha256sum -c`-формат                       |
+
+### Установка по платформам
+
+**Linux (AppImage — рекомендуется):**
+
+```bash
+# 1) Скачать
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/yt-uniq-gui-1.0.0-x86_64.AppImage
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/SHA256SUMS
+
+# 2) Проверить целостность (заменяет codesign)
+sha256sum -c SHA256SUMS --ignore-missing
+
+# 3) Сделать исполняемым и запустить
+chmod +x yt-uniq-gui-*.AppImage
+./yt-uniq-gui-*.AppImage
+```
+
+AppImage **самодостаточен** — Python, PyQt6 и ffmpeg/ffprobe внутри.
+Распаковывать ничего не нужно; запускается на любом дистрибутиве с
+glibc 2.31+ (Ubuntu 20.04+, Fedora 33+, Debian 11+).
+
+**macOS (unsigned `.app`):**
+
+```bash
+# 1) Скачать + проверить
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/yt-uniq-gui-macOS.zip
+curl -LO https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/SHA256SUMS
+shasum -a 256 -c SHA256SUMS --ignore-missing
+
+# 2) Распаковать
+unzip yt-uniq-gui-macOS.zip
+mv yt-uniq-gui.app /Applications/
+
+# 3) Первый запуск — Gatekeeper покажет "cannot be opened because
+#    the developer cannot be verified". Это ожидаемо (v1.0.0 не
+#    подписан). Bypass:
+#
+#    Right-click /Applications/yt-uniq-gui.app → Open
+#    → Open Anyway → ввести админ-пароль.
+#
+#    После одного раза Gatekeeper запоминает решение.
+#
+# ffmpeg должен быть в PATH:
+brew install ffmpeg chromaprint
+```
+
+**Windows (unsigned `.exe`):**
+
+```powershell
+# 1) Скачать + проверить (PowerShell 5+)
+Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/yt-uniq-gui-Windows.zip" -OutFile yt-uniq-gui-Windows.zip
+Invoke-WebRequest -Uri "https://github.com/hostlife22/Video-Deduplicator/releases/download/v1.0.0/SHA256SUMS" -OutFile SHA256SUMS
+Get-FileHash yt-uniq-gui-Windows.zip -Algorithm SHA256
+
+# 2) Распаковать
+Expand-Archive yt-uniq-gui-Windows.zip -DestinationPath .
+
+# 3) Первый запуск — SmartScreen покажет синее окно
+#    "Windows protected your PC". Это ожидаемо (v1.0.0 не подписан).
+#    Bypass:
+#       More info → Run anyway
+#
+#    Альтернатива — `Unblock-File` через PowerShell:
+Unblock-File .\yt-uniq-gui\yt-uniq-gui.exe
+.\yt-uniq-gui\yt-uniq-gui.exe
+
+# ffmpeg должен быть в PATH:
+choco install ffmpeg
+```
+
+### Почему unsigned на macOS/Windows?
+
+v1.0.0 шипится **без** Apple Developer ID (~$99/год) и Windows code
+signing cert (~$200-400/год). Это сознательное решение для open-source
+проекта без коммерческого спонсорства. Подпись прилетит как **v1.0.x
+patch release** как только credentials появятся; **bundle сам не
+поменяется** — будет та же сборка, прогнанная через codesign + notarytool
+(macOS) или signtool (Windows).
+
+Verification без подписи делается через **SHA256SUMS**, которое
+шипится на той же странице релиза. Любой mismatch = downloaded
+file повреждён или подменён → не запускать, скачать заново с
+официального GitHub URL.
+
+См. `installers/README.md` в репозитории для технических деталей
+будущей signing-pipeline.
+
+### Когда выбирать source-install вместо бинарника?
+
+Источниковый путь (секции 2-7 ниже) нужен если:
+
+- хочешь dev-mode + быстрый итерационный цикл (`make dev` + редактирование `src/`);
+- нужны опциональные extras (`[ml]` для SSCD, `[scene]` для PySceneDetect, `[web]` для headless FastAPI);
+- работаешь на arm64 Linux (AppImage пока x86_64-only);
+- собираешь собственный бинарник для платформы, которую релизы не покрывают (BSD, alpine musl).
+
 ## 1. Системные требования
 
 | Что | Минимум | Зачем |

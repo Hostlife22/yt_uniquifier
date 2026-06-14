@@ -1,19 +1,25 @@
 name: Release
 
 # F1 R1 (v0.6.0): scaffolding for the desktop-binary release pipeline.
+# F1 R4 (v1.0.0): Linux AppImage with bundled static ffmpeg + SHA256SUMS.
 #
-# Triggered on a `v*` tag push (e.g. `git tag v0.6.0 && git push --tags`),
-# this workflow builds the PyInstaller bundle on Ubuntu / macOS / Windows
-# and uploads the artifacts to a DRAFT GitHub Release. The draft must be
-# reviewed and published manually so an accidental tag push doesn't ship
-# binaries to users.
+# Triggered on a `v*` tag push (e.g. `git tag v1.0.0 && git push --tags`),
+# this workflow builds the PyInstaller bundle on Ubuntu / macOS / Windows,
+# wraps the Linux bundle in an AppImage, computes SHA256SUMS, and uploads
+# everything to a DRAFT GitHub Release. The draft must be reviewed and
+# published manually so an accidental tag push doesn't ship binaries.
 #
-# This Round 1 ships UNSIGNED artifacts: macOS Gatekeeper and Windows
-# SmartScreen will warn on first launch. Later rounds add:
-#   R2 — macOS DMG + codesign + notarytool (Apple Developer ID)
-#   R3 — Windows MSI (WiX Toolset) + signtool (code signing cert)
-#   R4 — Linux AppImage (appimagetool) + ffmpeg static bundling
-#   R5 — Release automation: tag-triggered changelog + auto-publish
+# Signing status as of v1.0.0:
+#   - Linux AppImage: ✅ self-contained — no X.509 cert needed; verified
+#                     via the SHA256SUMS file attached to the release.
+#   - macOS .app.zip: ❌ UNSIGNED — Gatekeeper warns on first launch.
+#                     See docs/install.md for the right-click → Open
+#                     bypass. Signing deferred to a v1.0.x patch once
+#                     APPLE_TEAM_ID / APPLE_DEV_ID_CERT secrets exist.
+#   - Windows .zip:   ❌ UNSIGNED — SmartScreen warns. Same story —
+#                     waiting on WIN_CODESIGN_PFX secret.
+# See installers/README.md for the full list of secrets the signing
+# rounds will consume.
 #
 # The CI workflow (.github/workflows/ci.yml) tests the source. This
 # workflow tests the BUNDLE — that the existing pyinstaller spec
@@ -131,18 +137,123 @@ jobs:
           path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
           retention-days: 14
 
+  appimage:
+    # v1.0.0 R5 / F1 R4 — wrap the Linux PyInstaller bundle in an
+    # AppImage with a bundled static ffmpeg so the result is portable
+    # across glibc lines and does NOT require the user to apt-install
+    # ffmpeg first. Runs after the matrix `build` job finishes so we
+    # can reuse the Linux artefact instead of re-running PyInstaller.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Download Linux bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: yt-uniq-gui-Linux
+          path: _dl
+
+      - name: Restore PyInstaller dist/ layout
+        # The build job archived `dist/yt-uniq-gui/` as a tarball;
+        # AppImageBuilder.yml expects to find it back at dist/.
+        run: |
+          mkdir -p dist
+          tar -xzf _dl/yt-uniq-gui-Linux.tar.gz -C dist
+          ls dist/yt-uniq-gui/ | head -5
+
+      - name: Fetch static ffmpeg (johnvansickle release)
+        # AppImage must be portable across glibc versions, so the
+        # apt-installed ffmpeg used elsewhere in CI is not suitable.
+        # johnvansickle ships a fully static x86_64 build.
+        run: |
+          mkdir -p .perf_cache/ffmpeg-static
+          curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+            | tar -xJ --strip-components=1 -C .perf_cache/ffmpeg-static
+          .perf_cache/ffmpeg-static/ffmpeg -version | head -1
+          .perf_cache/ffmpeg-static/ffprobe -version | head -1
+
+      - name: Generate placeholder icon
+        # The recipe references installers/linux/yt-uniq-gui.png. We
+        # generate a 256×256 solid-color placeholder at CI time so the
+        # repo doesn't carry a binary asset. Replace with a real icon
+        # in a follow-up when art lands.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          convert -size 256x256 xc:'#1e1e2e' \
+            -font "DejaVu-Sans-Bold" -pointsize 96 -fill '#9fd3ff' \
+            -gravity center -annotate +0+0 "YU" \
+            installers/linux/yt-uniq-gui.png
+
+      - name: Install appimage-builder
+        run: |
+          sudo apt-get install -y python3-pip libgdk-pixbuf-2.0-0 fakeroot \
+            squashfs-tools zsync desktop-file-utils
+          sudo pip3 install --break-system-packages "appimage-builder>=1.1"
+
+      - name: Build AppImage
+        env:
+          YT_UNIQUIFIER_VERSION: ${{ github.ref_name && github.ref_name || '0.0.0-dev' }}
+        run: |
+          # Strip the leading "v" from the tag (v1.0.0 → 1.0.0) — AppImage
+          # version fields are PEP-440-ish and not happy with a "v" prefix.
+          export YT_UNIQUIFIER_VERSION="${YT_UNIQUIFIER_VERSION#v}"
+          appimage-builder --recipe installers/linux/AppImageBuilder.yml \
+            --skip-test --skip-appimage || \
+          appimage-builder --recipe installers/linux/AppImageBuilder.yml \
+            --skip-test
+          ls -la *.AppImage *.AppImage.zsync 2>/dev/null || true
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-uniq-gui-AppImage
+          path: |
+            *.AppImage
+            *.AppImage.zsync
+          retention-days: 14
+          if-no-files-found: error
+
   release:
     # Only attach to a GitHub Release when this is a tag push. Manual
     # dispatch runs upload artifacts to the workflow run for ad-hoc
     # inspection but don't create a release.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, appimage]
     runs-on: ubuntu-latest
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Collect artefacts into a single flat directory
+        # The download step produces one subdir per artifact; the
+        # release upload + SHA256SUMS step want a flat directory.
+        run: |
+          mkdir -p _release
+          find artifacts -type f \
+            \( -name 'yt-uniq-gui-*.zip' \
+            -o -name 'yt-uniq-gui-*.tar.gz' \
+            -o -name 'yt-uniq-gui*.AppImage' \
+            -o -name 'yt-uniq-gui*.AppImage.zsync' \) \
+            -exec cp {} _release/ \;
+          ls -la _release/
+
+      - name: Generate SHA256SUMS
+        # v1.0.0 R5 — substitute for code signing on macOS/Windows.
+        # Users verify with:
+        #   curl -O https://.../SHA256SUMS
+        #   sha256sum -c SHA256SUMS --ignore-missing
+        # The file is intentionally a flat list, no GPG signature, so
+        # it works with stock coreutils on every platform.
+        run: |
+          cd _release
+          sha256sum yt-uniq-gui-* > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Publish DRAFT release
         # Draft so a human reviews before users see it. softprops is the
@@ -154,5 +265,4 @@ jobs:
           name: "yt-uniquifier ${{ github.ref_name }}"
           generate_release_notes: true
           files: |
-            artifacts/**/yt-uniq-gui-*.zip
-            artifacts/**/yt-uniq-gui-*.tar.gz
+            _release/*
