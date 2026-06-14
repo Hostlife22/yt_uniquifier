@@ -73,14 +73,21 @@ jobs:
       - name: Ruff check
         run: ruff check .
 
-      # v0.7.0 R8 — split fast vs. integration tests. The fast lane
-      # (unit + gui + smoke) runs on every matrix cell (3 OS × 2 Py) so
-      # PR feedback stays under ~2 min. The slow lane (real-ffmpeg
-      # integration) runs only on ubuntu+3.12 — every transform and
-      # encoder path it exercises is platform-agnostic at the Python
-      # level, so the extra coverage from running it 6× was pure
-      # wall-clock cost with no signal. The 180 s per-test cap from
-      # pyproject.toml is the safety net against any future hang.
+      # v0.7.0 R8 (revised v1.2.0 Task 26) — split fast vs. integration
+      # tests.  The fast lane (unit + gui + smoke) runs on every matrix
+      # cell (3 OS × 2 Py) so PR feedback stays under ~2 min.
+      #
+      # The slow lane (real-ffmpeg integration) now runs on EVERY cell.
+      # Pre-v1.2 it was ubuntu+3.12 only on the assumption that
+      # transform/encoder paths were platform-agnostic at the Python
+      # level — but the v0.6.0 plan_hash mode="json" fix and the
+      # cross-platform lockfile liveness probe were both regressions
+      # the single-cell matrix missed.  AV1 detection (Task 22) and
+      # VideoToolbox probing in particular need real macOS hardware to
+      # exercise; Windows surfaces atomic-rename and path-separator
+      # bugs that mocks can't.  The 180 s per-test cap from
+      # pyproject.toml caps wall-clock at 20 × 180 s = 60 min worst
+      # case per cell.
       - name: Pytest (fast — unit + gui + smoke)
         env:
           # Headless Qt: required for ubuntu-latest (no X display) and
@@ -94,7 +101,12 @@ jobs:
         run: pytest -q -m "not integration and not visual"
 
       - name: Pytest (integration — real ffmpeg)
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        # v1.2.0 Task 26 — promoted from ubuntu-3.12-only to all 6 cells.
+        # Each integration test starts with ``@needs_ffmpeg`` so a missing
+        # codec on a runner skips cleanly rather than failing.  The
+        # 15 min job-level timeout caps the worst-case wall-clock; the
+        # 180 s per-test cap from pyproject keeps individual tests honest.
+        timeout-minutes: 15
         env:
           QT_QPA_PLATFORM: offscreen
         run: pytest -q -m integration
