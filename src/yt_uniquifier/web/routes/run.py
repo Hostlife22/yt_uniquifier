@@ -92,6 +92,14 @@ def register(  # noqa: PLR0913
         )
 
         def _on_event(ev: RunEvent) -> None:
+            # v1.1.0 Task 15: feed the same RunEvent stream into the
+            # Prometheus counters before the SSE queue so the queue's
+            # back-pressure-drop path doesn't lose metric updates.
+            try:
+                from yt_uniquifier.web.metrics import update_from_event
+                update_from_event(ev)
+            except Exception:  # pragma: no cover — never block runs
+                pass
             # Best-effort enqueue; if the SSE consumer disappeared,
             # the queue may fill — drop oldest by pulling one item.
             import contextlib

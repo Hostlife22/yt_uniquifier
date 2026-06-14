@@ -59,6 +59,10 @@ web = [
     "uvicorn[standard]~=0.30",
     "python-multipart~=0.0.9",
     "httpx~=0.27",
+    # v1.1.0 Task 15: /metrics endpoint — Prometheus text format.
+    "prometheus-client~=0.21",
+    # v1.1.0 Task 16: per-IP and per-principal request rate limiting.
+    "slowapi~=0.1.9",
 ]
 # v0.9.0 R6 — mkdocs-material site. Dev-only; users do not
 # install this. CI builds with --strict and deploys via the

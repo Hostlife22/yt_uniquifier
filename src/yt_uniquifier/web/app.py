@@ -160,6 +160,67 @@ def build_app(config: WebConfig) -> Any:
     def healthz() -> str:
         return "ok"
 
+    @app.get("/readyz")
+    def readyz() -> Any:
+        """v1.1.0 Task 15: readiness probe.
+
+        Distinct from /healthz — readyz returns 503 when the server is
+        running but can't currently accept work (encoder cache empty,
+        work_dir read-only, etc.). Liveness probes use /healthz,
+        traffic gates use /readyz.
+        """
+        checks: dict[str, str] = {}
+        ready = True
+
+        # Cheap: pull from encoder cache (≤200 ms typical) so a cold
+        # detection doesn't make /readyz spawn 10 ffmpeg probes per
+        # health-check tick.
+        try:
+            from yt_uniquifier.core.encoder import detect_encoders
+            working = [c for c in detect_encoders() if c.works]
+            if not working:
+                ready = False
+                checks["encoders"] = "no working encoder detected"
+            else:
+                checks["encoders"] = f"{len(working)} working"
+        except Exception as exc:  # noqa: BLE001
+            ready = False
+            checks["encoders"] = f"probe failed: {type(exc).__name__}"
+
+        # work_dir must be writable for state.json / segment files.
+        try:
+            config.work_dir.mkdir(parents=True, exist_ok=True)
+            probe = config.work_dir / ".readyz_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            checks["work_dir"] = "writable"
+        except OSError as exc:
+            ready = False
+            checks["work_dir"] = f"unwritable: {exc}"
+
+        payload: dict[str, Any] = {"ready": ready, "checks": checks}
+        return JSONResponse(
+            payload,
+            status_code=200 if ready else 503,
+        )
+
+    @app.get("/metrics")
+    def metrics() -> PlainTextResponse:
+        """v1.1.0 Task 15: Prometheus text-format metrics.
+
+        Scraper-facing endpoint — no auth so cluster-internal Prometheus
+        servers don't need basic-auth wiring. Operators who expose
+        /metrics publicly should put it behind a network ACL.
+        """
+        from prometheus_client import (
+            CONTENT_TYPE_LATEST,
+            generate_latest,
+        )
+        return PlainTextResponse(
+            generate_latest(),
+            media_type=CONTENT_TYPE_LATEST,
+        )
+
     # -- helpers -----------------------------------------------------
     def _validate_input(input_path: Path) -> Path:
         if not input_path.exists():

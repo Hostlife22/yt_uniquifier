@@ -287,3 +287,84 @@ def test_qa_serves_html_when_present(
     r = client.get("/api/qa/myrun/html")
     assert r.status_code == 200
     assert "ok" in r.text
+
+
+# ---------------------------------------------------------------------------
+# v1.1.0 Task 15: /readyz + /metrics
+# ---------------------------------------------------------------------------
+
+
+def test_readyz_returns_200_when_encoders_present(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Encoder probe goes through encoder.detect_encoders. Stub it to
+    return one working candidate so /readyz does not depend on a real
+    ffmpeg install in the test runner.
+    """
+    from yt_uniquifier.core import encoder
+    from yt_uniquifier.core.models import EncoderCandidate
+
+    monkeypatch.setattr(
+        encoder, "detect_encoders",
+        lambda *a, **kw: [EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        )],
+    )
+    r = client.get("/readyz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ready"] is True
+    assert "encoders" in body["checks"]
+    assert "work_dir" in body["checks"]
+
+
+def test_readyz_returns_503_when_no_working_encoder(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core import encoder
+
+    monkeypatch.setattr(encoder, "detect_encoders", lambda *a, **kw: [])
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    body = r.json()
+    assert body["ready"] is False
+    assert "no working encoder" in body["checks"]["encoders"]
+
+
+def test_metrics_endpoint_serves_prometheus_text(
+    client: TestClient,
+) -> None:
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    # prometheus_client emits text/plain with a versioned content-type.
+    assert r.headers["content-type"].startswith("text/plain")
+    body = r.text
+    # The custom counter families must be present in the registry.
+    assert "yt_uniq_segments_total" in body
+    assert "yt_uniq_runs_total" in body
+    assert "yt_uniq_active_runs" in body
+
+
+def test_metrics_update_from_event_increments_counters() -> None:
+    """v1.1.0 Task 15: ``update_from_event`` plumbs RunEvents into the
+    appropriate Prometheus family without coupling the orchestrator to
+    the metrics module.
+    """
+    from yt_uniquifier.core.runner import RunEvent
+    from yt_uniquifier.web import metrics
+
+    before = metrics.SEGMENTS_TOTAL.labels(status="done")._value.get()
+    metrics.update_from_event(RunEvent(
+        kind="segment_done",
+        payload={"status": "done", "duration_sec": 12.5, "run_id": "r1"},
+    ))
+    after = metrics.SEGMENTS_TOTAL.labels(status="done")._value.get()
+    assert after == before + 1.0
+
+    err_before = metrics.FFMPEG_FAILURES_TOTAL.labels(encoder="libx264")._value.get()
+    metrics.update_from_event(RunEvent(
+        kind="error",
+        payload={"encoder": "libx264", "message": "boom"},
+    ))
+    err_after = metrics.FFMPEG_FAILURES_TOTAL.labels(encoder="libx264")._value.get()
+    assert err_after == err_before + 1.0
