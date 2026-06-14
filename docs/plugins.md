@@ -1,6 +1,6 @@
 # Transform plugins
 
-> Added in v0.8.0. See `.claude/plans/yt-uniquifier-v0.8.0.plan.md` § R1.
+> Added in v0.8.0. See `specs/v0.8-plan.md` § R1.
 
 Built-in transforms (crop+rescale, color jitter, loudnorm, pitch+tempo …) live in
 `src/yt_uniquifier/core/transforms/` and self-register via `register(TransformSpec(…))`

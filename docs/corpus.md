@@ -1,6 +1,6 @@
 # Reference corpus (SQLite)
 
-> Reworked in v0.8.0 R2. See `.claude/plans/yt-uniquifier-v0.8.0.plan.md`.
+> Reworked in v0.8.0 R2. See `specs/v0.8-plan.md`.
 
 The corpus is `yt-uniquifier`'s local index of "videos I might be a
 near-duplicate of." It backs the QA report's `cid_predict` step:

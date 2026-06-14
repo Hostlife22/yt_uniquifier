@@ -74,4 +74,4 @@ A fuller tour lives at [Getting started](getting-started.md).
   Appearance → Language. [Read more →](i18n.md)
 
 The full v0.9 roadmap and round-by-round breakdown live at
-`.claude/plans/yt-uniquifier-v0.9.0.plan.md` in the repo.
+`specs/v0.9-plan.md` in the repo.
