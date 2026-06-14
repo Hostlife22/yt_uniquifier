@@ -46,6 +46,18 @@ def qa_cmd(
         False, "--fast-qa",
         help="Cheaper QA: skip VMAF, halve sample count. Same flag as `yt-uniq run`.",
     ),
+    sscd: bool = typer.Option(
+        False, "--sscd",
+        help=(
+            "Add SSCD ML-grade copy-detection metric. Requires the `[ml]` "
+            "extra (torch + torchvision) and downloads ~80 MB of weights "
+            "on first use. Adds ~5-10 s per call on CPU."
+        ),
+    ),
+    sscd_frames: int = typer.Option(
+        32, "--sscd-frames",
+        help="Frame grid size used by --sscd (default 32, more = more precise + slower).",
+    ),
 ) -> None:
     """Compute similarity metrics for an (input, output) pair."""
     if fast_qa:
@@ -64,6 +76,8 @@ def qa_cmd(
             run_ssim=not no_ssim,
             predict_cid=not no_cid_predict,
             vs_corpus=corpus,
+            compute_sscd=sscd,
+            sscd_frame_count=sscd_frames,
         )
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
@@ -88,6 +102,19 @@ def qa_cmd(
         console.print(f"  Audio FP:         {report.audio_fp_similarity:.4f}")
     if report.cid_predict_self is not None:
         console.print(f"  CID self-match:   {report.cid_predict_self:.4f}")
+    if report.sscd_mean is not None:
+        from yt_uniquifier.core.qa.sscd import sscd_band
+
+        band = sscd_band(report.sscd_mean)
+        band_color = {"high": "red", "caution": "yellow", "clean": "green"}[band]
+        console.print(
+            f"  SSCD mean:        {report.sscd_mean:.4f} "
+            f"[{band_color}]({band})[/{band_color}]  "
+            f"min: {report.sscd_min:.4f}"
+            if report.sscd_min is not None
+            else f"  SSCD mean:        {report.sscd_mean:.4f} "
+                 f"[{band_color}]({band})[/{band_color}]"
+        )
     if report.corpus_matches:
         console.print(
             f"  Corpus matches:   {len(report.corpus_matches)} above threshold"

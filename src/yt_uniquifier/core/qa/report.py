@@ -93,6 +93,8 @@ def build_report(
     vs_corpus: Corpus | None = None,
     progress: ProgressFn | None = None,
     cancel_token: CancelToken | None = None,
+    compute_sscd: bool = False,
+    sscd_frame_count: int = 32,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order.
 
@@ -184,6 +186,39 @@ def build_report(
 
     duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
 
+    sscd_mean: float | None = None
+    sscd_min: float | None = None
+    sscd_per_frame: list[float] | None = None
+    if compute_sscd:
+        _check_cancel("sscd")
+        p("sscd", 0.0)
+        # Lazy import — keeps the torch dependency out of the import
+        # graph when the metric is unused.
+        from yt_uniquifier.core.qa import sscd as _sscd
+
+        try:
+            sres = _sscd.compute_sscd(
+                input_path, output_path,
+                frame_count=sscd_frame_count,
+                cancel_token=cancel_token,
+            )
+        except Exception as exc:  # noqa: BLE001 — opt-in metric; never abort whole report
+            # SSCD is opt-in and slow; a missing [ml] extra or a torch
+            # runtime fault should land as a NOTE rather than failing
+            # the entire QA report (which already collected the cheap
+            # metrics). Re-raise only on user cancellation so the
+            # cancel button still works.
+            from yt_uniquifier.core.errors import PipelineError
+
+            if isinstance(exc, PipelineError) and "cancelled" in str(exc):
+                raise
+            notes.append(f"sscd: {exc}")
+        else:
+            sscd_mean = sres.mean_similarity
+            sscd_min = sres.min_similarity
+            sscd_per_frame = list(sres.per_frame)
+        p("sscd", 1.0)
+
     cid_self: float | None = None
     weakest_window: tuple[float, float] | None = None
     chunk_dump: list[dict[str, float]] = []
@@ -244,6 +279,9 @@ def build_report(
         weakest_chunk_sec=weakest_window,
         chunk_similarities=chunk_dump,
         corpus_matches=corpus_dump,
+        sscd_mean=sscd_mean,
+        sscd_min=sscd_min,
+        sscd_per_frame=sscd_per_frame,
     )
 
 

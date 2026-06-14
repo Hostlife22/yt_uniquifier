@@ -162,6 +162,61 @@ audio: {{ '%.3f'|format(c.audio) }}"></span>
 </div>
 {% endif %}
 
+{% if report.sscd_mean is not none %}
+<div class="section">
+  <h2>SSCD (ML-grade copy detection)</h2>
+  <p>
+    Cosine similarity of SSCD embeddings between matched source and output
+    frames. SSCD is Meta's self-supervised copy-detection model
+    (<a href="https://github.com/facebookresearch/sscd-copy-detection">facebookresearch/sscd-copy-detection</a>);
+    it is the strongest available proxy for whether a CID-style system
+    will consider the output a derivative of the source. Bands derive
+    from the SSCD paper's precision-recall curves on the DISC21 set.
+  </p>
+  <table>
+    <tr>
+      <th>Mean similarity</th>
+      <td>
+        {{ "%.3f"|format(report.sscd_mean) }}
+        {% if report.sscd_mean >= 0.85 %}
+          <span style="color:#e74c3c;font-weight:600;">high CID risk</span>
+        {% elif report.sscd_mean >= 0.65 %}
+          <span style="color:#f1c40f;font-weight:600;">caution</span>
+        {% else %}
+          <span style="color:#2ecc71;font-weight:600;">clean</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% if report.sscd_min is not none %}
+    <tr>
+      <th>Min similarity (worst frame pair)</th>
+      <td>{{ "%.3f"|format(report.sscd_min) }}</td>
+    </tr>
+    {% endif %}
+    {% if report.sscd_per_frame %}
+    <tr>
+      <th>Frame pairs scored</th>
+      <td>{{ report.sscd_per_frame|length }}</td>
+    </tr>
+    {% endif %}
+  </table>
+  {% if report.sscd_per_frame %}
+  <div class="heatmap" style="margin-top:0.5em;">
+    {% for v in report.sscd_per_frame %}
+    <span class="cell"
+          style="background: {{ v|heatmap_color }}"
+          title="frame {{ loop.index }}: {{ '%.3f'|format(v) }}"></span>
+    {% endfor %}
+  </div>
+  <div class="legend">
+    <span class="swatch" style="background: {{ 0.0|heatmap_color }}"></span> low (different)
+    <span class="swatch" style="background: {{ 0.5|heatmap_color }}"></span> mid
+    <span class="swatch" style="background: {{ 1.0|heatmap_color }}"></span> high (similar)
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if report.corpus_matches %}
 <div class="section">
   <h2>Corpus matches</h2>

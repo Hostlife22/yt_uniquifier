@@ -271,3 +271,13 @@ class QAReport(BaseModel):
     weakest_chunk_sec: tuple[float, float] | None = None
     chunk_similarities: list[dict[str, float]] = Field(default_factory=list)
     corpus_matches: list[dict[str, float | str]] = Field(default_factory=list)
+    # v0.8.0 R4 — SSCD (Self-Supervised Copy Detection) embedding similarity
+    # between source and output, on a deterministic frame grid. Mean and
+    # min are the headline KPIs (1.0 = identical, 0.0 = unrelated). The
+    # per-frame list is kept for the HTML chart and downstream analysis.
+    # Populated only when build_report(..., compute_sscd=True) and the
+    # ``[ml]`` extra is installed. Flat fields rather than a nested model
+    # so existing JSON tooling keeps reading the report shape unchanged.
+    sscd_mean: float | None = None
+    sscd_min: float | None = None
+    sscd_per_frame: list[float] | None = None
