@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from yt_uniquifier.core.calibration.loop import (
+    CalibrationMetric,
     CalibrationStep,
     CalibrationTarget,
     calibrate,
@@ -44,6 +45,14 @@ def calibrate_cmd(
         Path(".yt_uniq_calib"), "--work-dir",
         help="Per-iteration scratch area.",
     ),
+    metric: str = typer.Option(
+        "chromaprint", "--metric",
+        help=(
+            "Similarity metric to bisect against. "
+            "'chromaprint' uses the v0.5 audio-fingerprint predictor (needs fpcalc); "
+            "'sscd' uses the SSCD copy-detection embedding (needs the [ml] extra)."
+        ),
+    ),
 ) -> None:
     """Bisect intensity until predicted self-match drops below --target.
 
@@ -52,6 +61,16 @@ def calibrate_cmd(
       1  profile load / calibration error
       2  did not converge within --iterations (tuned profile still written)
     """
+    if metric not in ("chromaprint", "sscd"):
+        console.print(
+            f"[red]error:[/red] --metric must be 'chromaprint' or 'sscd', "
+            f"got {metric!r}"
+        )
+        raise typer.Exit(code=1)
+    metric_typed: CalibrationMetric = (
+        "sscd" if metric == "sscd" else "chromaprint"
+    )
+
     try:
         base_profile = load_profile(base)
     except YtUniquifierError as exc:
@@ -92,13 +111,14 @@ def calibrate_cmd(
         result = calibrate(
             input, base_profile, target,
             work_dir=work_dir, encoder_override=encoder_override,
-            on_step=on_step,
+            on_step=on_step, metric=metric_typed,
         )
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
     console.print(table)
+    console.print(f"[dim]metric: {metric_typed}[/dim]")
     status = "[green]converged[/green]" if result.converged else "[yellow]not converged[/yellow]"
     quality_str = ""
     if result.final_quality is not None:

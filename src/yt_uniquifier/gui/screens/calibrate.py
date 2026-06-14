@@ -17,7 +17,10 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from yt_uniquifier.core.calibration.loop import CalibrationTarget
+from yt_uniquifier.core.calibration.loop import (
+    CalibrationMetric,
+    CalibrationTarget,
+)
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
 from yt_uniquifier.gui.a11y import mark
@@ -108,6 +111,15 @@ class CalibrateScreen(ScreenBase):
              "Seconds of the source used as the calibration probe (shorter = faster).")
         knobs.addWidget(self.clip_spin)
 
+        knobs.addWidget(QLabel("Metric:"))
+        self.metric_combo = QComboBox()
+        self.metric_combo.addItem("chromaprint", "chromaprint")
+        self.metric_combo.addItem("sscd", "sscd")
+        mark(self.metric_combo, "Similarity metric",
+             "chromaprint = v0.5 audio-fingerprint predictor; "
+             "sscd = SSCD copy-detection embedding (needs [ml] extra).")
+        knobs.addWidget(self.metric_combo)
+
         knobs.addStretch(1)
         layout.addLayout(knobs)
 
@@ -189,7 +201,13 @@ class CalibrateScreen(ScreenBase):
         ])
         self.log.clear()
 
-        self.worker = CalibrateWorker(self.input_path, profile, target)
+        metric_raw = self.metric_combo.currentData()
+        metric: CalibrationMetric = (
+            "sscd" if metric_raw == "sscd" else "chromaprint"
+        )
+        self.worker = CalibrateWorker(
+            self.input_path, profile, target, metric=metric,
+        )
         self.worker.step.connect(self._on_step)
         self.worker.completed.connect(self._on_completed)
         self.worker.finished_ok.connect(self._on_finished)
@@ -202,7 +220,11 @@ class CalibrateScreen(ScreenBase):
         # Reset iteration bar; max may have changed since UI build.
         self.progress_bar.setRange(0, target.max_iterations)
         self.progress_bar.setValue(0)
-        self.log.log(f"calibrating {self.input_path.name} → target {target.max_self_match}", "info")
+        self.log.log(
+            f"calibrating {self.input_path.name} → target {target.max_self_match} "
+            f"(metric={metric})",
+            "info",
+        )
         self.worker.start()
 
     def _on_cancel(self) -> None:

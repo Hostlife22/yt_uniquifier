@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt6.QtCore import pyqtSignal
 
 from yt_uniquifier.core.calibration.loop import (
+    CalibrationMetric,
     CalibrationStep,
     CalibrationTarget,
 )
@@ -45,6 +46,7 @@ class CalibrateWorker(WorkerBase):
         *,
         encoder_override: str | None = None,
         work_dir: Path | None = None,
+        metric: CalibrationMetric = "chromaprint",
     ) -> None:
         super().__init__()
         self.input_path = input_path
@@ -52,6 +54,7 @@ class CalibrateWorker(WorkerBase):
         self.target = target
         self.encoder_override = encoder_override
         self.work_dir = work_dir or Path.home() / ".cache" / "yt_uniquifier" / "calib"
+        self.metric: CalibrationMetric = metric
 
     def run(self) -> None:
         try:
@@ -67,6 +70,7 @@ class CalibrateWorker(WorkerBase):
                 # previous build silently accepted the click and kept
                 # encoding for minutes.
                 cancel_token=self.cancel_token,
+                metric=self.metric,
             )
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
