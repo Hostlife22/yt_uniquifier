@@ -52,11 +52,19 @@ def _write(path: Path, payload: dict[str, object]) -> None:
 
 
 def _run(args: list[str | Path]) -> subprocess.CompletedProcess[str]:
-    """Run perf_compare with the cwd set to the repo root."""
+    """Run perf_compare with the cwd set to the repo root.
+
+    Forces UTF-8 decoding for child stdout/stderr because the script
+    emits ⚠️ / ✅ glyphs. On Windows `text=True` defaults to
+    `locale.getpreferredencoding()` = cp1252, which can't decode the
+    UTF-8 bytes the child writes — the reader thread crashes and
+    `result.stdout` arrives as `None`. Passing `encoding=` (Python 3.7+)
+    overrides the locale for both stdout and stderr.
+    """
     cmd = [sys.executable, str(TOOL), *(str(a) for a in args)]
     return subprocess.run(
         cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False,
-        timeout=30,
+        timeout=30, encoding="utf-8",
     )
 
 
