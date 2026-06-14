@@ -191,6 +191,18 @@ class Profile(BaseModel):
     # PySceneDetect with snap-to-keyframe to keep the stream-copy
     # invariant in segmenter.stream_copy_extract.
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
+    # v0.8.0 R5 — per-segment VMAF target-quality feedback loop
+    # (Av1an-style). When set, each segment is scored after the
+    # initial encode and, if the score is below ``target_vmaf``,
+    # re-encoded with CRF reduced by ``target_vmaf_step`` (cq/qp/
+    # global_quality reduced equivalently on hardware encoders).
+    # Loops up to ``target_vmaf_max_retries`` times before accepting
+    # the best attempt and emitting a ``target_vmaf_failed`` event.
+    # Single-host only; ``yt-uniq worker`` (distributed) logs a
+    # warning and ignores the field.
+    target_vmaf: float | None = Field(default=None, ge=0.0, le=100.0)
+    target_vmaf_step: int = Field(default=2, ge=1, le=10)
+    target_vmaf_max_retries: int = Field(default=2, ge=0, le=5)
     # NEW (v0.2): controls run-time randomization of transform parameters.
     #   fixed     — `seed` used verbatim, every run identical.
     #   per_run   — fresh random seed on each invocation (default).

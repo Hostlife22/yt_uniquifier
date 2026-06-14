@@ -475,6 +475,8 @@ def build_video_segment_command(
     plan: Plan,
     segment_input: Path,
     segment_output: Path,
+    *,
+    crf_override: int | None = None,
 ) -> BuiltCommand:
     """Build an ffmpeg command that applies video transforms to one segment.
 
@@ -528,7 +530,7 @@ def build_video_segment_command(
     args += ["-map", "0:a?", "-c:a", "copy"]
     args += ["-map", "0:s?", "-c:s", "copy"]
     args += ["-map_chapters", "-1"]
-    args += _encoder_args_for(plan)
+    args += _encoder_args_for(plan, crf_override=crf_override)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
 
@@ -548,6 +550,8 @@ def build_video_segment_command_fused(
     segment: Segment,
     source: Path,
     segment_output: Path,
+    *,
+    crf_override: int | None = None,
 ) -> BuiltCommand:
     """B3 (v0.6.0): fused single-fork variant of build_video_segment_command.
 
@@ -625,7 +629,7 @@ def build_video_segment_command_fused(
     args += ["-map", "0:a?", "-c:a", "copy"]
     args += ["-map", "0:s?", "-c:s", "copy"]
     args += ["-map_chapters", "-1"]
-    args += _encoder_args_for(plan)
+    args += _encoder_args_for(plan, crf_override=crf_override)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
 
@@ -882,20 +886,43 @@ def _segment_pix_fmt(plan: Plan) -> str:
     return "yuv420p"
 
 
-def _encoder_args_for(plan: Plan) -> list[str]:
-    """Same encoder args as FilterGraph._encoder_args, but free function."""
+_DEFAULT_X26X_CRF = 18
+_DEFAULT_GPU_QUALITY = 19  # nvenc cq, qsv global_quality, amf qp_i/qp_p
+
+
+def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[str]:
+    """Same encoder args as FilterGraph._encoder_args, but free function.
+
+    v0.8.0 R5 — accepts an optional ``crf_override`` used by the
+    target-VMAF feedback loop in ``segmenter.process_video_segment``.
+    For libx264/libx265 the value is the literal CRF. For hardware
+    encoders the same delta is applied to their quality knob
+    (nvenc cq, qsv global_quality, amf qp_i/qp_p) so the loop can
+    drive quality across the whole encoder matrix from one parameter.
+    The fallback to the historical defaults
+    (CRF 18, GPU quality 19) is preserved when ``crf_override`` is
+    ``None`` — no behavioural change for callers that don't opt in.
+    """
     enc = plan.encoder
     name = enc.name
     mb = _max_bitrate_for(plan)
+    crf = _DEFAULT_X26X_CRF if crf_override is None else max(0, min(51, crf_override))
+    # Hardware encoders use a parallel 0..51 quality scale; map by
+    # preserving the (default_crf - override) delta so a profile that
+    # asks for a 2-step reduction yields the same perceptual bump on
+    # CPU and GPU paths.
+    gpu_q = _DEFAULT_GPU_QUALITY + (crf - _DEFAULT_X26X_CRF)
+    gpu_q = max(0, min(51, gpu_q))
+    gpu_q_s = str(gpu_q)
     if enc.vendor == "nvenc":
         return [
-            "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", "19",
+            "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", gpu_q_s,
             "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
         ]
     if enc.vendor == "qsv":
-        return ["-c:v", name, "-global_quality", "19", "-look_ahead", "1"]
+        return ["-c:v", name, "-global_quality", gpu_q_s, "-look_ahead", "1"]
     if enc.vendor == "amf":
-        return ["-c:v", name, "-rc", "cqp", "-qp_i", "19", "-qp_p", "19"]
+        return ["-c:v", name, "-rc", "cqp", "-qp_i", gpu_q_s, "-qp_p", gpu_q_s]
     if enc.vendor == "videotoolbox":
         return [
             "-c:v", name, "-b:v", str(mb),
@@ -903,7 +930,7 @@ def _encoder_args_for(plan: Plan) -> list[str]:
             "-allow_sw", "1",
         ]
     return [
-        "-c:v", name, "-preset", "medium", "-crf", "18",
+        "-c:v", name, "-preset", "medium", "-crf", str(crf),
         "-maxrate", str(mb), "-bufsize", str(mb * 2),
     ]
 

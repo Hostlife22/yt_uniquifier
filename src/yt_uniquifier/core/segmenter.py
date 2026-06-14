@@ -21,6 +21,7 @@ from yt_uniquifier.core.audio_windows import verify_audio_filters_available
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan, Segment
 from yt_uniquifier.core.pipeline import (
+    BuiltCommand,
     build_main_audio_command,
     build_main_audio_command_windowed,
     build_video_segment_command,
@@ -375,6 +376,15 @@ def process_video_segment(
     is still available via ``YT_UNIQ_DISABLE_FUSE=1`` for emergency
     rollback.
 
+    R5 (v0.8.0): when ``plan.profile.target_vmaf`` is set, the encoded
+    segment is scored with libvmaf; if the mean score is below the
+    target, the segment is re-encoded with a reduced CRF (or the
+    equivalent quality bump on hardware encoders) up to
+    ``target_vmaf_max_retries`` times. Emits ``target_vmaf`` events
+    after each scored attempt and a terminal ``target_vmaf_failed``
+    event if every attempt undershoots the target (the best attempt
+    is still kept — never the worse option of an empty segment).
+
     Returns ``(src_seg_path | None, out_seg_path)``. The fused path
     has no ``_src.mkv`` intermediate so ``src`` is ``None``;
     downstream callers (``CheckpointStore.mark``, cleanup) all handle
@@ -383,48 +393,162 @@ def process_video_segment(
     out = work_dir / f"seg_{segment.idx:04d}.mkv"
     seg_plan = _plan_for_segment(plan, segment.idx)
 
-    if _fuse_enabled():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        cmd = build_video_segment_command_fused(
-            seg_plan, segment, plan.source.path, out,
-        )
-        src: Path | None = None
-    else:
-        # Legacy two-fork path.
-        src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
-        stream_copy_extract(segment, plan.source.path, src)
-        cmd = build_video_segment_command(seg_plan, src, out)
-    # Inject segment idx into every event so downstream consumers (GUI
-    # progress bar, history log) can correlate ffmpeg `progress=...`
-    # blocks with the segment they belong to. Without this, the GUI
-    # shows "segment ?" for the entire encode because runner.py only
-    # sees ffmpeg's stdout (`out_time_us`, `frame=...`) — it has no
-    # knowledge of the segment index.
-    if on_event is not None:
-        _on_event = on_event
+    target = plan.profile.target_vmaf
+    step = plan.profile.target_vmaf_step
+    max_retries = plan.profile.target_vmaf_max_retries
+    crf_override: int | None = None
+    src: Path | None = None
+    attempt = 0
 
-        def _wrap(ev: RunEvent) -> None:
-            # A1 (v0.5.5): do NOT mutate the input event's payload —
-            # RunEvent is `frozen=True` but `payload: dict[str, object]` is
-            # only shallowly frozen, so in-place mutation leaks back to
-            # any holder of the reference (Qt queued connections, log
-            # buffers, retry-replay loops). Construct a new event.
-            if "segment" not in ev.payload:
-                ev = RunEvent(
-                    kind=ev.kind,
-                    payload={**ev.payload, "segment": segment.idx},
-                )
-            _on_event(ev)
-        forwarded_on_event: Callable[[RunEvent], None] | None = _wrap
-    else:
-        forwarded_on_event = None
-    run_ffmpeg(
-        cmd, output=out, on_event=forwarded_on_event, cancel_token=cancel_token,
-        pause_token=pause_token,
-        log_path=out.with_suffix(".mkv.log"),
-        extra_env=extra_env,
-    )
+    def _run(cmd: BuiltCommand) -> None:
+        # Inject segment idx into every event so downstream consumers
+        # (GUI progress bar, history log) can correlate ffmpeg
+        # `progress=...` blocks with the segment they belong to.
+        if on_event is not None:
+            _on_event = on_event
+
+            def _wrap(ev: RunEvent) -> None:
+                # A1 (v0.5.5): do NOT mutate the input event's payload.
+                if "segment" not in ev.payload:
+                    ev = RunEvent(
+                        kind=ev.kind,
+                        payload={**ev.payload, "segment": segment.idx},
+                    )
+                _on_event(ev)
+            forwarded_on_event: Callable[[RunEvent], None] | None = _wrap
+        else:
+            forwarded_on_event = None
+        run_ffmpeg(
+            cmd, output=out, on_event=forwarded_on_event, cancel_token=cancel_token,
+            pause_token=pause_token,
+            log_path=out.with_suffix(".mkv.log"),
+            extra_env=extra_env,
+        )
+
+    # Drive the encode (and any retries) by re-using one helper.
+    def _encode_once() -> None:
+        if _fuse_enabled():
+            out.parent.mkdir(parents=True, exist_ok=True)
+            cmd_fused = build_video_segment_command_fused(
+                seg_plan, segment, plan.source.path, out,
+                crf_override=crf_override,
+            )
+            _run(cmd_fused)
+        else:
+            nonlocal src
+            src = work_dir / f"seg_{segment.idx:04d}_src.mkv"
+            if not src.exists():
+                stream_copy_extract(segment, plan.source.path, src)
+            cmd_legacy = build_video_segment_command(
+                seg_plan, src, out, crf_override=crf_override,
+            )
+            _run(cmd_legacy)
+
+    _encode_once()
+
+    if target is not None:
+        score = _score_segment_vmaf(segment, plan.source.path, out)
+        if on_event is not None:
+            on_event(RunEvent(
+                kind="target_vmaf",
+                payload={
+                    "segment": segment.idx,
+                    "vmaf": score,
+                    "crf": crf_override if crf_override is not None else _DEFAULT_CRF_HINT,
+                    "attempt": attempt,
+                    "target": target,
+                },
+            ))
+        while (
+            score is not None
+            and score < target
+            and attempt < max_retries
+        ):
+            attempt += 1
+            current_crf = crf_override if crf_override is not None else _DEFAULT_CRF_HINT
+            crf_override = max(0, current_crf - step)
+            if cancel_token is not None and cancel_token.is_cancelled():
+                break
+            _encode_once()
+            score = _score_segment_vmaf(segment, plan.source.path, out)
+            if on_event is not None:
+                on_event(RunEvent(
+                    kind="target_vmaf",
+                    payload={
+                        "segment": segment.idx,
+                        "vmaf": score,
+                        "crf": crf_override,
+                        "attempt": attempt,
+                        "target": target,
+                    },
+                ))
+        if (
+            score is not None
+            and score < target
+            and on_event is not None
+        ):
+            on_event(RunEvent(
+                kind="target_vmaf_failed",
+                payload={
+                    "segment": segment.idx,
+                    "vmaf": score,
+                    "crf": crf_override,
+                    "attempts": attempt + 1,
+                    "target": target,
+                },
+            ))
+
     return src, out
+
+
+# Mirror of ``pipeline._DEFAULT_X26X_CRF``; we keep the constant local to
+# avoid a circular import (pipeline pulls models, segmenter pulls
+# pipeline). Drift between the two is guarded by
+# ``tests/unit/test_target_vmaf_loop.py::test_default_crf_constants_match``.
+_DEFAULT_CRF_HINT = 18
+
+
+def _score_segment_vmaf(
+    segment: Segment, source: Path, encoded: Path,
+) -> float | None:
+    """Score one encoded segment against the matching source span.
+
+    Returns ``None`` when libvmaf isn't available or the run failed —
+    the feedback loop treats ``None`` as "don't retry" rather than
+    looping forever waiting for a score that will never arrive.
+    """
+    # We need to compare encoded against the matching span of the
+    # source. Slice the source via an intermediate stream-copy so
+    # libvmaf gets two identical-duration files with PTS at 0.
+    import tempfile
+
+    from yt_uniquifier.core.qa import vmaf as _vmaf
+
+    span = max(0.001, segment.end_sec - segment.start_sec)
+    with tempfile.TemporaryDirectory(prefix="vmaf_ref_") as tmp:
+        ref = Path(tmp) / "ref.mkv"
+        cmd = [
+            ffmpeg_bin(),
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", f"{segment.start_sec:.6f}",
+            "-i", str(source),
+            "-t", f"{span:.6f}",
+            "-c:v", "copy", "-an", "-sn",
+            "-avoid_negative_ts", "make_zero",
+            str(ref),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        except subprocess.CalledProcessError as exc:
+            _log.warning(
+                "target_vmaf: ref slice failed for seg %d: %s",
+                segment.idx, exc.stderr.strip() if exc.stderr else exc,
+            )
+            return None
+        # Subsample=4 keeps this fast on short segments without losing
+        # meaningful accuracy at the 80-95 VMAF range we care about.
+        result = _vmaf.compute(ref, encoded, subsample=4)
+    return result.score
 
 
 def parallel_safe(plan: Plan) -> int:

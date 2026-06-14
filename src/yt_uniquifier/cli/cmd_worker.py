@@ -60,6 +60,21 @@ def worker_cmd(
         console.print(f"[red]profile error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    # v0.8.0 R5 — per-segment target_vmaf feedback loop is single-host
+    # only. The distributed worker doesn't get the on_event stream
+    # back to the orchestrator that initiated the batch, and re-encode
+    # retries would invalidate the per-segment lease/checkpoint
+    # accounting. Surface the mismatch loudly so the operator can fix
+    # the profile rather than wonder why their --vmaf target was
+    # silently ignored.
+    if prof.target_vmaf is not None:
+        console.print(
+            f"[yellow]warning:[/yellow] profile {prof.name!r} sets "
+            f"target_vmaf={prof.target_vmaf}; this is ignored in "
+            f"distributed worker mode (single-host only)."
+        )
+        prof = prof.model_copy(update={"target_vmaf": None})
+
     stop = threading.Event()
     cancel = CancelToken()
 
