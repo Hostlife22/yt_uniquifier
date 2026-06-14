@@ -30,3 +30,5 @@ tests/visual/__snapshots__/_actual_*.png
 .idea/
 .vscode/
 out/
+# mkdocs build output (gh-pages workflow generates fresh per deploy)
+site/

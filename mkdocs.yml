@@ -78,6 +78,10 @@ nav:
       - YouTube targets: youtube_targets.md
       - Telemetry: telemetry.md
       - Localization: i18n.md
+  - Project:
+      - Versioning & compatibility: versioning.md
+      - API contracts: api-contracts.md
+      - Security policy: security.md
 
 markdown_extensions:
   - admonition

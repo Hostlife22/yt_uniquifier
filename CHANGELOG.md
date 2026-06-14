@@ -10,11 +10,284 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
-## [Unreleased]
+## [v1.0.0] — 2026-06-14
+
+**First stable release.** API surface (`Plan`, `Profile`, `RunEvent`,
+`RunOptions`, `RunSummary`) is frozen under SemVer; see
+[`docs/versioning.md`](docs/versioning.md) for the breaking-change
+contract and the RFC process for proposing changes.
+[`SECURITY.md`](SECURITY.md) ships the disclosure policy.
+
+No new user-facing features vs v0.9.0 — v1.0.0 is the production-ready
+manifest of the work shipped across v0.5.5 through v0.9.0. Distribution
+status: Linux AppImage signed; macOS/Windows shipped unsigned pending
+code-signing credentials (see `docs/install.md`).
+
+### Added
+
+- **`docs/versioning.md`** — SemVer commitment, breaking-change
+  definitions per contract (Plan / Profile / CLI / RunEvent / Python
+  API), RFC process for proposing breaking changes.
+- **`SECURITY.md`** — vulnerability disclosure policy, response
+  timeline, supported-versions table, GitHub Private Vulnerability
+  Reporting enabled.
+- **`docs/api-contracts.md`** — field-by-field stability table for the
+  public surface; stable / experimental / internal labels.
+- **`tests/contracts/`** — snapshot tests for `Plan`, `Profile`,
+  `RunEvent` serialisation. A diff means an intentional bump
+  decision must be made before merge.
+- **`.github/workflows/perf-regression.yml`** — nightly benchmark on
+  ubuntu-latest; publishes JSON to gh-pages `perf-history/`; opens
+  issue with label `perf-regression` on >15% degradation across two
+  consecutive runs.
+- **`docs/accessibility.md`** — WCAG 2.1 AA conformance statement,
+  per-screen screen-reader manual test guide.
+- **`installers/linux/AppImageBuilder.yml`** — signed AppImage with
+  bundled ffmpeg static + Python 3.11 runtime.
+
+### Changed
+
+- **`pyproject.toml`** — `version` bumped to `1.0.0`; classifier
+  `Development Status :: 5 - Production/Stable`.
+- **`src/yt_uniquifier/__init__.py`** — `__version__` sourced from
+  `importlib.metadata.version("yt-uniquifier")` (single source of
+  truth in `pyproject.toml`).
+- **Coverage gate** — CI enforces `--cov-fail-under=85` on `core/`,
+  `--cov-fail-under=80` on `cli/`, `--cov-fail-under=75` on `gui/`.
+- **mkdocs site** — versioned via `mike`; `latest` alias tracks the
+  most recent tag.
+
+### Security
+
+- GitHub Private Vulnerability Reporting enabled. See `SECURITY.md`
+  for disclosure timeline and supported-versions table.
+
+## [v0.9.0] — 2026-06-14
+
+Community + Web. Six atomic rounds; 906 unit + 27 GUI + 9 integration
+smoke = 942 tests green; mypy --strict clean across 136 source files.
+
+### Added
+
+- **R1 / F9 — Profile marketplace** (`42fa5d3`). HTTPS-only,
+  SHA-pinned, schema-validated. `yt-uniq profile {list-community,
+  show, install, purge-cache, install-dir}`. GUI
+  `CommunityProfilesDialog` in Profile Editor. 5-entry bootstrap
+  catalogue shipped in the wheel.
+- **R2 / F14 — Whisper subtitle transform** (`4901db7`).
+  `core/transforms/video_subtitles.py` (filter-arg injection guards),
+  `_whisper_probe.py` capability detection,
+  `core/subtitles.py` whisper-cpp SRT generator cached by
+  `(size, mtime, model, lang)`, `cli/cmd_subtitles.py`, preflight
+  check `_check_subtitle_burnin`.
+- **R3 — Opt-in local telemetry** (`96c6f48`). `core/telemetry.py`
+  (off by default, append-only JSONL, HOME redaction, bounded
+  rotation), `_maybe_record_telemetry` in orchestrator, CLI
+  `yt-uniq telemetry {status,export,purge}` (no `enable`
+  subcommand — by design), Settings groupbox + first-run consent.
+- **R4 / F13 — Docker headless + web UI** (`f7e954f`).
+  `src/yt_uniquifier/web/` FastAPI app (lazy import), SSE event
+  streaming, vanilla-JS SPA, `yt-uniq-web` uvicorn launcher,
+  multi-stage Dockerfile (ffmpeg + python + non-root + tini +
+  healthcheck), docker-compose.yml for NAS deployments,
+  `input_root` chroot + basic-auth gate.
+- **R5 — Localization en + ru** (`dc85cc2`). `gui/i18n/`
+  `RuntimeTranslator` subclass + in-Python catalogue (~40 keys),
+  `AppState.locale` round-trip, Settings Language combo with
+  hot-swap.
+- **R6 — Documentation site (mkdocs-material)** (`7d61000`).
+  `mkdocs.yml` strict mode, landing + getting-started + marketplace
+  + web + telemetry + GUI walkthrough; `[docs]` extra;
+  `.github/workflows/docs.yml` gh-pages deploy on tag.
+
+### Fixed
+
+- **Windows CI: LF line endings + redact_path separator tolerance**
+  (`333017d`).
+
+## [v0.8.0] — 2026-06-12
+
+ML-grade QA + Plugin system. Seven rounds.
+
+### Added
+
+- **R1 — Transform plugin system** (`b664044`). Third-party
+  transforms discoverable via
+  `importlib.metadata.entry_points("yt_uniquifier.transforms")`.
+- **R2 — SQLite-backed corpus** (`3dc9d0b`). `core/qa/corpus_db.py`,
+  auto-migration from `index.json`, scale to 50k+ references.
+- **R3 — PySceneDetect segment boundary mode** (`e5cf603`). Opt-in
+  via `SegmentationConfig.mode="scene"` + `[scene]` extra.
+- **R4 / F6 — SSCD ML-grade copy-detection metric** (`11fc8ea`).
+  `core/qa/sscd.py`, lazy model download (~80 MB torchscript);
+  HTML report shows SSCD distribution. `[ml]` extra.
+- **R5 / F11 — Per-segment VMAF target-quality feedback loop**
+  (`6262704`). `Profile.target_vmaf*`, `segmenter._encode_once`
+  retry on miss, `RunEvent` kinds `target_vmaf` /
+  `target_vmaf_failed`.
+- **R6 — Calibrate via SSCD metric** (`1e4e71c`).
+  `calibrate(metric="sscd")`, CLI `--metric` flag, GUI dropdown.
+
+### Documentation
+
+- **R7 — docs + cross-cutting smoke + master-plan checkboxes**
+  (`2f969d5`).
+
+## [v0.7.0] — 2026-06-08
+
+GUI maturity + Platform profiles. Eight rounds; 821 tests green;
+ruff + mypy clean; WCAG-AA contrast guard catches 8 real failures
+that were then fixed.
+
+### Added
+
+- **R3 / F3 — `video.fit_aspect` transform + 7 platform profiles**
+  (`4dedf55`). `youtube_4k`, `youtube_1080p`, `youtube_shorts`,
+  `tiktok_vertical`, `instagram_reels`, `instagram_square`,
+  `linkedin_square`. Crop / pad_blur / pad_black modes.
+- **R4 / F2 / F7 — Live pHash divergence indicator + Auto-tune
+  button** (`d4d3556`). pHash sampling in orchestrator
+  (`RunOptions.sample_phash: off|light|full`), custom-painted
+  `_Sparkline` widget with EMA, KPI-banded colours; `🎯 Auto-tune`
+  CTA launches `CalibrateWorker`.
+- **R5 / F4 — Post-job notifications** (`d58726b`). `core/notifications.py`
+  auto-detects Discord embed / Slack blocks / Telegram Markdown
+  / generic; stdlib-only (urllib + smtplib); optional `keyring`
+  for SMTP password; Settings groupbox + Test button.
+- **R6 / F5 — Pause / Resume** (`0dcdb12`).
+  `core/process_control.py` (POSIX SIGSTOP/SIGCONT + Windows lazy
+  psutil, recursive tree), `PauseToken` in runner with 24 h
+  auto-cancel, `paused_at` marker in `state.json`, GUI `&Pause`
+  button (Space shortcut) in Run screen.
+
+### Changed
+
+- **R1 — type-ignore sweep + `QStandardPaths` + theme tokens +
+  `importlib.resources`** (`cbf243a`). All `# type: ignore`
+  removed (C1-C7). `QStandardPaths.AppConfigLocation` for config,
+  `CacheLocation` for cache; migration helper copies from legacy
+  `~/.config/yt_uniquifier/`. Theme leaks fixed (`kpi_pills`,
+  `preflight_panel` subscribe to `state.theme_changed`).
+  Profiles loaded via
+  `importlib.resources.files("yt_uniquifier").joinpath("profiles")`
+  for PyInstaller portability.
+- **R2 — Accessibility framework + Run/Settings sweep + global
+  excepthook** (`5959ce5`, `dc3d237`). `setAccessibleName/Description/
+  setTabOrder/setShortcut` (Ctrl+R / Esc / Ctrl+Q / Ctrl+1..0);
+  mnemonics in all CTAs; global `sys.excepthook` → QMessageBox +
+  "Copy details" + 100 KiB `crash.log` rotation;
+  `KeyboardInterrupt` bypass.
+
+### Fixed
+
+- **R7 — docs catch-up, WCAG-AA contrast guard, real-ffmpeg
+  pause/resume integration** (`e09bcd9`). `tests/gui/test_theme_contrast.py`
+  caught 8 real contrast failures across badge / KPI tokens
+  (fg_dim light, badge_ok, kpi_yellow/green, per-band fg);
+  `tests/integration/test_pause_resume_real_ffmpeg.py` (2 cases:
+  pause-mid-encode → resume duration parity; pause_token wired
+  but unused → no-op).
+- **R8 — CI split + per-test timeout + isolated config dir**
+  (`3c880fb`). pytest-timeout 3-minute cap;
+  `XDG_CONFIG_HOME=tmp` in CI prevents user-config pollution.
+- **R9 (rounds 1-6) — Windows-matrix unblock** (`96b240f`,
+  `abb3ca5`, `0093e38`, `2f1d8e2`, `ad9f69b`, `3bbe756`). Linux
+  silent-subprocess cancel; Windows `_pid_alive` safety;
+  `_FakePopen` context-manager protocol; `proc.terminate` always
+  runs after `taskkill` attempt.
+
+## [v0.6.0] — 2026-06-03
+
+Performance + Distribution. Three rounds + CI matrix expansion.
+
+### Added
+
+- **F8 — Vulkan AV1 encoder** (`ae4ef3d`). `av1_vulkan` in
+  `_CANDIDATES` (+ `EncoderKind="av1"`, `EncoderVendor="vulkan"`).
+  AMD/Intel GPU AV1 without NVENC/QSV.
+- **F1 R1 — release workflow scaffolding** (`9c1f3bf`). 3-OS
+  matrix, `softprops/action-gh-release` draft on tag push,
+  unsigned PyInstaller artifacts. R2-R5 (notarytool, signtool,
+  AppImage, release automation) deferred to v1.0.0.
+- **windows-latest in CI matrix** (`eff5d3d`). 3 OS × 2 Py = 6
+  jobs. `@needs_symlink` skip marker for `os.symlink` tests
+  (Win admin required).
+
+### Performance
+
+- **R1 — five mechanical perf wins** (`a76293b`):
+  - **B1** keyframe-cache key → `(st_size, st_mtime_ns)`; `md5_file`
+    removed from hot path. 180 GB 4K HDR cold-start: 60-360 s → <1 ms.
+  - **B2** loudnorm pass-1 prepended with
+    `aresample=16000,aformat=channel_layouts=mono`. 4 h source:
+    144 s → 24 s (6×).
+  - **B5** `auto_subsample_for_duration` helper + reorder in
+    `build_report` (probe before VMAF). 4 h 24 fps:
+    4-11 h → ~1 h (6-11×).
+  - **B6** `ThreadPoolExecutor` parallels 10 candidate probes.
+    Cold-start 5.5 s → 0.6 s (9×).
+  - **B7** NVENC multi-GPU sum — `_nvenc_max_parallel` sums sessions
+    across all GPUs. Dual A6000: 8 → 16 sessions.
+- **R2 — debounced flush + NFS cursor** (`ae4ef3d`):
+  - **B4** `_flush_maybe` via 10 marks OR 0.25 s thresholds;
+    phase-boundary writes force-flush. 1000-segment × 4 workers:
+    ~4000 fsync → ~100.
+  - **B8** NFS lease cursor — `_lease_cursor` cached, refreshed on
+    exhaust. ~5× fewer `iterdir` round-trips.
+- **R3 — fused single-fork segment encode** (`d37e6fd`):
+  - **B3** `build_video_segment_command_fused`. Env-flag
+    `YT_UNIQ_DISABLE_FUSE=1` for emergency rollback.
+
+## [v0.5.5] — 2026-06-01
+
+Hotfix sprint. Ten A-fixes + 1 bonus + 89 regression tests. No new
+user-facing features; all changes additive or behaviour-preserving.
+Production-critical bug audit results.
+
+### Fixed
+
+- **A1 — `RunEvent.payload` data race in parallel segmentation**
+  (`d719221`). New `RunEvent` per emission instead of mutating
+  shared payload dict; data race in `segmenter.py:265-280` killed.
+- **A2 — `assert isinstance` → `ensure_params`/`ensure_rng`**
+  (`abe722e`). Survives `python -OO` and PyInstaller
+  `--optimize=2`. Inline raises in `pipeline.py` (4 sites) and
+  `runner.py` (1 site). Regression test under `PYTHONOPTIMIZE=2`.
+- **A3 — Resume edge case: per-segment recovery + defensive
+  `.exists()` filter in concat** (`abe722e`). 2 integration tests
+  (all-missing + partial cleanup).
+- **A4 — Cross-platform PID lockfile in `CheckpointStore`**
+  (`cdb23fe`). Cross-host via `os.kill(pid, 0)`. 8 unit tests
+  including subprocess collision.
+- **A5 — Cancel watcher in `runner.py::_run_once`** (`58fe715`).
+  Daemon thread; cancel during silent ffmpeg in <7 s instead of
+  the 3600 s `communicate()` timeout. 3 timing tests.
+- **A6 — `cancel_token` plumbed through calibrate / qa /
+  encoder.detect_encoders** (`58fe715`). `CorrelateWorker`
+  rewritten on `Popen` + `poll`. 6 regression tests.
+- **A7 — `lease()` rejects symlinks** (`cdb23fe`). Marker log
+  on rejection.
+- **A8 — Reaper double-checks heartbeat mid-loop** (`cdb23fe`).
+  Closes worker-revive race.
+- **A9 — Pillow pin `>=10.3.1,<11`** (`d719221`). CVE-2024-28219
+  (heap buffer overflow in `_imagingcms`) closed for fresh installs.
+- **A10 — `model_config = ConfigDict(extra="forbid")` across all
+  19 `*Params`** (`d719221`). Registry-walking regression test
+  catches accidental relaxation.
+- **5.2 bonus — `_safe_host_name()` sanitisation** (`cdb23fe`).
+  Path traversal via hostname blocked.
+
+### Changed
+
+- **`ruff polish` — Annotated quote drops + suppress() rewrites**
+  (`cf0bb9f`).
+
+## [v0.5.4.1 / Unreleased pre-hotfix] — 2026-05-31
 
 Post-v0.5.4 hardening — robustness, concurrency, and lifecycle fixes
 surfaced by two rounds of internal audit. No new user-facing features;
-all changes additive or behaviour-preserving.
+all changes additive or behaviour-preserving. Folded into the v0.5.5
+hotfix sprint shortly after.
 
 ### Added
 

@@ -1,6 +1,6 @@
 [project]
 name = "yt-uniquifier"
-version = "0.1.0a0"
+version = "1.0.0"
 description = "Production-grade re-encoder with controlled micro-transforms for owned/licensed video content."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "yt-uniquifier contributors" }]
 keywords = ["video", "ffmpeg", "youtube", "re-encode"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
