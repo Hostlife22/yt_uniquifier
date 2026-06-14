@@ -18,6 +18,7 @@ yt-uniq calibrate /path/to/master.mp4 \
   --min-quality 88.0    # min quality score on the unified scale (default)
   --iterations 5        # max bisect steps (default)
   --clip-sec 60.0       # test clip duration in seconds (default)
+  --metric phash        # v0.8 R6: 'phash' (default) | 'sscd' (semantic-similarity, requires [ml] extra)
 
 yt-uniq run /path/to/master.mp4 \
   --profile /path/to/tuned.yaml \

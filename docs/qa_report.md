@@ -19,6 +19,12 @@ metric families. Each one is optional and degrades gracefully if its
 backing binary is missing — the QA report just notes which ones it
 couldn't compute.
 
+> **New since v0.8.0**: optional SSCD semantic-similarity scores
+> (`yt-uniq run --metric sscd` or `yt-uniq qa --metric sscd`,
+> requires `[ml]` extra) and target-VMAF bounded-retry events for
+> profiles that opt into `target_vmaf`. See the SSCD + target-VMAF
+> subsections below.
+
 ### File-level
 
 | Field | Source | Meaning |
@@ -69,6 +75,41 @@ literature:
 | 15–25 | uncertain |
 | ≥ 26 | no match |
 | ≥ 30 | high-confidence non-match |
+
+### SSCD semantic similarity (v0.8.0 R4, opt-in)
+
+Populated only when `yt-uniq run --metric sscd` (or `yt-uniq qa
+--metric sscd`) is passed. Requires the `[ml]` extra (torch +
+transformers). The first run downloads ~200 MB of model weights to
+`~/.cache/yt_uniquifier/models/`; subsequent runs use the cache.
+Full background in [`docs/sscd.md`](./sscd.md).
+
+| Field | Source | Range | Meaning |
+|---|---|---|---|
+| `sscd.mean_similarity` | mean cosine similarity over N-frame embedding pairs | 0..1 | aggregate semantic match |
+| `sscd.min_similarity`  | min cosine similarity (weakest paired frame) | 0..1 | worst case — the chunk most likely to fail human review |
+| `sscd.per_frame[]`     | `{frame_idx, similarity}` for each sampled pair | 0..1 | drives the SSCD heatmap in the HTML report |
+| `sscd.band`            | derived bucket: `high` ≥0.85, `medium` 0.65-0.85, `low` <0.65 | enum | colour-coded in HTML |
+
+Unlike pHash (pixel-level), SSCD reflects what a content-aware human
+or model would see: a recoloured + cropped + slightly-noisy clip can
+score 0.92 on SSCD while pHash similarity drops below 0.50.
+
+### Target-VMAF retry events (v0.8.0 R5)
+
+Profiles that set `target_vmaf` trigger an in-flight retry when a
+segment lands below the target. The QA report records every retry:
+
+| Field | Meaning |
+|---|---|
+| `target_vmaf_events[].segment_idx` | which segment retried |
+| `target_vmaf_events[].attempt`     | 1-based retry attempt |
+| `target_vmaf_events[].measured`    | VMAF actually measured |
+| `target_vmaf_events[].target`      | the `target_vmaf` from the profile |
+| `target_vmaf_events[].action`      | `retry` (re-encoded with crf--) or `accept` (hit cap, kept best-so-far) |
+
+`target_vmaf_max_retries` caps the loop; when the cap is hit the
+report includes a `notes[]` entry naming the segment.
 
 ### Content-ID prediction (v0.2+)
 
