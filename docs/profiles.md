@@ -19,9 +19,43 @@ target_codec: "h264" | "hevc"
 target_loudness_lufs: float                                   # default -14.0
 seed: int | null                                              # used when seed_strategy=fixed
 seed_strategy: "fixed" | "per_run" | "per_file" | "divergent" # default per_run; v0.3.3 CID profiles ship divergent
+
+# --- v0.8.0 R3 — segmentation strategy ---
+segmentation:
+  mode: "keyframe" | "scene"                                  # default keyframe
+  scene_threshold: float                                       # default 27.0 (PySceneDetect ContentDetector)
+  scene_min_length_sec: float                                  # default 2.0
+# --- v0.8.0 R5 — per-segment VMAF target-quality ---
+target_vmaf: float | null                                      # default null (loop disabled)
+target_vmaf_step: int                                          # default 2 (CRF decrement per retry)
+target_vmaf_max_retries: int                                   # default 2 (cap on re-encode attempts)
 ```
 
 Unknown top-level fields are rejected (`extra=forbid`).
+
+### Segmentation modes (v0.8.0 R3)
+
+* **`keyframe`** (default) — segments aligned on source keyframes,
+  enabling stream-copy extraction. This is the v0.7 behaviour and what
+  every shipped profile uses.
+* **`scene`** — boundaries detected by [PySceneDetect's ContentDetector](https://github.com/Breakingofstars/PySceneDetect),
+  then snapped DOWN to the nearest keyframe to preserve the stream-copy
+  invariant. Falls back to a single segment if no scene cuts survive
+  the snap. Requires the `[scene]` extra
+  (`pip install 'yt-uniquifier[scene]'`).
+
+### Per-segment VMAF target-quality (v0.8.0 R5)
+
+When `target_vmaf` is set, each segment is re-encoded with progressively
+lower CRF (decrement = `target_vmaf_step`, cap = `target_vmaf_max_retries`)
+until VMAF clears the target or retries are exhausted. The default CRF
+hint is 18 (x264/x265) — hardware encoders preserve the delta and map to
+their native quality knob (nvenc `cq`, qsv `global_quality`, amf `qp`).
+
+**Distributed-mode warning**: the feedback loop is single-host only. A
+profile shipped to a `yt-uniq worker` queue logs a yellow warning and
+strips `target_vmaf` before running, to avoid invalidating per-segment
+lease accounting.
 
 See [seed_strategy.md](./seed_strategy.md) for what each strategy means
 and when to pick which.

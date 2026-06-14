@@ -257,12 +257,12 @@
 
 **Цель**: research-grade backing + extensibility.
 
-- [ ] **F6: SSCD-based copy detection** через `[ml]` extras. Frame-grid + ResNet50 эмбеддинг + cosine сходство. HTML-report показывает SSCD distribution.
-- [ ] **F10: SQLite-backed corpus** (scale > 10k references).
-- [ ] **F11: per-segment VMAF target-quality** (Av1an-style feedback loop).
-- [ ] **F12: PySceneDetect** segment boundary mode (opt-in).
-- [ ] Transform plugin system через `importlib.metadata.entry_points()` — community может писать transforms без форка.
-- [ ] Calibrate loop: bisect по SSCD similarity вместо chromaprint Jaccard как опция.
+- [x] **F6: SSCD-based copy detection** через `[ml]` extras. Frame-grid + ResNet50 эмбеддинг + cosine сходство. HTML-report показывает SSCD distribution. *(R4 — `core/qa/sscd.py`, `docs/sscd.md`)*
+- [x] **F10: SQLite-backed corpus** (scale > 10k references). *(R2 — `core/qa/corpus_db.py`, auto-migration from `index.json`, `docs/corpus.md`)*
+- [x] **F11: per-segment VMAF target-quality** (Av1an-style feedback loop). *(R5 — `Profile.target_vmaf*`, `segmenter._encode_once`, `RunEvent` kinds `target_vmaf` / `target_vmaf_failed`)*
+- [x] **F12: PySceneDetect** segment boundary mode (opt-in). *(R3 — `core/scene_detect.py`, `SegmentationConfig.mode="scene"`, `[scene]` extra)*
+- [x] Transform plugin system через `importlib.metadata.entry_points()` — community может писать transforms без форка. *(R1 — `ENTRY_POINT_GROUP="yt_uniquifier.transforms"`, `docs/plugins.md`)*
+- [x] Calibrate loop: bisect по SSCD similarity вместо chromaprint Jaccard как опция. *(R6 — `calibrate(metric="sscd")`, `--metric` CLI flag, GUI dropdown)*
 
 **Метрика**: `yt-uniq qa <in> <out> --sscd` работает offline, scale до 50k corpus references без замедления, plugin система задокументирована + 1 third-party example.
 
@@ -368,7 +368,7 @@ yt-uniq run <real_4k> --workers 8 --new-variant  # smoke: no data race in logs
 - [ ] **Live divergence indicator** в GUI, замеренный TTV (time-to-value) для нового пользователя ≤ 60 сек.
 - [ ] **5+ platform-destination профилей** шипятся.
 - [ ] **Post-job webhook** работает с Discord, Slack, email.
-- [ ] **SSCD QA** опционально доступен, документация показывает correlation с реальным CID.
+- [x] **SSCD QA** опционально доступен (`yt-uniq qa --sscd`, `--metric sscd` для calibrate), документация в `docs/sscd.md` (correlation против реального CID — empirical follow-up, не блокер v0.8.0).
 - [ ] **80%+ coverage** на core/, 100% на новых модулях.
 - [ ] **Performance baseline**: 2h 1080p run на референсном HDD-стенде ≤ 1.2× libx264 baseline (vs 1.5× сейчас).
 - [ ] **Accessibility**: WCAG 2.1 AA для всех 10 экранов.
