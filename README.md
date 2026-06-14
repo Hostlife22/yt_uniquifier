@@ -7,6 +7,8 @@
 > third-party plugin system, community profile marketplace, opt-in local
 > telemetry, English + Russian localization.
 
+📚 **Live docs**: <https://hostlife22.github.io/yt_uniquifier/> — mkdocs-material site, auto-deployed on every `v*` tag.
+
 ![yt-uniquifier Run screen](./docs/screenshots/run-screen.png)
 
 ## What it does
@@ -232,6 +234,8 @@ yt-uniq-web --host 0.0.0.0 --port 8000
 Run any command with `--help` for full flag listings.
 
 ## Project docs
+
+📖 **Hosted site**: <https://hostlife22.github.io/yt_uniquifier/> — same content as the `docs/` directory below, rendered with search and dark/light theme via mkdocs-material. Use the hosted site for casual reading; use the in-repo links below when you want to read the version that matches your local checkout.
 
 **Getting started**
 
