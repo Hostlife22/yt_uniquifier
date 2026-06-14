@@ -12,6 +12,12 @@ from rich.table import Table
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.qa.corpus import Corpus
+from yt_uniquifier.core.qa.corpus_db import (
+    LEGACY_JSON_FILENAME,
+    SQLITE_FILENAME,
+    CorpusDB,
+    migrate_from_json,
+)
 
 corpus_app = typer.Typer(
     no_args_is_help=True,
@@ -98,3 +104,78 @@ def cmd_remove(
     else:
         console.print(f"[yellow]no such entry:[/yellow] {entry_id}")
         raise typer.Exit(code=1)
+
+
+@corpus_app.command("migrate")
+def cmd_migrate(
+    corpus_dir: Path | None = typer.Option(
+        None,
+        "--corpus-dir",
+        help="Corpus directory; defaults to the same path Corpus() uses.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would be migrated without writing the SQLite store.",
+    ),
+) -> None:
+    """Migrate a legacy ``index.json`` to the SQLite store (idempotent).
+
+    v0.8.0 R2 — opening any ``Corpus`` already auto-migrates if a legacy
+    ``index.json`` is present; this command exists for users who want
+    explicit, scriptable control (e.g. NAS deployments, CI corpus
+    snapshots). Safe to re-run: a no-op when SQLite is already populated
+    or when no legacy file exists.
+    """
+    from yt_uniquifier.core.qa.corpus import DEFAULT_CORPUS_DIR
+
+    root = corpus_dir or DEFAULT_CORPUS_DIR
+    json_path = root / LEGACY_JSON_FILENAME
+    sqlite_path = root / SQLITE_FILENAME
+
+    if not json_path.exists():
+        console.print(
+            f"[yellow]no legacy {LEGACY_JSON_FILENAME} at {root} — nothing to migrate"
+            f"[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    if dry_run:
+        try:
+            raw = json.loads(json_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            console.print(f"[red]error reading {json_path}:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        entries = raw.get("entries", []) if isinstance(raw, dict) else []
+        console.print(
+            f"[cyan]dry-run:[/cyan] would migrate {len(entries)} entries "
+            f"from {json_path} → {sqlite_path}"
+        )
+        return
+
+    db = CorpusDB(root)
+    try:
+        # The DB constructor already auto-migrated if SQLite was empty;
+        # detect that by checking the rename marker. If a backup exists
+        # we know the auto-migration ran.
+        already_migrated = any(
+            p.name.startswith(f"{LEGACY_JSON_FILENAME}.migrated.")
+            for p in root.iterdir()
+        )
+        if already_migrated and not json_path.exists():
+            console.print(
+                f"[green]migration already complete[/green] "
+                f"(SQLite has {len(db)} entries)"
+            )
+            return
+        # Edge case: user manually re-created index.json after a prior
+        # migration. Run an explicit pass to fold those in.
+        inserted = migrate_from_json(json_path, db)
+        console.print(
+            f"[green]migrated[/green] {inserted} entries → {sqlite_path}"
+        )
+    except YtUniquifierError as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        db.close()

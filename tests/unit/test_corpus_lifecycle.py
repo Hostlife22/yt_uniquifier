@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -55,21 +54,34 @@ def test_remove(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert c.remove(entry.id) is False  # idempotent
 
 
-def test_atomic_index_write(tmp_path: Path,
-                              monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlite_store_is_created_and_populated(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.8.0 R2 — storage moved from index.json to index.sqlite.
+
+    The lifecycle test no longer asserts on the JSON file layout; that
+    concern moved to ``test_corpus_sqlite_parity.py``. What we still
+    care about here: after add(), the persisted store exists, contains
+    the entry, and the connection released its WAL+SHM cleanly so a
+    second Corpus() open sees the same data.
+    """
     _patch_phash_and_audio(monkeypatch)
     src = tmp_path / "movie.mp4"
     src.touch()
-    c = Corpus(tmp_path / "corpus")
+    corpus_dir = tmp_path / "corpus"
+    c = Corpus(corpus_dir)
     c.add(src)
-    # No leftover tmp file.
-    assert not (tmp_path / "corpus" / "index.json.tmp").exists()
-    raw = json.loads((tmp_path / "corpus" / "index.json").read_text())
-    assert raw["schema_version"] == 1
-    assert len(raw["entries"]) == 1
+    assert (corpus_dir / "index.sqlite").exists()
+    # Re-opening from a different Corpus handle must see the row — proves
+    # the write was committed, not just kept in the connection's WAL.
+    assert len(Corpus(corpus_dir).list_all()) == 1
 
 
-def test_corrupt_index_returns_empty(tmp_path: Path) -> None:
+def test_corrupt_legacy_json_returns_empty(tmp_path: Path) -> None:
+    """A pre-v0.8 corpus with a corrupt index.json must not break open().
+
+    The new code attempts to auto-migrate; on parse failure it logs a
+    warning, leaves the JSON in place, and starts the SQLite store empty.
+    """
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()
     (corpus_dir / "index.json").write_text("{ broken")

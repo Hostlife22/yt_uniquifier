@@ -23,7 +23,9 @@ def _seed_entry(corpus: Corpus, path: Path, phashes: tuple[int, ...],
         duration_sec=10.0, phash_frames=phashes, audio_fingerprint=audio,
         sample_count=len(phashes),
     )
-    corpus._upsert(e)
+    # v0.8.0 R2 — _upsert is gone; storage lives in corpus._db now and
+    # add_entry is the public injection point for pre-built entries.
+    corpus._db.add_entry(e)
     return e
 
 

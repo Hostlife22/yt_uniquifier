@@ -1,52 +1,53 @@
-"""Local fingerprint corpus.
+"""Local fingerprint corpus — facade over :mod:`corpus_db`.
 
-A small JSON-backed index of files the user has already uploaded (or is
-about to upload), so they can be checked against new outputs before a fresh
-upload — answering "did I just produce something Content ID will match
-against my own previous variant?"
+A small index of files the user has already uploaded (or is about to),
+so they can be checked against new outputs before a fresh upload —
+answering "did I just produce something Content ID will match against my
+own previous variant?"
 
-Per entry we store:
-  - phash_frames: 64-bit perceptual hashes for N evenly-spaced frames
-  - audio_fingerprint: chromaprint subfingerprints (when fpcalc is available)
+Storage moved from a single ``index.json`` to a per-row SQLite table in
+v0.8.0 (see :mod:`corpus_db` for the rationale + schema). This module
+keeps the older method names (``add`` / ``list_all`` / ``remove`` /
+``search_match``) so every existing CLI / GUI / test callsite continues
+to work; new code should prefer ``corpus_db.CorpusDB`` directly.
 
-Both are JSON-serialisable ints; no numpy dependency.
-
-Storage layout:
-    ~/.cache/yt_uniquifier/corpus/
-        index.json                 — all entries inline (single atomic write)
+``CorpusEntry`` is re-exported from ``corpus_db`` so older imports like
+``from yt_uniquifier.core.qa.corpus import CorpusEntry`` still resolve.
 """
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-import json
-import os
-import threading
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import imagehash
 
 from yt_uniquifier.core.qa import audio_fp, phash
+from yt_uniquifier.core.qa.corpus_db import (
+    LEGACY_JSON_FILENAME,
+    SCHEMA_VERSION,
+    SQLITE_FILENAME,
+    CorpusDB,
+    CorpusEntry,
+    migrate_from_json,
+)
 from yt_uniquifier.core.qa.utils import _decode_chromaprint
 
 DEFAULT_CORPUS_DIR = Path.home() / ".cache" / "yt_uniquifier" / "corpus"
-SCHEMA_VERSION = 1
 
-
-@dataclass(frozen=True)
-class CorpusEntry:
-    id: str                          # first 16 hex of sha256(absolute path)
-    path: Path
-    added_at: float                  # unix timestamp
-    duration_sec: float
-    phash_frames: tuple[int, ...]    # 64-bit phashes
-    audio_fingerprint: tuple[int, ...]   # chromaprint subfingerprints (or empty)
-    sample_count: int                # len(phash_frames)
+__all__ = [
+    "DEFAULT_CORPUS_DIR",
+    "LEGACY_JSON_FILENAME",
+    "SCHEMA_VERSION",
+    "SQLITE_FILENAME",
+    "Corpus",
+    "CorpusDB",
+    "CorpusEntry",
+    "CorpusMatch",
+    "migrate_from_json",
+]
 
 
 @dataclass(frozen=True)
@@ -58,21 +59,11 @@ class CorpusMatch:
 
 
 class Corpus:
-    """JSON-backed fingerprint index for previously-known files."""
+    """Fingerprint index facade. Storage lives in ``corpus_db.CorpusDB``."""
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or DEFAULT_CORPUS_DIR
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.index_path = self.root / "index.json"
-        # In-process lock guarding the read-modify-write sequence in
-        # remove() / _upsert(). The GUI shares a single Corpus instance
-        # between the UI thread (CorpusScreen.remove()) and worker
-        # threads (CorpusWorker.add / CorpusListWorker.list_all). Without
-        # this lock the JSON index can be corrupted when a concurrent
-        # reader catches the file mid-write between the worker's load
-        # and save. The cross-process flock in _corpus_flock handles
-        # inter-process races; this lock handles intra-process ones.
-        self._mutex = threading.RLock()
+        self._db = CorpusDB(self.root)
 
     # ---- public API --------------------------------------------------------
 
@@ -107,21 +98,14 @@ class Corpus:
             audio_fingerprint=audio_ints,
             sample_count=len(phash_ints),
         )
-        self._upsert(entry)
+        self._db.add_entry(entry)
         return entry
 
     def remove(self, entry_id: str) -> bool:
-        with self._mutex, _corpus_flock(self.index_path):
-            entries = self._load_all()
-            new = [e for e in entries if e.id != entry_id]
-            if len(new) == len(entries):
-                return False
-            self._save_all(new)
-        return True
+        return self._db.purge(entry_id)
 
     def list_all(self) -> list[CorpusEntry]:
-        with self._mutex:
-            return self._load_all()
+        return list(self._db.iter_entries())
 
     def search_match(
         self,
@@ -141,7 +125,7 @@ class Corpus:
         once for this search). Each ffmpeg/fpcalc sample pass is
         seconds; saving a second pass is a useful win on every report.
         """
-        entries = self._load_all()
+        entries = self.list_all()
         if not entries:
             return []
 
@@ -180,74 +164,8 @@ class Corpus:
         matches.sort(key=lambda m: m.combined, reverse=True)
         return matches
 
-    # ---- storage -----------------------------------------------------------
-
-    def _load_all(self) -> list[CorpusEntry]:
-        if not self.index_path.exists():
-            return []
-        try:
-            raw = json.loads(self.index_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        entries_raw = raw.get("entries", []) if isinstance(raw, dict) else []
-        return [_entry_from_dict(d) for d in entries_raw]
-
-    def _save_all(self, entries: list[CorpusEntry]) -> None:
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "entries": [_entry_to_dict(e) for e in entries],
-        }
-        # pid-suffixed tmp prevents collisions between concurrent
-        # processes (the corpus index is a *global* cache, unlike the
-        # per-job state.json — same justification as encoder.py).
-        tmp = self.index_path.with_suffix(f".json.{os.getpid()}.tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, indent=2))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, self.index_path)
-
-    def _upsert(self, entry: CorpusEntry) -> None:
-        # Inter-process serialisation: load-mutate-save is not atomic
-        # across processes; two concurrent `yt-uniq batch` workers
-        # calling add() would each read the same snapshot, append, and
-        # one would silently overwrite the other. Hold an exclusive
-        # flock on a sibling lock file for the duration. The in-process
-        # mutex covers the GUI case where CorpusWorker and CorpusScreen
-        # share the same Corpus instance across threads.
-        with self._mutex, _corpus_flock(self.index_path):
-            entries = self._load_all()
-            new = [e for e in entries if e.id != entry.id]
-            new.append(entry)
-            self._save_all(new)
-
 
 # ---- helpers --------------------------------------------------------------
-
-@contextlib.contextmanager
-def _corpus_flock(index_path: Path) -> Iterator[None]:
-    """Inter-process exclusive lock on a sibling lock file.
-
-    POSIX-only (fcntl). On Windows the lock is a no-op — yt-uniq batch
-    workloads on Windows are not a documented use case and a real
-    Windows port would need msvcrt.locking instead.
-    """
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = index_path.with_suffix(".json.lock")
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - windows
-        yield
-        return
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
 
 
 def _hash_path(path: Path) -> str:
@@ -267,27 +185,3 @@ def _phash_similarity(a: tuple[int, ...] | list[int], b: list[int]) -> float:
 def _jaccard(s1: set[int], s2: set[int]) -> float:
     union = len(s1 | s2)
     return len(s1 & s2) / union if union else 0.0
-
-
-def _entry_to_dict(e: CorpusEntry) -> dict[str, Any]:
-    return {
-        "id": e.id,
-        "path": str(e.path),
-        "added_at": e.added_at,
-        "duration_sec": e.duration_sec,
-        "phash_frames": list(e.phash_frames),
-        "audio_fingerprint": list(e.audio_fingerprint),
-        "sample_count": e.sample_count,
-    }
-
-
-def _entry_from_dict(d: dict[str, Any]) -> CorpusEntry:
-    return CorpusEntry(
-        id=str(d["id"]),
-        path=Path(d["path"]),
-        added_at=float(d.get("added_at", 0.0)),
-        duration_sec=float(d.get("duration_sec", 0.0)),
-        phash_frames=tuple(int(x) for x in d.get("phash_frames", [])),
-        audio_fingerprint=tuple(int(x) for x in d.get("audio_fingerprint", [])),
-        sample_count=int(d.get("sample_count", 0)),
-    )
