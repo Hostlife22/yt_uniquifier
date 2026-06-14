@@ -5,6 +5,7 @@ from yt_uniquifier.cli.cmd_calibrate import calibrate_cmd
 from yt_uniquifier.cli.cmd_corpus import corpus_app
 from yt_uniquifier.cli.cmd_preflight import preflight_cmd
 from yt_uniquifier.cli.cmd_probe import probe_cmd
+from yt_uniquifier.cli.cmd_profile import profile_app
 from yt_uniquifier.cli.cmd_qa import qa_cmd
 from yt_uniquifier.cli.cmd_queue import queue_app
 from yt_uniquifier.cli.cmd_run import run_cmd
@@ -37,3 +38,4 @@ app.command("calibrate")(calibrate_cmd)
 app.command("worker")(worker_cmd)
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(queue_app, name="queue")
+app.add_typer(profile_app, name="profile")

@@ -87,12 +87,17 @@ packages = ["src/yt_uniquifier"]
 [tool.hatch.build.targets.wheel.shared-data]
 "src/yt_uniquifier/profiles" = "yt_uniquifier/profiles"
 "src/yt_uniquifier/core/qa/templates" = "yt_uniquifier/core/qa/templates"
+# v0.9.0 R1 / F9 — bootstrap marketplace catalog shipped in the wheel
+# so a fresh install can list community profiles offline. Network
+# fetch overrides this on first run; see core/profile_marketplace.py.
+"src/yt_uniquifier/marketplace" = "yt_uniquifier/marketplace"
 
 [tool.hatch.build]
 include = [
     "src/yt_uniquifier/**/*.py",
     "src/yt_uniquifier/profiles/*.yaml",
     "src/yt_uniquifier/core/qa/templates/*.j2",
+    "src/yt_uniquifier/marketplace/*.json",
 ]
 
 [tool.ruff]

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "cid_aware",
+      "name": "CID-aware (balanced)",
+      "description": "Conservative micro-transforms tuned to lower CID match confidence without visible quality loss. Recommended starting point for re-uploads of owned content.",
+      "url": "https://raw.githubusercontent.com/Hostlife22/yt_uniquifier/main/src/yt_uniquifier/profiles/cid_aware.yaml",
+      "sha256": "d4cdb9e4877387ec259524da6ef9806cf8f7c88b5e2268adef6637f7c3d472db",
+      "author": "yt-uniquifier core",
+      "tags": ["cid", "balanced", "starter"],
+      "version": "1.0.0",
+      "min_yt_uniquifier_version": "0.9.0"
+    },
+    {
+      "id": "cid_aggressive",
+      "name": "CID-aggressive (max divergence)",
+      "description": "Wider per-segment seed divergence and stronger color/loudnorm jitter. Use when the conservative profile still triggers matches; expect a small VMAF cost.",
+      "url": "https://raw.githubusercontent.com/Hostlife22/yt_uniquifier/main/src/yt_uniquifier/profiles/cid_aggressive.yaml",
+      "sha256": "d68b811452e42d20150889abefb0bcf1770b230e2ceeea3decaff728f962b9f2",
+      "author": "yt-uniquifier core",
+      "tags": ["cid", "aggressive"],
+      "version": "1.0.0",
+      "min_yt_uniquifier_version": "0.9.0"
+    },
+    {
+      "id": "tiktok_vertical",
+      "name": "TikTok (vertical 9:16)",
+      "description": "9:16 reframe via video.fit_aspect with LUFS target matching TikTok normalisation. Pairs with the auto-tune button in the Run screen.",
+      "url": "https://raw.githubusercontent.com/Hostlife22/yt_uniquifier/main/src/yt_uniquifier/profiles/tiktok_vertical.yaml",
+      "sha256": "062483d8e16a185e9f1066625c4b9965c921f8ea05a4438a617abdd762603015",
+      "author": "yt-uniquifier core",
+      "tags": ["platform", "tiktok", "vertical"],
+      "version": "1.0.0",
+      "min_yt_uniquifier_version": "0.9.0"
+    },
+    {
+      "id": "youtube_shorts",
+      "name": "YouTube Shorts (9:16 ≤ 60s)",
+      "description": "Shorts-friendly geometry and loudnorm target. Trim-warning surfaces in preflight when input exceeds 60 seconds.",
+      "url": "https://raw.githubusercontent.com/Hostlife22/yt_uniquifier/main/src/yt_uniquifier/profiles/youtube_shorts.yaml",
+      "sha256": "98104e8aee4ced7cae64bcebf3f154ca01874d75f2d561eb866b48db39ff77b1",
+      "author": "yt-uniquifier core",
+      "tags": ["platform", "youtube", "shorts", "vertical"],
+      "version": "1.0.0",
+      "min_yt_uniquifier_version": "0.9.0"
+    },
+    {
+      "id": "soft",
+      "name": "Soft (minimal transforms)",
+      "description": "Lowest-impact preset — useful as a baseline for A/B comparisons and for sources where any visible drift is unacceptable.",
+      "url": "https://raw.githubusercontent.com/Hostlife22/yt_uniquifier/main/src/yt_uniquifier/profiles/soft.yaml",
+      "sha256": "fb60caf3a8afd84d9afa5159eea26a6708a41fb4622d6c8296eec5f185d104dc",
+      "author": "yt-uniquifier core",
+      "tags": ["baseline", "soft"],
+      "version": "1.0.0",
+      "min_yt_uniquifier_version": "0.9.0"
+    }
+  ]
+}

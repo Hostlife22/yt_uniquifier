@@ -9,6 +9,8 @@ import yaml
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -20,16 +22,28 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from yt_uniquifier.core.errors import YtUniquifierError
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.profile_loader import dump_profile, load_profile
+from yt_uniquifier.core.profile_marketplace import (
+    Catalog,
+    CatalogEntry,
+    InstallResult,
+    default_install_dir,
+    list_entries,
+)
 from yt_uniquifier.core.transforms import all_ids
 from yt_uniquifier.gui.a11y import mark
 from yt_uniquifier.gui.paths import profiles_dir
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.state import AppState
+from yt_uniquifier.gui.workers.marketplace_worker import (
+    MarketplaceFetchWorker,
+    MarketplaceInstallWorker,
+)
 
 PROFILES_DIR = profiles_dir()
 
@@ -86,6 +100,14 @@ class ProfileEditorScreen(ScreenBase):
         mark(self.reload_btn, "Reload profile list",
              "Rescan the profiles directory and refresh the dropdown.")
         bar.addWidget(self.reload_btn)
+
+        # v0.9.0 R1 / F9 — community profile marketplace entry point.
+        self.browse_community_btn = QPushButton("&Browse community…")
+        self.browse_community_btn.clicked.connect(self._on_browse_community)
+        mark(self.browse_community_btn, "Browse community profiles",
+             "Fetch the community profile catalog and install one into "
+             "your per-user profiles directory.")
+        bar.addWidget(self.browse_community_btn)
         layout.addLayout(bar)
 
         # Split: transforms table | YAML preview
@@ -265,3 +287,206 @@ class ProfileEditorScreen(ScreenBase):
             return
         self.status_label.setText(f"saved: {path_str}")
         self._populate_profile_combo()
+
+    # ------------------------------------------------------------------
+    # v0.9.0 R1 / F9 — community marketplace
+    # ------------------------------------------------------------------
+
+    def _on_browse_community(self) -> None:
+        """Open the community profile dialog and refresh on install."""
+        dlg = CommunityProfilesDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.last_install is not None:
+            self.status_label.setText(
+                f"installed community profile: {dlg.last_install.path}",
+            )
+            self._populate_profile_combo()
+            # Select the newly-installed profile if it appeared.
+            idx = self.profile_combo.findData(str(dlg.last_install.path))
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+
+
+class CommunityProfilesDialog(QDialog):
+    """Modal that lists catalog entries and installs the selected one.
+
+    The dialog owns two short-lived workers: one to fetch the catalog
+    (re-runnable via the Refresh button) and one to install a chosen
+    entry. Workers are parented to the dialog so closing it
+    auto-cancels in-flight ops via ``WorkerBase.request_cancel``.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Community profiles")
+        self.resize(720, 420)
+        self.last_install: InstallResult | None = None
+        self._fetch_worker: MarketplaceFetchWorker | None = None
+        self._install_worker: MarketplaceInstallWorker | None = None
+        self._entries: list[CatalogEntry] = []
+        self._build_ui()
+        self._start_fetch(refresh=False)
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel(
+            "Verified by SHA-256. Source: yt-uniquifier-profiles community catalog.",
+        ))
+        header.addStretch(1)
+        self.refresh_btn = QPushButton("&Refresh")
+        self.refresh_btn.clicked.connect(lambda: self._start_fetch(refresh=True))
+        mark(self.refresh_btn, "Refresh catalog",
+             "Re-fetch the marketplace catalog from the network.")
+        header.addWidget(self.refresh_btn)
+        layout.addLayout(header)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["id", "name", "tags", "version"])
+        self.table.setSelectionBehavior(self.table.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(self.table.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
+        h = self.table.horizontalHeader()
+        if h is not None:
+            h.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            h.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            h.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        mark(self.table, "Community profile catalog",
+             "Select a row and click Install to download the profile "
+             "into your per-user profiles directory.")
+        layout.addWidget(self.table, stretch=1)
+
+        self.detail_label = QLabel("")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setObjectName("detail")
+        layout.addWidget(self.detail_label)
+
+        self.status_label = QLabel("Loading catalog…")
+        layout.addWidget(self.status_label)
+
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel,
+        )
+        self.install_btn = QPushButton("&Install")
+        self.install_btn.setEnabled(False)
+        self.install_btn.clicked.connect(self._on_install)
+        mark(self.install_btn, "Install selected profile",
+             "Download, verify SHA-256, and write the YAML into the "
+             "per-user profiles directory.")
+        buttons.addButton(
+            self.install_btn,
+            QDialogButtonBox.ButtonRole.AcceptRole,
+        )
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _start_fetch(self, *, refresh: bool) -> None:
+        self._cancel_workers()
+        self.refresh_btn.setEnabled(False)
+        self.install_btn.setEnabled(False)
+        self.status_label.setText(
+            "Refreshing catalog…" if refresh else "Loading catalog…",
+        )
+        worker = MarketplaceFetchWorker(refresh=refresh)
+        worker.setParent(self)
+        worker.catalog_ready.connect(self._on_catalog_ready)
+        worker.failed.connect(self._on_fetch_failed)
+        worker.finished.connect(lambda: self.refresh_btn.setEnabled(True))
+        self._fetch_worker = worker
+        worker.start()
+
+    def _on_catalog_ready(self, catalog: Catalog) -> None:
+        self._entries = list_entries(catalog)
+        self.table.setRowCount(0)
+        for entry in self._entries:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self.table.setItem(r, 0, QTableWidgetItem(entry.id))
+            self.table.setItem(r, 1, QTableWidgetItem(entry.name))
+            self.table.setItem(r, 2, QTableWidgetItem(", ".join(entry.tags)))
+            self.table.setItem(r, 3, QTableWidgetItem(entry.version))
+        self.status_label.setText(f"{len(self._entries)} entries.")
+        if self._entries:
+            self.table.selectRow(0)
+
+    def _on_fetch_failed(self, msg: str) -> None:
+        self.status_label.setText(f"fetch failed: {msg}")
+        QMessageBox.warning(self, "Catalog fetch failed", msg)
+
+    def _on_selection_changed(self) -> None:
+        entry = self._selected_entry()
+        if entry is None:
+            self.install_btn.setEnabled(False)
+            self.detail_label.setText("")
+            return
+        self.install_btn.setEnabled(True)
+        self.detail_label.setText(
+            f"<b>{entry.name}</b> by {entry.author}<br>"
+            f"{entry.description}<br>"
+            f"<code>{entry.url}</code>",
+        )
+
+    def _selected_entry(self) -> CatalogEntry | None:
+        rows = self.table.selectionModel()
+        if rows is None:
+            return None
+        indices = rows.selectedRows()
+        if not indices:
+            return None
+        idx = indices[0].row()
+        if 0 <= idx < len(self._entries):
+            return self._entries[idx]
+        return None
+
+    def _on_install(self) -> None:
+        entry = self._selected_entry()
+        if entry is None:
+            return
+        target_path = default_install_dir() / f"{entry.id}.yaml"
+        overwrite = False
+        if target_path.exists():
+            answer = QMessageBox.question(
+                self,
+                "Overwrite existing profile?",
+                f"{target_path} already exists. Replace it?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            overwrite = True
+
+        self.install_btn.setEnabled(False)
+        self.status_label.setText(f"installing {entry.id}…")
+        worker = MarketplaceInstallWorker(entry, overwrite=overwrite)
+        worker.setParent(self)
+        worker.installed.connect(self._on_installed)
+        worker.failed.connect(self._on_install_failed)
+        worker.finished.connect(lambda: self.install_btn.setEnabled(True))
+        self._install_worker = worker
+        worker.start()
+
+    def _on_installed(self, result: InstallResult) -> None:
+        self.last_install = result
+        self.status_label.setText(
+            f"installed {result.entry_id} → {result.path}",
+        )
+        self.accept()
+
+    def _on_install_failed(self, msg: str) -> None:
+        self.status_label.setText(f"install failed: {msg}")
+        QMessageBox.critical(self, "Install failed", msg)
+
+    def _cancel_workers(self) -> None:
+        for worker in (self._fetch_worker, self._install_worker):
+            if worker is not None and worker.isRunning():
+                worker.request_cancel()
+                worker.quit()
+                worker.wait(2000)
+
+    def closeEvent(self, event: object) -> None:
+        self._cancel_workers()
+        super().closeEvent(event)  # type: ignore[arg-type]
