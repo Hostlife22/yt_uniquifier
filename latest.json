@@ -5,16 +5,16 @@
   "input": ".perf/fixture_720p.mp4",
   "out": ".perf/out.mp4",
   "per_phase_sec": {
-    "main_audio": 0.81,
-    "segment": 299.82
+    "main_audio": 1.02,
+    "segment": 443.72
   },
   "platform": "Linux-x86_64",
   "py_version": "3.12.13",
-  "rss_peak_kb": 38520,
+  "rss_peak_kb": 38324,
   "schema_version": 1,
   "segments_seen": 1,
   "size_bytes": 9455486,
-  "wall_sec": 302.11,
+  "wall_sec": 446.94,
   "workers": 2,
   "yt_uniquifier_version": "1.0.0"
 }
