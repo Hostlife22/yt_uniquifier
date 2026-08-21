@@ -6,15 +6,15 @@
   "out": ".perf/out.mp4",
   "per_phase_sec": {
     "main_audio": 0.98,
-    "segment": 420.18
+    "segment": 422.43
   },
   "platform": "Linux-x86_64",
   "py_version": "3.12.14",
-  "rss_peak_kb": 38420,
+  "rss_peak_kb": 38356,
   "schema_version": 1,
   "segments_seen": 1,
   "size_bytes": 9455486,
-  "wall_sec": 423.24,
+  "wall_sec": 425.55,
   "workers": 2,
   "yt_uniquifier_version": "1.0.0"
 }
