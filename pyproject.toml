@@ -84,7 +84,7 @@ web = [
 # .github/workflows/docs.yml pipeline on tag push.
 docs = [
     "mkdocs-material~=9.5",
-    "pymdown-extensions~=10.9",
+    "pymdown-extensions>=10.9,<12.0",
 ]
 dev = [
     "pytest~=8.2",
