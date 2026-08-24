@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from yt_uniquifier.gui.a11y import INTERACTIVE_WIDGET_CLASSES
 from yt_uniquifier.gui.app_pyqt import SIDEBAR_ITEMS, _build_screen
 from yt_uniquifier.gui.state import AppState
+from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 
 
 def _stop_background_workers(screen: QWidget) -> None:
@@ -31,6 +32,8 @@ def _stop_background_workers(screen: QWidget) -> None:
     is still running". Mirror MainWindow.closeEvent's walker so the
     accessibility test never leaks a thread between parametrized cases.
     """
+    for selector in screen.findChildren(EncoderSelector):
+        assert selector.shutdown_detection(), "encoder detection did not stop"
     for attr_name in dir(screen):
         if attr_name.startswith("__"):
             continue

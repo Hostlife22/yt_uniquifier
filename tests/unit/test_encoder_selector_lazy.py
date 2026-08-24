@@ -91,3 +91,28 @@ def test_encoder_selector_appends_detected_items(
     assert "h264_nvenc" in sel.itemText(2)
     assert "unavailable" in sel.itemText(2)
     assert sel._detect_worker is None
+
+
+def test_shutdown_preserves_reference_when_worker_is_still_running(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BusyWorker:
+        def __init__(self) -> None:
+            self.detected = MagicMock()
+            self.failed = MagicMock()
+            self.request_cancel = MagicMock()
+            self.quit = MagicMock()
+            self.wait = MagicMock(return_value=False)
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(encoder_selector_mod, "EncoderDetectWorker", _BusyWorker)
+    sel = EncoderSelector()
+    worker = sel._detect_worker
+
+    assert not sel.shutdown_detection(wait_ms=1)
+    assert sel._detect_worker is worker
+    assert worker is not None
+    worker.request_cancel.assert_called_once_with()
+    worker.quit.assert_called_once_with()

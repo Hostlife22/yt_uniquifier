@@ -248,6 +248,11 @@ class MainWindow(QMainWindow):
             screen = self.stack.widget(i)
             if screen is None:
                 continue
+            # EncoderSelector owns its QThread as a nested widget attribute,
+            # so the direct screen-attribute walker below cannot see it.
+            from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
+            for selector in screen.findChildren(EncoderSelector):
+                selector.shutdown_detection()
             for attr_name in dir(screen):
                 if attr_name.startswith("__"):
                     continue

@@ -91,7 +91,9 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 - **Cross-platform CI and container build** — regenerated the hashed dev lock
   as a universal resolution (including Hypothesis, Ed25519 test support, and
   Windows colorama), and rebuilt the Docker path around a native multi-arch
-  Debian FFmpeg plus a complete offline web wheelhouse.
+  Debian FFmpeg plus a complete offline web wheelhouse. Encoder-selector
+  detection threads are now cancelled and joined before nested GUI widgets
+  are destroyed, preventing intermittent Windows Qt process aborts.
 
 ### CI
 
