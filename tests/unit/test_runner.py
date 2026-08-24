@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -182,25 +183,39 @@ def test_subprocess_compatibility() -> None:
     assert hasattr(subprocess, "Popen")
 
 
-def test_non_cancel_path_drains_stderr_via_communicate(
+def test_non_cancel_path_requests_merged_stderr(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression: on the non-cancel path the runner must drain stderr
-    via communicate() rather than an unbounded proc.stderr.read().
+    """ffmpeg logs and progress must share one pipe to prevent deadlock."""
+    fake = _FakePopen(["progress=end\n"], rc=0)
+    captured: dict[str, object] = {}
 
-    A raw stderr.read() blocks until the child closes stderr; if ffmpeg
-    already filled the OS pipe buffer (~64 KB) before stdout EOF, the
-    child is blocked on its own write to stderr and never closes it →
-    the parent hangs forever. communicate() drains both pipes
-    concurrently and respects a timeout.
-    """
-    huge_stderr = "x" * 100_000  # > typical 64 KB pipe buffer
-    fake = _FakePopen(["progress=end\n"], rc=0, stderr_text=huge_stderr)
-    _patch_popen(monkeypatch, fake)
+    def fake_popen(*_args: object, **kwargs: object) -> _FakePopen:
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(runner_mod.subprocess, "Popen", fake_popen)
 
     run(_cmd(tmp_path), output=tmp_path / "out.mp4")
 
-    assert fake.communicate_calls >= 1, (
-        "non-cancel path must drain stderr via communicate(), "
-        "not via proc.stderr.read()"
+    assert captured["stderr"] is subprocess.STDOUT
+
+
+def test_large_stderr_cannot_block_progress_pipe() -> None:
+    """Regression: output larger than a Windows pipe must be drained live."""
+    script = (
+        "import sys; "
+        "sys.stderr.write('x' * 200_000 + '\\n'); "
+        "sys.stderr.flush(); "
+        "sys.stdout.write('progress=end\\n'); "
+        "sys.stdout.flush()"
     )
+
+    rc, lines = runner_mod._run_once(
+        [sys.executable, "-c", script],
+        on_event=lambda _event: None,
+        cancel_token=None,
+    )
+
+    assert rc == 0
+    assert any(len(line) >= 200_000 for line in lines)

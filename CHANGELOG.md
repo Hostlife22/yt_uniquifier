@@ -70,6 +70,9 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 
 ### Fixed
 
+- **Windows ffmpeg pipe deadlock** — runner logs and machine-readable progress
+  are now drained through one pipe, preventing verbose ffmpeg/filter output
+  from filling stderr and freezing segment encoding indefinitely.
 - **Windows keyframe cache races** — atomic cache replacement now retries
   short-lived destination locks from concurrent writers or antivirus scanners,
   while retaining the whole-file/no-torn-write guarantee and cleaning up temp

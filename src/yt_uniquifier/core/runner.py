@@ -173,7 +173,7 @@ _NVENC_OOM_PATTERNS = (
 def _is_nvenc_oom(log_lines: list[str]) -> bool:
     """Heuristic: NVENC session-exhaustion vs other ffmpeg failures.
 
-    Matches against the last 50 lines of stderr (case-insensitive).
+    Matches against the last 50 merged ffmpeg log lines (case-insensitive).
     """
     tail = "\n".join(log_lines[-50:]).lower()
     return any(p in tail for p in _NVENC_OOM_PATTERNS)
@@ -197,8 +197,8 @@ def run(
     """Execute the BuiltCommand and stream progress events.
 
     The command is expected to be a complete ffmpeg invocation including the
-    output path. We append `-progress pipe:1 -nostats` so progress lines arrive
-    on stdout while stderr carries human logs.
+    output path. We append `-progress pipe:1 -nostats`; stdout and the human
+    stderr log are merged and drained together to avoid pipe-buffer deadlocks.
 
     Retries up to ``_NVENC_OOM_MAX_RETRIES`` times on NVENC GPU session
     exhaustion via an iterative loop. The previous recursive
@@ -295,7 +295,11 @@ def _run_once(
     proc = subprocess.Popen(
         full_cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Drain ffmpeg's human log and ``-progress pipe:1`` through one
+        # stream.  Reading stdout to EOF before draining a separate stderr
+        # pipe deadlocks as soon as verbose filter output fills the stderr
+        # buffer (particularly easy on Windows, whose pipe is small).
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
         env=proc_env,
@@ -404,6 +408,9 @@ def _run_once(
             line = line.strip()
             if not line:
                 continue
+            # stderr is merged into stdout so it is drained concurrently with
+            # progress and retained for the full log / error diagnosis.
+            log_lines.append(line)
             if "=" not in line:
                 continue
             key, _, value = line.partition("=")
@@ -412,13 +419,10 @@ def _run_once(
                 on_event(RunEvent(kind="progress", payload=dict(block)))
                 block.clear()
     finally:
-        # Drain stderr without blocking forever. After the stdout loop exits
-        # ffmpeg may still be flushing its stderr summary; a raw
-        # `proc.stderr.read()` is unbounded and hangs if ffmpeg exceeded the
-        # OS pipe buffer (~64 KB on Linux) before stdout EOF. Use
-        # `communicate(timeout=…)` on both branches — it drains both pipes
-        # concurrently and waits for the child to exit. The outer
-        # TimeoutExpired handler kills the process if it overstays.
+        # Real subprocesses have stderr=None because it is merged into stdout
+        # above, eliminating the two-pipe deadlock.  The conditional drain is
+        # retained for lightweight Popen fakes and custom wrappers that expose
+        # a separate stderr stream despite the requested redirection.
         stderr_data = ""
         try:
             if cancelled_mid_loop:
