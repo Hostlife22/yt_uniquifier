@@ -79,6 +79,29 @@ def short_av1_clip(tmp_path: Path) -> Path:
     return out
 
 
+@pytest.fixture
+def single_frame_av1_clip(tmp_path: Path) -> Path:
+    """One-frame source for the 4K profile wiring smoke.
+
+    It still exercises the real 3840x2160 filter/encoder path without
+    making every integration matrix encode five seconds of 4K AV1.
+    """
+    out = tmp_path / "single_frame.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=4:duration=0.25",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=0.25",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-shortest", str(out),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    return out
+
+
 @needs_ffmpeg
 @needs_av1
 @pytest.mark.integration
@@ -136,3 +159,29 @@ def test_youtube_av1_profile_end_to_end(
         f"output duration {out_meta.duration_sec:.3f} drifted by "
         f"{duration_delta:.3f} s from source {src_meta.duration_sec:.3f}"
     )
+
+
+@needs_ffmpeg
+@needs_av1
+@pytest.mark.integration
+def test_youtube_4k_av1_profile_end_to_end(
+    single_frame_av1_clip: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+) -> None:
+    """The shipped 4K AV1 profile must produce its promised stream shape."""
+    out = tmp_path / "out_4k_av1.mp4"
+    profile = load_profile(PROFILES_DIR / "youtube_4k_av1.yaml")
+    plan = build_plan(single_frame_av1_clip, profile, encoder_override="libsvtav1")
+    run_full(
+        plan,
+        RunOptions(
+            work_dir=tmp_path / "work" / plan.plan_hash,
+            output=out,
+            keep_segments=False,
+        ),
+    )
+
+    output_meta = probe(out)
+    assert output_meta.video[0].codec == "av1"
+    assert (output_meta.video[0].width, output_meta.video[0].height) == (3840, 2160)

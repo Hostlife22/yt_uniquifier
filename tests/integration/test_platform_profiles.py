@@ -39,6 +39,10 @@ _PLATFORM_PROFILES: list[tuple[str, tuple[int, int]]] = [
     ("linkedin_square",  (1080, 1080)),
 ]
 
+# AV1 profiles require an AV1-capable ffmpeg and are exercised in
+# test_av1_encoding.py rather than forced through this libx264 matrix.
+_AV1_PROFILES = {"youtube_av1", "youtube_4k_av1"}
+
 
 def _probe_resolution(path: Path) -> tuple[int, int]:
     """Return (width, height) of the first video stream via ffprobe."""
@@ -99,7 +103,7 @@ def test_every_shipped_profile_has_integration_coverage() -> None:
         p.stem for p in profiles_dir().glob("*.yaml")
         if p.stem.startswith(("youtube_", "tiktok_", "instagram_", "linkedin_"))
     }
-    missing = shipped - covered
+    missing = shipped - covered - _AV1_PROFILES
     assert not missing, (
         "shipped platform profile(s) missing from _PLATFORM_PROFILES: "
         f"{sorted(missing)}"

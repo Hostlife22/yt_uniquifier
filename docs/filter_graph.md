@@ -46,7 +46,7 @@ argument seeded from `Plan.run_seed`. Same seed → identical filter graph.
 ```
 [0:v:0]
    crop=iw*0.96:ih*0.96:iw*0.02:ih*0.02,
-   scale=iw/0.96:ih/0.96:flags=lanczos                                  [v1]
+   scale=round(iw/0.96/2)*2:round(ih/0.96/2)*2:flags=lanczos            [v1]
 [v1]
    eq=brightness=0.015:contrast=1.022:gamma=0.99:saturation=1.04        [v2]
 [v2]

@@ -24,7 +24,7 @@ def test_crop_resize_is_deterministic_with_seed() -> None:
     c2 = spec.build(p, LabelAllocator(), "0:v:0")
     assert c1.filter_str == c2.filter_str
     assert "crop=iw*" in c1.filter_str
-    assert "scale=iw/" in c1.filter_str
+    assert "scale=round(iw/" in c1.filter_str
     assert "flags=lanczos" in c1.filter_str
 
 

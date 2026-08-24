@@ -41,7 +41,9 @@
         "videotoolbox",
         "vulkan",
         "x264",
-        "x265"
+        "x265",
+        "libaom",
+        "svtav1"
       ],
       "title": "Vendor",
       "type": "string"

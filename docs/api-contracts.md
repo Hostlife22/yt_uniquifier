@@ -11,7 +11,7 @@ with a pointer to `tools/regen_contract_goldens.py`.
 - **`stable`** — covered by the SemVer commitment. MAJOR bump
   required to remove or break; MINOR may add fields.
 - **`experimental`** — covered, but MAY be removed in a MINOR with
-  a `DeprecationWarning`. Pin `==1.0.*` if you depend on it.
+  a `DeprecationWarning`. Pin `==1.3.*` if you depend on it.
 - **`internal`** — not covered. Default for anything not listed.
 
 ## How to import
@@ -45,10 +45,10 @@ Every model below has its full JSON schema locked by
 | `SubtitleStream` | `core/models.py` | `frozen=True`. |
 | `Chapter` | `core/models.py` | `frozen=True`. |
 | `SourceMeta` | `core/models.py` | `frozen=True`. The full probe result. |
-| `EncoderCandidate` | `core/models.py` | `frozen=True`. `max_parallel ∈ [1, 64]`. |
+| `EncoderCandidate` | `core/models.py` | `frozen=True`. `max_parallel ∈ [1, 64]`; includes AV1 software vendors `svtav1` and `libaom`. |
 | `TransformConfig` | `core/models.py` | `extra="forbid"`. `params: dict[str, object]` — the parameter dict is shape-checked at the transform's own `*Params` model, not here. |
 | `SegmentationConfig` | `core/models.py` | `extra="forbid"`. v0.8.0 added `mode="scene"` opt-in. |
-| `Profile` | `core/models.py` | `extra="forbid"`. The user-facing YAML schema. |
+| `Profile` | `core/models.py` | `extra="forbid"`. The user-facing YAML schema; v1.3 adds `skip_watermark_check`. |
 | `Plan` | `core/models.py` | `frozen=True`. Carries `plan_hash` (resume key) + `run_seed` (NOT part of the hash). |
 | `QAReport` | `core/models.py` | `frozen=True`. All ML/fingerprint metrics are `Optional` so omitting an extra leaves the report shape unchanged. |
 
@@ -64,7 +64,7 @@ are explicitly NOT locked — a behaviour-only default tweak
 |---|---|---|
 | `RunEvent` | `core/runner.py` | `kind`, `payload` |
 | `RunResult` | `core/runner.py` | `returncode`, `duration_sec`, `output_path` |
-| `RunOptions` | `core/orchestrator.py` | `work_dir`, `output`, `encoder_override`, `title_template`, `target_segment_sec`, `keep_segments`, `enforce_preflight`, `force_new_variant`, `workers`, `sanitize_bitstream`, `sample_phash`, `notifications`, `telemetry` |
+| `RunOptions` | `core/orchestrator.py` | `work_dir`, `output`, `encoder_override`, `title_template`, `target_segment_sec`, `keep_segments`, `enforce_preflight`, `force_new_variant`, `workers`, `sanitize_bitstream`, `sample_phash`, `notifications`, `telemetry`, `run_id`, `accept_watermark_risk`, `audit_log_path`, `audit_principal` |
 | `RunSummary` | `core/orchestrator.py` | `output`, `plan`, `segments_done`, `preflight_findings` |
 
 ### RunEvent kinds (`stable`)
@@ -92,7 +92,7 @@ RFC.
 Every shipped profile's loaded form is locked by
 `tests/contracts/test_shipped_profiles_stable.py` (goldens under
 `tests/fixtures/contracts/profiles/`). The set itself is locked by
-`shipped_profiles.json`. As of v1.0.0:
+`shipped_profiles.json`. As of v1.3.0:
 
 | Profile | Container | Codec | LUFS | Notes |
 |---|---|---|---|---|
@@ -105,6 +105,8 @@ Every shipped profile's loaded form is locked by
 | `cid_aggressive` | mp4 | h264 | -14 | Maximal divergence at QA cost. |
 | `youtube_4k` | mp4 | h264 | -14 | YouTube 4K target geometry + bitrate. |
 | `youtube_1080p` | mp4 | h264 | -14 | YouTube 1080p target. |
+| `youtube_av1` | mp4 | av1 | -14 | YouTube 1080p AV1 target. |
+| `youtube_4k_av1` | mp4 | av1 | -14 | YouTube 4K AV1 target. |
 | `youtube_shorts` | mp4 | h264 | -14 | 9:16 vertical, ≤60 s expected. |
 | `tiktok_vertical` | mp4 | h264 | -14 | 9:16 vertical, TikTok loudness. |
 | `instagram_reels` | mp4 | h264 | -14 | 9:16 vertical. |
@@ -139,6 +141,7 @@ subcommand or flag is MINOR; removing or renaming is MAJOR.
 | `profile` | `cli/cmd_profile.py` (v0.9 R1) |
 | `subtitles` | `cli/cmd_subtitles.py` (v0.9 R2) |
 | `telemetry` | `cli/cmd_telemetry.py` (v0.9 R3) |
+| `update` | `cli/cmd_update.py` (v1.3 Task 33) |
 
 ### Plugin entry-point group (`stable`)
 
@@ -149,7 +152,7 @@ the pydantic schema test above.
 
 ## Surfaces marked `experimental`
 
-Pin `yt-uniquifier==1.0.*` if you depend on any of these.
+Pin `yt-uniquifier==1.3.*` if you depend on any of these.
 
 | Surface | Reason |
 |---|---|

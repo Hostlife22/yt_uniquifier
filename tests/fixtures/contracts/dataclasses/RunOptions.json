@@ -63,5 +63,25 @@
     "has_default": true,
     "name": "telemetry",
     "type": "TelemetryConfig | None"
+  },
+  {
+    "has_default": true,
+    "name": "run_id",
+    "type": "str | None"
+  },
+  {
+    "has_default": true,
+    "name": "accept_watermark_risk",
+    "type": "bool"
+  },
+  {
+    "has_default": true,
+    "name": "audit_log_path",
+    "type": "Path | None"
+  },
+  {
+    "has_default": true,
+    "name": "audit_principal",
+    "type": "str | None"
   }
 ]

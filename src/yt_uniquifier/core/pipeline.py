@@ -54,10 +54,29 @@ from yt_uniquifier.core.transforms.video_blend import (
     B_INPUT_PLACEHOLDER,
     IN_PLACEHOLDER,
 )
+from yt_uniquifier.core.transforms.video_fit_aspect import FitAspectParams, _resolve_dims
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 LOUDNORM_ID = "audio.loudnorm"
 BLEND_B_ID = "video.blend_b"
+
+
+def _video_tail_scale(plan: Plan) -> str:
+    """Return the final canvas guard for the plan.
+
+    Platform profiles promise exact pixel dimensions. Later micro-crops
+    rescale approximately because FFmpeg rounds crop coordinates to pixel
+    boundaries, so the generic even-dimension tail can otherwise leave a
+    1920x1078 or 3838x2160 result. Re-assert the configured fit-aspect
+    canvas at the tail; non-platform profiles keep the legacy even guard.
+    """
+    for transform in reversed(plan.profile.transforms):
+        if transform.enabled and transform.id == "video.fit_aspect":
+            spec = get(transform.id)
+            params = FitAspectParams.model_validate({**spec.defaults, **transform.params})
+            width, height = _resolve_dims(params)
+            return f"scale={width}:{height}"
+    return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
 
 def _wrap_chain_str(in_label: str, filter_str: str, out_label: str) -> str:
@@ -250,9 +269,7 @@ class FilterGraph:
         # Tail: round dims to even (required by libx264/H.264 profiles) and set pix_fmt.
         pix_fmt = self._target_pix_fmt()
         v_out = self.alloc.next("v")
-        v_chains.append(
-            f"[{v_label}]scale=trunc(iw/2)*2:trunc(ih/2)*2,format={pix_fmt}[{v_out}]"
-        )
+        v_chains.append(f"[{v_label}]{_video_tail_scale(self.plan)},format={pix_fmt}[{v_out}]")
 
         # ---- audio chain (main track only) ----
         loudnorm_used = any(tc.id == LOUDNORM_ID for tc in audio_transforms)
@@ -520,9 +537,7 @@ def build_video_segment_command(
 
     pix_fmt = _segment_pix_fmt(plan)
     v_out = alloc.next("v")
-    v_chains.append(
-        f"[{v_label}]scale=trunc(iw/2)*2:trunc(ih/2)*2,format={pix_fmt}[{v_out}]"
-    )
+    v_chains.append(f"[{v_label}]{_video_tail_scale(plan)},format={pix_fmt}[{v_out}]")
 
     filter_complex = ";".join(v_chains)
     for idx, _ in enumerate(extra_inputs, start=1):
@@ -609,9 +624,7 @@ def build_video_segment_command_fused(
 
     pix_fmt = _segment_pix_fmt(plan)
     v_out = alloc.next("v")
-    v_chains.append(
-        f"[{v_label}]scale=trunc(iw/2)*2:trunc(ih/2)*2,format={pix_fmt}[{v_out}]"
-    )
+    v_chains.append(f"[{v_label}]{_video_tail_scale(plan)},format={pix_fmt}[{v_out}]")
 
     filter_complex = ";".join(v_chains)
     for idx, _ in enumerate(extra_inputs, start=1):

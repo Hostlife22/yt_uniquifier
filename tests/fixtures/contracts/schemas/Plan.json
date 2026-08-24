@@ -142,7 +142,9 @@
             "videotoolbox",
             "vulkan",
             "x264",
-            "x265"
+            "x265",
+            "libaom",
+            "svtav1"
           ],
           "title": "Vendor",
           "type": "string"
@@ -309,6 +311,11 @@
         },
         "segmentation": {
           "$ref": "#/$defs/SegmentationConfig"
+        },
+        "skip_watermark_check": {
+          "default": false,
+          "title": "Skip Watermark Check",
+          "type": "boolean"
         },
         "target_codec": {
           "default": "h264",

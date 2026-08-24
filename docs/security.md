@@ -32,8 +32,8 @@ Security fixes land on the most recent MAJOR.MINOR line.
 
 | Version | Security fixes |
 |---|---|
-| **1.0.x** | ✅ active |
-| 0.9.x and earlier | ❌ end-of-life |
+| **1.3.x** | ✅ active |
+| 1.2.x and earlier | ❌ end-of-life |
 
 See the full policy — scope, disclosure timeline, hall of fame —
 in [`SECURITY.md`](https://github.com/hostlife22/Video-Deduplicator/blob/main/SECURITY.md).

@@ -115,6 +115,21 @@ def test_video_only_chain(tmp_path: Path) -> None:
     assert "format=yuv420p" in fc
 
 
+def test_fit_aspect_reasserts_exact_canvas_at_tail(tmp_path: Path) -> None:
+    src = _src(tmp_path)
+    plan = _plan(src, [
+        TransformConfig(
+            id="video.fit_aspect",
+            params={"target_aspect": "16:9", "target_width": 3840, "target_height": 2160},
+        ),
+        TransformConfig(id="video.crop_resize", params={"max_strength": 0.02}),
+    ])
+
+    built = FilterGraph(plan, tmp_path / "out.mp4").build()
+
+    assert "scale=3840:2160,format=yuv420p" in built.filter_complex
+
+
 def test_hdr_source_uses_10bit_when_keep_hdr(tmp_path: Path) -> None:
     src = _src(tmp_path, hdr=True)
     plan = _plan(src, [

@@ -11,6 +11,7 @@
     "scene_min_length_sec": 2.0,
     "scene_threshold": 27.0
   },
+  "skip_watermark_check": false,
   "target_codec": "h264",
   "target_loudness_lufs": -14.0,
   "target_vmaf": null,

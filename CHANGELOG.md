@@ -10,7 +10,7 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
-## [Unreleased] — v1.2.0 (in progress)
+## [Unreleased] — v1.3.0
 
 AV1 + plugin sandbox + cross-OS quality. Backwards-compatible. MINOR.
 See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
@@ -63,6 +63,31 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
   calibrated prediction when available; cache miss falls back to
   the v1.1.0 heuristic. Writers use `BEGIN IMMEDIATE` so concurrent
   `yt-uniq batch` workers serialise cleanly.
+- **Tasks 30–35: production guardrails and operations** — persistent-corner
+  watermark detection with explicit ownership attestation, DRM preflight,
+  per-run JSONL audit records, cosign-verified updater, opt-in OpenTelemetry,
+  and Chinese/Spanish/Brazilian-Portuguese GUI locales.
+
+### Fixed
+
+- **Watermark false positives** — detection now requires a strong match for
+  the same synthetic template/corner across at least 60% of uniformly spaced
+  samples. A single ordinary rectangle can no longer block every encode.
+- **SSCD production path** — replaced placeholder model hashes with the
+  verified official TorchScript SHA-256, removed the advertised but
+  unpublished ONNX artifact, verifies cached weights on every load, applies
+  upstream ImageNet normalization, and samples the complete timeline.
+- **Atomic final mux** — concat writes to a per-run temporary file and uses
+  atomic replacement only after a non-empty success, preserving an existing
+  good output when ffmpeg fails. Sources with more than three audio tracks no
+  longer lose tracks at concat.
+- **Short/silent audio and target dimensions** — non-finite EBU R128 pass-1
+  measurements now fall back to dynamic loudnorm instead of crashing FFmpeg;
+  crop-resize rounds back to the nearest even source canvas so platform
+  profiles retain their promised 1080p/4K dimensions.
+- **Release gates and contracts** — synchronized additive v1.1–v1.3 model,
+  `RunOptions`, encoder-vendor, and AV1-profile snapshots; restored clean Ruff
+  and strict-mypy runs; added real 4K AV1 profile coverage.
 
 ### CI
 

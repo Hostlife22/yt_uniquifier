@@ -109,7 +109,7 @@ def test_preflight_emits_unavailable_when_detector_skipped(
     # graceful-skip path fired.
     monkeypatch.setattr(
         "yt_uniquifier.core.guardrails.watermark.detect_watermark",
-        lambda _src: None,
+        lambda _src, **_kwargs: None,
     )
     findings = pf._check_input_watermark(src, plan)
     assert [f.code for f in findings] == ["watermark.unavailable"]
@@ -123,7 +123,7 @@ def test_preflight_emits_fail_on_detection(
     plan = _plan(src)
     monkeypatch.setattr(
         "yt_uniquifier.core.guardrails.watermark.detect_watermark",
-        lambda _src: WatermarkFinding(
+        lambda _src, **_kwargs: WatermarkFinding(
             detected=True, confidence=0.78,
             sampled_frames=5, matched_frames=2,
         ),
@@ -144,7 +144,7 @@ def test_preflight_no_finding_when_detector_finds_nothing(
     plan = _plan(src)
     monkeypatch.setattr(
         "yt_uniquifier.core.guardrails.watermark.detect_watermark",
-        lambda _src: WatermarkFinding(
+        lambda _src, **_kwargs: WatermarkFinding(
             detected=False, confidence=0.20,
             sampled_frames=5, matched_frames=0,
         ),
@@ -173,3 +173,51 @@ def test_template_corpus_loads(monkeypatch: pytest.MonkeyPatch) -> None:
         assert t.dtype == np.dtype("uint8")
     # Silence "unused" — cv2_mod is the same cv2.
     assert cv2_mod is not None
+
+
+def _write_detection_frames(tmp_path: Path, *, overlay_frames: int) -> list[Path]:
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    template = wm._load_templates(cv2)[0]
+    paths: list[Path] = []
+    rng = np.random.default_rng(7)
+    for idx in range(5):
+        frame = rng.integers(0, 256, size=(360, 640), dtype=np.uint8)
+        if idx < overlay_frames:
+            height, width = template.shape
+            frame[10 : 10 + height, 640 - width - 10 : 630] = template
+        path = tmp_path / f"frame_{idx:03d}.png"
+        assert cv2.imwrite(str(path), frame)
+        paths.append(path)
+    return paths
+
+
+def test_detector_requires_persistent_corner_overlay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.touch()
+    frames = _write_detection_frames(tmp_path, overlay_frames=1)
+    monkeypatch.setattr(wm, "_extract_sample_frames", lambda *_a, **_kw: frames)
+
+    finding = wm.detect_watermark(source, duration_sec=10.0)
+
+    assert finding is not None
+    assert finding.detected is False
+    assert finding.matched_frames == 1
+
+
+def test_detector_accepts_persistent_corner_overlay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.touch()
+    frames = _write_detection_frames(tmp_path, overlay_frames=4)
+    monkeypatch.setattr(wm, "_extract_sample_frames", lambda *_a, **_kw: frames)
+
+    finding = wm.detect_watermark(source, duration_sec=10.0)
+
+    assert finding is not None
+    assert finding.detected is True
+    assert finding.matched_frames == 4
+    assert finding.confidence > 0.99

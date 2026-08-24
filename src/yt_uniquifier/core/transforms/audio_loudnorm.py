@@ -13,6 +13,7 @@ source + target tuple and caches the result.
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -142,6 +143,16 @@ def build_apply(
             -params.target_jitter_lufs, params.target_jitter_lufs,
         )
     out = alloc.next("a")
+    if not _measurement_is_usable(m):
+        # FFmpeg reports +/-inf for silent or sub-gating-duration audio.
+        # Passing those tokens as measured_* values makes pass 2 fail
+        # before it processes a sample. Dynamic single-pass mode is the
+        # documented fallback and preserves silence/very short clips.
+        filt = (
+            f"loudnorm=I={target_i}:TP={params.true_peak}:LRA={params.lra}:"
+            "linear=false:print_format=summary"
+        )
+        return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
     filt = (
         f"loudnorm=I={target_i}:TP={params.true_peak}:LRA={params.lra}:"
         f"measured_I={m.input_i}:measured_TP={m.input_tp}:measured_LRA={m.input_lra}:"
@@ -149,6 +160,19 @@ def build_apply(
         "linear=true:print_format=summary"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
+
+
+def _measurement_is_usable(m: LoudnormMeasurement) -> bool:
+    values = (m.input_i, m.input_tp, m.input_lra, m.input_thresh, m.target_offset)
+    if not all(math.isfinite(value) for value in values):
+        return False
+    return (
+        -99.0 <= m.input_i <= 0.0
+        and -99.0 <= m.input_thresh <= 0.0
+        and 0.0 <= m.input_lra <= 99.0
+        and -99.0 <= m.input_tp <= 99.0
+        and -99.0 <= m.target_offset <= 99.0
+    )
 
 
 def _build_placeholder(

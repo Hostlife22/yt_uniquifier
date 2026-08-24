@@ -9,7 +9,7 @@ The excepthook must:
 
 Dialog rendering is intentionally NOT asserted (offscreen QApplication
 can't display a modal). The hook short-circuits cleanly when no
-QApplication exists, which is the path we exercise here.
+QApplication exists or the active Qt platform is headless.
 """
 
 from __future__ import annotations

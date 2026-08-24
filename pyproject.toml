@@ -1,6 +1,6 @@
 [project]
 name = "yt-uniquifier"
-version = "1.0.0"
+version = "1.3.0"
 description = "Production-grade re-encoder with controlled micro-transforms for owned/licensed video content."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -51,14 +51,6 @@ scene = ["scenedetect~=0.6.6", "opencv-python-headless~=4.10"]
 # first run, NOT bundled in the wheel. Users invoke via `--sscd` on
 # `yt-uniq qa` or `compute_sscd=True` on the build_report API.
 ml  = ["torch>=2.1,<3", "torchvision>=0.16,<1"]
-# v1.3.0 Task 29 — ONNX Runtime path for the SSCD metric.  Lighter than
-# the [ml] torch extra (~50 MB vs ~250 MB), distributed under the same
-# CC-BY-NC license as the bundled Meta weights — explicitly named
-# `ml-nc` (Non-Commercial) so users picking the extra opt in to the
-# license terms.  Commercial deployments stay on the chromaprint + pHash
-# baseline (no extra installed).  Pillow is reused from the base deps;
-# numpy is pulled transitively by onnxruntime.
-ml-nc = ["onnxruntime>=1.18"]
 # v1.2.0 Task 25 — Ed25519 signature verification for marketplace catalog
 # entries.  Optional so unsigned-trust installs (the v0.9 behaviour)
 # don't pull a 5 MB crypto wheel they don't use.  ``cryptography`` is

@@ -93,8 +93,8 @@ maintainer-authored RFCs may use a shortened 3-day comment window.
 
 | Version line | Status | Bug fixes | Security fixes | Until |
 |---|---|---|---|---|
-| **1.0.x** | Active | yes | yes | TBD — see GitHub Releases |
-| 0.9.x | End-of-life | no | no | 2026-06-14 |
+| **1.3.x** | Active | yes | yes | TBD — see GitHub Releases |
+| 1.2.x and earlier | End-of-life | no | no | superseded |
 | 0.8.x and earlier | End-of-life | no | no | superseded |
 
 Security fixes for the active line are released as PATCH versions
@@ -127,6 +127,6 @@ misinterpretation.
 |---|---|
 | Application that calls `yt-uniq` from a shell script | `yt-uniquifier~=1.0` (MINOR-stable) |
 | Library that imports `yt_uniquifier.core` and uses `stable` surface only | `yt-uniquifier~=1.0` |
-| Library that uses any `experimental` surface | `yt-uniquifier==1.0.*` (PATCH-stable) |
-| Reproducible research artifact / paper | exact pin, e.g. `yt-uniquifier==1.0.0` |
+| Library that uses any `experimental` surface | `yt-uniquifier==1.3.*` (PATCH-stable) |
+| Reproducible research artifact / paper | exact pin, e.g. `yt-uniquifier==1.3.0` |
 | Editable install for development | `pip install -e ".[dev,gui]"` from a checkout |

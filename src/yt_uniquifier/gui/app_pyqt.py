@@ -97,7 +97,10 @@ def _install_global_excepthook() -> None:
         # Show a modal dialog. Only attempt if a QApplication is alive —
         # constructing a QMessageBox without one raises a different error.
         app = QApplication.instance()
-        if app is None:
+        # Headless/offscreen test and server processes may retain a shared
+        # QApplication from an earlier component. A modal exec() there has
+        # no user who can close it and deadlocks the process until timeout.
+        if app is None or QApplication.platformName() in {"offscreen", "minimal"}:
             return
         with contextlib.suppress(Exception):
             dlg = QMessageBox()

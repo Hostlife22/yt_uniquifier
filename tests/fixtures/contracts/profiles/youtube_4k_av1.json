@@ -1,8 +1,8 @@
 {
   "audio_tracks": "first",
-  "description": "HDR (PQ / HLG) preserved through color transforms via zscale linear roundtrip.\nRequires an HDR-capable encoder (libx265 / hevc_nvenc / hevc_videotoolbox)\nand ffmpeg built with zimg.\n",
-  "keep_hdr": true,
-  "name": "medium_hdr",
+  "description": "YouTube 4K AV1 (3840x2160 16:9) re-encode with soft micro-transforms. AV1 is the recommended ingest codec for 4K+ where H.264's 25 Mb/s cap limits perceived quality.  CPU-bound on libsvtav1 (~3x libx264); prefer av1_nvenc / av1_vulkan / av1_qsv when available.  Target loudness -14 LUFS (YouTube spec).  Crops to 16:9 cover so letterboxed/vertical sources land at full canvas.",
+  "keep_hdr": false,
+  "name": "youtube_4k_av1",
   "output_container": "mp4",
   "seed": 42,
   "seed_strategy": "per_run",
@@ -12,7 +12,7 @@
     "scene_threshold": 27.0
   },
   "skip_watermark_check": false,
-  "target_codec": "hevc",
+  "target_codec": "av1",
   "target_loudness_lufs": -14.0,
   "target_vmaf": null,
   "target_vmaf_max_retries": 2,
@@ -20,9 +20,19 @@
   "transforms": [
     {
       "enabled": true,
+      "id": "video.fit_aspect",
+      "params": {
+        "mode": "crop",
+        "target_aspect": "16:9",
+        "target_height": 2160,
+        "target_width": 3840
+      }
+    },
+    {
+      "enabled": true,
       "id": "video.crop_resize",
       "params": {
-        "max_strength": 0.025,
+        "max_strength": 0.015,
         "rng_seed": 42
       }
     },
@@ -30,31 +40,26 @@
       "enabled": true,
       "id": "video.color_eq",
       "params": {
-        "brightness": 0.008,
-        "contrast": 1.012,
-        "gamma": 0.997,
-        "saturation": 1.02
+        "brightness": 0.006,
+        "contrast": 1.01,
+        "gamma": 0.998,
+        "saturation": 1.015
       }
     },
     {
       "enabled": true,
       "id": "video.noise",
       "params": {
-        "strength": 3
+        "strength": 2
       }
     },
     {
       "enabled": true,
       "id": "audio.pitch_tempo",
       "params": {
-        "pitch": 1.0008,
+        "pitch": 1.0004,
         "tempo": 1.0
       }
-    },
-    {
-      "enabled": true,
-      "id": "audio.eq",
-      "params": {}
     },
     {
       "enabled": true,

@@ -66,3 +66,24 @@ def test_jitter_respects_bounds_via_pydantic() -> None:
         LoudnormParams(target_jitter_lufs=10.0)
     with pytest.raises(Exception):  # noqa: B017
         LoudnormParams(target_jitter_lufs=-1.0)
+
+
+def test_non_finite_measurement_falls_back_to_dynamic_mode() -> None:
+    measurement = LoudnormMeasurement(
+        input_i=float("-inf"),
+        input_tp=-17.72,
+        input_lra=0.0,
+        input_thresh=-70.0,
+        target_offset=float("inf"),
+    )
+
+    chain = build_apply(
+        LoudnormParams(),
+        measurement,
+        LabelAllocator(),
+        "0:a:0",
+    )
+
+    assert "linear=false" in chain.filter_str
+    assert "measured_I" not in chain.filter_str
+    assert "inf" not in chain.filter_str
