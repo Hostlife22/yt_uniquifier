@@ -95,7 +95,7 @@ dev = [
     # See [tool.pytest.ini_options]::timeout in this file.
     "pytest-timeout~=2.3",
     "ruff~=0.5",
-    "mypy~=1.10",
+    "mypy>=1.10,<3.0",
     "types-PyYAML~=6.0",
     # v1.2.0 Task 27 — Hypothesis property tests over Profile / Plan
     # invariants (plan-hash stability, label allocator uniqueness, even-
