@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtWidgets import QApplication
 
+from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.widgets import encoder_selector as encoder_selector_mod
 from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 
@@ -116,3 +117,32 @@ def test_shutdown_preserves_reference_when_worker_is_still_running(
     assert worker is not None
     worker.request_cancel.assert_called_once_with()
     worker.quit.assert_called_once_with()
+
+
+def test_screen_close_shuts_down_nested_encoder_worker(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Directly embedded screens must own nested selector thread cleanup."""
+    class _Worker:
+        def __init__(self) -> None:
+            self.detected = MagicMock()
+            self.failed = MagicMock()
+            self.request_cancel = MagicMock()
+            self.quit = MagicMock()
+            self.wait = MagicMock(return_value=True)
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(encoder_selector_mod, "EncoderDetectWorker", _Worker)
+    screen = ScreenBase(MagicMock())
+    selector = EncoderSelector()
+    selector.setParent(screen)
+    worker = selector._detect_worker
+
+    assert screen.close()
+    assert worker is not None
+    worker.request_cancel.assert_called_once_with()
+    worker.quit.assert_called_once_with()
+    worker.wait.assert_called_once_with(16_000)
+    assert selector._detect_worker is None

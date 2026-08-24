@@ -90,9 +90,8 @@ class EncoderSelector(QComboBox):
         the window mid-probe, dropping the Python ref while the C++
         QThread is still in run() leads to "QThread: Destroyed while
         thread is still running". EncoderSelector lives inside multiple
-        screens (Run, Batch, Queue, Validation) and the screens'
-        closeEvent walker doesn't see this attribute, so it has to clean
-        up its own worker.
+        screens (Run, Batch, Queue, Validation), so both its own close handler
+        and ScreenBase's nested-worker walker use this explicit shutdown hook.
         """
         if self._detect_worker is None:
             return True

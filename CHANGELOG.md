@@ -70,6 +70,9 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 
 ### Fixed
 
+- **Direct GUI screen shutdown** — every screen now cancels and joins both
+  direct workers and nested encoder-detection threads when closed, preventing
+  Qt from aborting on teardown with a live `QThread`.
 - **Windows ffmpeg pipe deadlock** — runner logs and machine-readable progress
   are now drained through one pipe, preventing verbose ffmpeg/filter output
   from filling stderr and freezing segment encoding indefinitely.
