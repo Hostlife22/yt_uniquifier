@@ -41,7 +41,7 @@ jobs:
       - name: Build site (strict)
         run: mkdocs build --strict --site-dir _site
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
