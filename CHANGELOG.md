@@ -88,6 +88,10 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 - **Release gates and contracts** — synchronized additive v1.1–v1.3 model,
   `RunOptions`, encoder-vendor, and AV1-profile snapshots; restored clean Ruff
   and strict-mypy runs; added real 4K AV1 profile coverage.
+- **Cross-platform CI and container build** — regenerated the hashed dev lock
+  as a universal resolution (including Hypothesis, Ed25519 test support, and
+  Windows colorama), and rebuilt the Docker path around a native multi-arch
+  Debian FFmpeg plus a complete offline web wheelhouse.
 
 ### CI
 

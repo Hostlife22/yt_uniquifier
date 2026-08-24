@@ -1,41 +1,34 @@
 # yt-uniquifier — headless web UI image (v0.9.0 R4 / F13).
 #
-# Two-stage build keeps the runtime layer free of build toolchains.
-# Base ffmpeg image gives us a known-working static ffmpeg without
-# distro-specific surprises (libass, libvmaf, libfdk-aac all
-# included). Python is layered on top so we can install yt-uniquifier
-# itself + the [web] extra.
+# Two-stage build keeps the runtime layer free of Python build toolchains.
+# FFmpeg comes from the same Debian release as the Python runtime, avoiding
+# cross-libc copies while retaining native amd64/arm64 package support.
 #
 # Build:
-#   docker build -t yt-uniquifier:0.9.0 .
+#   docker build -t yt-uniquifier:1.3.0 .
 #
 # Run (LAN-trusted; no auth):
 #   docker run --rm -p 8080:8080 \
 #       -v $PWD/input:/data/input:ro \
 #       -v $PWD/output:/data/output \
 #       -v $PWD/work:/data/work \
-#       yt-uniquifier:0.9.0
+#       yt-uniquifier:1.3.0
 #
 # Run (with basic auth):
 #   docker run --rm -p 8080:8080 \
 #       -e YT_UNIQ_WEB_USER=alice -e YT_UNIQ_WEB_PASS=hunter2 \
 #       -v $PWD/input:/data/input:ro \
 #       -v $PWD/output:/data/output \
-#       yt-uniquifier:0.9.0
+#       yt-uniquifier:1.3.0
 #
 # The [ml] / [scene] extras are deliberately NOT installed here —
 # torch alone would push the image past 1 GB. Bake your own image
 # with `pip install yt-uniquifier[ml]` inside the runtime stage if
 # you need SSCD/PySceneDetect on the container.
 
-# v1.1.0 Task 12: multi-arch image. Both base tags resolve to a
-# manifest list with linux/amd64 + linux/arm64 entries — buildx will
-# pick the right arch per --platform leg. Dependabot's docker
-# ecosystem updates this file weekly so the floating tags stay close
-# to upstream patch releases without losing reproducibility (digest
-# pins are added by Dependabot's `docker-image` updater when it
-# rewrites these lines).
-ARG FFMPEG_IMAGE=jrottenberg/ffmpeg:7-alpine
+# v1.1.0 Task 12: multi-arch image. The official Python base resolves to
+# linux/amd64 and linux/arm64. Debian installs the matching FFmpeg package
+# for each Buildx platform leg.
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
 # ---- Build stage: wheels only, no system tools in final layer ----
@@ -45,29 +38,27 @@ WORKDIR /build
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
-RUN pip install --upgrade pip wheel build && \
-    python -m build --wheel --outdir /wheels
+RUN pip install --upgrade pip wheel && \
+    pip wheel --wheel-dir /wheels '.[web]'
 
 # ---- Runtime stage ---------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
 
-# ffmpeg from the official static image — copy the binaries only so we
-# don't pull alpine's libc into a Debian-based Python image.
-COPY --from=${FFMPEG_IMAGE} /usr/local/bin/ffmpeg  /usr/local/bin/ffmpeg
-COPY --from=${FFMPEG_IMAGE} /usr/local/bin/ffprobe /usr/local/bin/ffprobe
-
-# Runtime deps for ffmpeg's shared libs (libass etc. when present in
-# the static build) — bookworm-slim ships musl-compatible shims for
-# most of what the alpine build expects.
+# Install FFmpeg and its shared libraries from the runtime distribution.
+# This is architecture-correct on both Buildx targets and avoids mixing
+# Alpine/musl binaries with Debian/glibc.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libssl3 ca-certificates curl tini && \
+        ffmpeg libssl3 ca-certificates curl tini && \
     rm -rf /var/lib/apt/lists/* && \
     useradd --create-home --shell /usr/sbin/nologin --uid 1000 ytuniq
 
 COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir --no-index /wheels/*.whl 'yt-uniquifier[web]' && \
-    rm -rf /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels 'yt-uniquifier[web]' && \
+    rm -rf /wheels && \
+    ffmpeg -version >/dev/null && \
+    ffprobe -version >/dev/null && \
+    python -c "import fastapi, uvicorn; from yt_uniquifier.web.app import build_app"
 
 USER ytuniq
 WORKDIR /home/ytuniq

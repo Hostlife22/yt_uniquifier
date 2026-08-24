@@ -103,6 +103,9 @@ dev = [
     # ship dev-only — production installs don't need them.
     "hypothesis~=6.108",
     "mutmut~=2.5",
+    # Signature contract tests generate Ed25519 signatures; keep the
+    # production feature optional while making the dev test closure complete.
+    "cryptography>=42,<46",
 ]
 
 [project.scripts]
