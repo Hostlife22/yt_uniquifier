@@ -70,6 +70,10 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 
 ### Fixed
 
+- **Windows keyframe cache races** — atomic cache replacement now retries
+  short-lived destination locks from concurrent writers or antivirus scanners,
+  while retaining the whole-file/no-torn-write guarantee and cleaning up temp
+  files after a terminal failure.
 - **Watermark false positives** — detection now requires a strong match for
   the same synthetic template/corner across at least 60% of uniformly spaced
   samples. A single ordinary rectangle can no longer block every encode.

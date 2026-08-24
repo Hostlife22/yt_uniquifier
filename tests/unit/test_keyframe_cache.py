@@ -157,6 +157,33 @@ def test_keyframe_cache_atomic_replace(
     assert cache_path.exists()
 
 
+def test_keyframe_cache_retries_transient_replace_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
+) -> None:
+    """A short-lived Windows destination lock must not fail cache writes."""
+    src = tmp_path / "x.mp4"
+    src.write_bytes(b"x")
+    cache_path = seg_mod._keyframe_cache_path(src)
+    real_replace = seg_mod.os.replace
+    calls = 0
+
+    def flaky_replace(src_path: str, dst_path: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise PermissionError(13, "destination temporarily locked")
+        real_replace(src_path, dst_path)
+
+    monkeypatch.setattr(seg_mod.os, "replace", flaky_replace)
+    monkeypatch.setattr(seg_mod.time, "sleep", lambda _seconds: None)
+
+    seg_mod._save_keyframe_cache(src, [0.0, 1.5, 3.0])
+
+    assert calls == 3
+    assert cache_path.exists()
+    assert not list(cache_path.parent.glob("*.tmp"))
+
+
 def test_keyframe_cache_concurrent_writers_no_torn_merge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
 ) -> None:
