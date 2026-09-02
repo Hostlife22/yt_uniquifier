@@ -56,7 +56,7 @@ ml  = ["torch>=2.1,<3", "torchvision>=0.16,<1"]
 # don't pull a 5 MB crypto wheel they don't use.  ``cryptography`` is
 # PyCA's reference library and the only realistic choice for raw Ed25519
 # in pure Python today.
-crypto = ["cryptography>=42,<51"]
+crypto = ["cryptography>=42,<49"]
 # v1.3.0 Task 34 — OpenTelemetry tracing for per-segment / per-run
 # spans.  Opt-in because the OTLP SDK + exporter pull ~10 MB of
 # dependencies that most CLI / desktop users don't need.  Active when
@@ -105,7 +105,7 @@ dev = [
     "mutmut~=2.5",
     # Signature contract tests generate Ed25519 signatures; keep the
     # production feature optional while making the dev test closure complete.
-    "cryptography>=42,<51",
+    "cryptography>=42,<49",
 ]
 
 [project.scripts]
