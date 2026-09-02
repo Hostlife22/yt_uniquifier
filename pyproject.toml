@@ -207,5 +207,5 @@ ignore_missing_imports = true
 # --strict. The web layer is intentionally a thin shell over typed
 # core/ — we relax the decorator check only inside web/.
 [[tool.mypy.overrides]]
-module = "yt_uniquifier.web.routes.*"
+module = ["yt_uniquifier.web.app", "yt_uniquifier.web.routes.*"]
 disable_error_code = ["untyped-decorator", "no-any-return"]
