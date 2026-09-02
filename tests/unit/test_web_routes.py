@@ -41,6 +41,7 @@ def client(web_dirs: tuple[Path, Path, Path]) -> TestClient:
         work_dir=work,
         output_dir=output,
         profile_dir=profiles,
+        input_root=work.parent,
     )
     return TestClient(build_app(config))
 
@@ -263,6 +264,33 @@ def test_run_rejects_input_outside_root(
     assert r.status_code == 403
 
 
+def test_run_rejects_input_symlink_escaping_root(
+    web_dirs: tuple[Path, Path, Path], tmp_path: Path,
+) -> None:
+    work, output, profiles = web_dirs
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    outside = tmp_path / "outside.mp4"
+    outside.touch()
+    link = sandbox / "linked.mp4"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available for this test account")
+    config = WebConfig(
+        work_dir=work, output_dir=output, profile_dir=profiles,
+        input_root=sandbox,
+    )
+    client = TestClient(build_app(config))
+
+    r = client.post("/api/run", json={
+        "input_path": str(link),
+        "profile_path": str(profiles / "any.yaml"),
+    })
+
+    assert r.status_code == 403
+
+
 def test_run_rejects_profile_outside_configured_root(
     client: TestClient, web_dirs: tuple[Path, Path, Path], tmp_path: Path,
 ) -> None:
@@ -302,6 +330,33 @@ def test_run_rejects_output_path_traversal(
 
     assert r.status_code == 400
     assert not (output.parent / "escape.mp4").exists()
+
+
+def test_run_rejects_output_symlink_escaping_root(
+    client: TestClient,
+    web_dirs: tuple[Path, Path, Path],
+    tmp_path: Path,
+) -> None:
+    _, output, profiles = web_dirs
+    input_path = tmp_path / "input.mp4"
+    input_path.touch()
+    profile_path = profiles / "safe.yaml"
+    profile_path.write_text("name: safe\ntransforms: []\n", encoding="utf-8")
+    outside = tmp_path / "outside.mp4"
+    link = output / "linked.mp4"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available for this test account")
+
+    r = client.post("/api/run", json={
+        "input_path": str(input_path),
+        "profile_path": str(profile_path),
+        "output_name": link.name,
+    })
+
+    assert r.status_code == 400
+    assert not outside.exists()
 
 
 def test_cancel_unknown_run_id(client: TestClient) -> None:
@@ -476,6 +531,7 @@ def test_audit_log_records_run_start_and_cancel(
     audit_path = tmp_path / "audit.jsonl"
     config = WebConfig(
         work_dir=work, output_dir=output, profile_dir=profiles,
+        input_root=tmp_path,
         audit_log_path=audit_path,
     )
 

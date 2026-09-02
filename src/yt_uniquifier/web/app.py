@@ -24,6 +24,7 @@ client never has to round-trip them.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import secrets
 import threading
@@ -48,10 +49,9 @@ class WebConfig:
     profile_dir: Path | None = None
     basic_auth_user: str | None = None
     basic_auth_pass: str | None = None
-    # When set, ``/api/run`` will only accept input paths under this
-    # root. Defends against an authenticated user hopping out of the
-    # mounted media dir. ``None`` disables the check (useful on a
-    # dev box where the LAN is trusted).
+    # ``/api/run`` only accepts input paths under this root. ``None``
+    # selects the process working directory, keeping the default secure
+    # while allowing deployments to opt into another mounted media dir.
     input_root: Path | None = None
     # v1.1.0 Task 16: state-changing requests are rate-limited per
     # principal (basic-auth user) or per client IP. Defaults match
@@ -293,30 +293,31 @@ def build_app(config: WebConfig) -> Any:
         )
 
     # -- helpers -----------------------------------------------------
-    def _validate_input(input_path: Path) -> Path:
-        if not input_path.exists():
-            raise HTTPException(status_code=404, detail=f"input not found: {input_path}")
-        if config.input_root is not None:
-            try:
-                input_path.resolve().relative_to(config.input_root.resolve())
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"input must live under {config.input_root}; "
-                        f"got {input_path}"
-                    ),
-                ) from exc
+    # Freeze the default boundary at app construction time. A library or
+    # plugin changing the process cwd later must not move the security root.
+    configured_input_root = config.input_root or Path.cwd()
+    input_root_text = os.path.realpath(os.fspath(configured_input_root))
+    input_root_prefix = input_root_text.rstrip(os.sep) + os.sep
+
+    def _validate_input(raw_path: str) -> Path:
+        """Normalize an input and confine it to the configured media root."""
+        resolved_text = os.path.realpath(os.path.expanduser(raw_path))
+        if (
+            resolved_text != input_root_text
+            and not resolved_text.startswith(input_root_prefix)
+        ):
+            raise HTTPException(status_code=403, detail="input is outside allowed root")
+
+        # Do not turn request data into a Path until it has passed the
+        # realpath + trusted-prefix boundary above.
+        input_path = Path(resolved_text)
+        if not input_path.is_file():
+            raise HTTPException(status_code=404, detail="input not found")
         return input_path
 
-    def _validate_profile(profile_path: Path) -> Path:
+    def _validate_profile(raw_path: str) -> Path:
         """Resolve a profile only when it belongs to an advertised root."""
-        try:
-            resolved = profile_path.resolve(strict=True)
-        except OSError as exc:
-            raise HTTPException(status_code=404, detail="profile not found") from exc
-        if not resolved.is_file():
-            raise HTTPException(status_code=404, detail="profile not found")
+        resolved_text = os.path.realpath(os.path.expanduser(raw_path))
 
         roots: list[Path] = []
         try:
@@ -329,10 +330,16 @@ def build_app(config: WebConfig) -> Any:
             roots.append(Path(config.profile_dir))
 
         for root in roots:
-            try:
-                resolved.relative_to(root.resolve())
-            except (OSError, ValueError):
+            root_text = os.path.realpath(os.fspath(root))
+            root_prefix = root_text.rstrip(os.sep) + os.sep
+            if resolved_text != root_text and not resolved_text.startswith(root_prefix):
                 continue
+
+            # As with input paths, filesystem access only happens after the
+            # normalized candidate has been confined to a trusted root.
+            resolved = Path(resolved_text)
+            if not resolved.is_file():
+                raise HTTPException(status_code=404, detail="profile not found")
             return resolved
         raise HTTPException(status_code=403, detail="profile is outside allowed roots")
 

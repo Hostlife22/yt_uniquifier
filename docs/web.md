@@ -31,7 +31,7 @@ CLI flags (env-var equivalents in parentheses):
 | `--work-dir`     | `YT_UNIQ_WEB_WORK_DIR`   | `/tmp/yt-uniquifier-web`      |
 | `--output-dir`   | `YT_UNIQ_WEB_OUTPUT_DIR` | `./output`                    |
 | `--profile-dir`  | `YT_UNIQ_WEB_PROFILE_DIR`| per-user XDG config           |
-| `--input-root`   | `YT_UNIQ_WEB_INPUT_ROOT` | unset (no chroot)             |
+| `--input-root`   | `YT_UNIQ_WEB_INPUT_ROOT` | current working directory     |
 
 Basic auth is gated on both `YT_UNIQ_WEB_USER` and
 `YT_UNIQ_WEB_PASS` being set. With neither set, the server is
@@ -124,8 +124,10 @@ and the QA HTML/JSON passthroughs.
 }
 ```
 
-When `input_root` is set on `WebConfig`, paths outside that root
-are rejected with **403**. Path-traversal attempts against
+Input paths outside `WebConfig.input_root` are rejected with **403**;
+when it is unset, the server uses its current working directory as the
+root. Set `--input-root /data/input` explicitly for NAS/container mounts.
+Path-traversal attempts against
 `/api/qa/...` are rejected with **400 / 404**.
 
 ## What's *not* on the web yet

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import queue
 import threading
 import uuid
@@ -74,8 +75,8 @@ def register(  # noqa: PLR0913
     runs: dict[str, Any],
     runs_lock: threading.Lock,
     auth: Callable[..., None],
-    validate_input: Callable[[Path], Path],
-    validate_profile: Callable[[Path], Path],
+    validate_input: Callable[[str], Path],
+    validate_profile: Callable[[str], Path],
     streaming_response: Any,
     json_response: Any,
     http_exception: Any,
@@ -97,8 +98,8 @@ def register(  # noqa: PLR0913
     def start_run(request: Request, req: RunRequest) -> Any:
         # Resolve paths through the validator so a bad input is a 404
         # before we touch the orchestrator.
-        input_path = validate_input(Path(req.input_path).expanduser())
-        profile_path = validate_profile(Path(req.profile_path).expanduser())
+        input_path = validate_input(req.input_path)
+        profile_path = validate_profile(req.profile_path)
         try:
             profile = load_profile(profile_path)
         except Exception as exc:  # noqa: BLE001
@@ -112,17 +113,21 @@ def register(  # noqa: PLR0913
             out_name in {"", ".", ".."}
             or "/" in out_name
             or "\\" in out_name
-            or Path(out_name).is_absolute()
-            or Path(out_name).name != out_name
+            or os.path.isabs(out_name)
+            or os.path.basename(out_name) != out_name
         ):
             raise http_exception(status_code=400, detail="invalid output_name")
-        output_root = Path(config.output_dir).resolve()
+        output_root = Path(config.output_dir).resolve(strict=False)
         output_root.mkdir(parents=True, exist_ok=True)
-        output_path = (output_root / out_name).resolve()
-        try:
-            output_path.relative_to(output_root)
-        except ValueError as exc:
-            raise http_exception(status_code=400, detail="invalid output_name") from exc
+        output_root_text = os.path.realpath(os.fspath(output_root))
+        output_path_text = os.path.realpath(os.path.join(output_root_text, out_name))
+        output_prefix = output_root_text.rstrip(os.sep) + os.sep
+        if not output_path_text.startswith(output_prefix):
+            raise http_exception(status_code=400, detail="invalid output_name")
+        # Construct a filesystem object only after normalization and the
+        # trusted-root check. This ordering is both the actual security
+        # boundary and the pattern understood by static path-injection checks.
+        output_path = Path(output_path_text)
 
         try:
             plan = build_plan(input_path, profile, req.encoder_override)

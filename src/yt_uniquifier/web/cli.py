@@ -10,7 +10,7 @@ Env vars honoured (override CLI flags when set):
   YT_UNIQ_WEB_WORK_DIR    — default /tmp/yt-uniquifier-web
   YT_UNIQ_WEB_OUTPUT_DIR  — default ./output
   YT_UNIQ_WEB_PROFILE_DIR — default per-user profile dir
-  YT_UNIQ_WEB_INPUT_ROOT  — when set, restrict inputs to under this dir
+  YT_UNIQ_WEB_INPUT_ROOT  — input boundary (default: current directory)
   YT_UNIQ_WEB_USER        — when both set, enable basic auth
   YT_UNIQ_WEB_PASS
 """
@@ -44,8 +44,11 @@ def main(argv: list[str] | None = None) -> int:
                                                "./output"))
     parser.add_argument("--profile-dir",
                         default=os.environ.get("YT_UNIQ_WEB_PROFILE_DIR"))
-    parser.add_argument("--input-root",
-                        default=os.environ.get("YT_UNIQ_WEB_INPUT_ROOT"))
+    parser.add_argument(
+        "--input-root",
+        default=os.environ.get("YT_UNIQ_WEB_INPUT_ROOT"),
+        help="allowed input directory (default: current directory)",
+    )
     args = parser.parse_args(argv)
 
     try:

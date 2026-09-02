@@ -70,6 +70,9 @@ See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.
 
 ### Fixed
 
+- **Web path confinement** — `/api/run` now normalizes input, profile, and
+  output paths before filesystem access, rejects symlink escapes, and confines
+  inputs to the current working directory unless `input_root` is explicitly set.
 - **Direct GUI screen shutdown** — every screen now cancels and joins both
   direct workers and nested encoder-detection threads when closed, preventing
   Qt from aborting on teardown with a live `QThread`.
