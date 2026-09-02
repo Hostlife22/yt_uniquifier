@@ -20,6 +20,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from yt_uniquifier.core.audio_windows import verify_audio_filters_available
+from yt_uniquifier.core.auxiliary_streams import (
+    AuxiliaryStream,
+    unsupported_auxiliary_streams,
+)
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import AudioStream, Plan, Segment
 from yt_uniquifier.core.pipeline import (
@@ -816,6 +820,7 @@ def concat_segments(
     audio_source_indices: list[int] | None = None,
     audio_streams: list[AudioStream] | None = None,
     subtitle_codecs: list[str] | None = None,
+    auxiliary_streams: list[AuxiliaryStream] | None = None,
     target_duration_sec: float | None = None,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
@@ -866,6 +871,22 @@ def concat_segments(
     media_idx = add_input(media_source)
     chapter_idx = add_input(map_chapters_from)
 
+    auxiliary_streams = auxiliary_streams or []
+    unsupported_auxiliary = unsupported_auxiliary_streams(
+        auxiliary_streams, output.suffix.lower().lstrip("."),
+    )
+    if unsupported_auxiliary:
+        descriptions = ", ".join(
+            stream.codec_tag or stream.codec or stream.kind
+            for stream in unsupported_auxiliary
+        )
+        raise PipelineError(
+            f"auxiliary stream(s) [{descriptions}] cannot be preserved in "
+            f"{output.suffix.lower() or 'the selected container'}"
+        )
+    if auxiliary_streams and media_idx is None:
+        raise PipelineError("auxiliary streams require the original media source")
+
     cmd += ["-map", "0:v:0"]
     selected_audio = (
         audio_source_indices
@@ -882,6 +903,21 @@ def concat_segments(
         cmd += ["-map", f"{passthrough_idx}:a:{relative_idx}?"]
     subtitle_idx = media_idx if media_idx is not None else 0
     cmd += ["-map", f"{subtitle_idx}:s?"]
+    attachments = [stream for stream in auxiliary_streams if stream.kind == "attachment"]
+    data_streams = [stream for stream in auxiliary_streams if stream.kind == "data"]
+    attached_pictures = [
+        stream for stream in auxiliary_streams if stream.kind == "attached_pic"
+    ]
+    for auxiliary in attachments:
+        cmd += ["-map", f"{media_idx}:{auxiliary.index}"]
+    if attachments:
+        cmd += ["-c:t", "copy"]
+    for auxiliary in data_streams:
+        cmd += ["-map", f"{media_idx}:{auxiliary.index}"]
+    if data_streams:
+        cmd += ["-c:d", "copy"]
+    for auxiliary in attached_pictures:
+        cmd += ["-map", f"{media_idx}:{auxiliary.index}"]
 
     output_container = output.suffix.lower()
     image_subtitle_codecs = {
@@ -941,6 +977,26 @@ def concat_segments(
     if target_duration_sec is not None and target_duration_sec > 0:
         cmd += ["-t", f"{target_duration_sec:.6f}"]
     cmd += metadata_args
+    for index, auxiliary in enumerate(attachments):
+        for key, value in (
+            ("filename", auxiliary.filename),
+            ("mimetype", auxiliary.mimetype),
+            ("title", auxiliary.title),
+        ):
+            if value:
+                cmd += [f"-metadata:s:t:{index}", f"{key}={value}"]
+    for index, auxiliary in enumerate(data_streams):
+        for key, value in (
+            ("language", auxiliary.language),
+            ("handler_name", auxiliary.title),
+            ("timecode", auxiliary.timecode),
+        ):
+            if value:
+                cmd += [f"-metadata:s:d:{index}", f"{key}={value}"]
+    for index, auxiliary in enumerate(attached_pictures, start=1):
+        cmd += [f"-disposition:v:{index}", "attached_pic"]
+        if auxiliary.title:
+            cmd += [f"-metadata:s:v:{index}", f"title={auxiliary.title}"]
     tmp_output = output.with_name(
         f".{output.stem}.{os.getpid()}.{secrets.token_hex(4)}.part{output.suffix}"
     )

@@ -24,9 +24,11 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] A/V sync проходит start/end/impulse tests.
 - [x] Chapters сохраняются согласно policy на MKV→MP4 regression fixture.
 - [x] Selected multi-audio/subtitle language, title и supported dispositions
-      сохраняются и валидируются; attachment/data matrix pending.
-- [ ] SRT→MP4 и image-subtitle preflight проверены; ASS/PGS/MKV/MOV matrix pending.
-- [ ] Attachments/data streams сохраняются или явно объявлены unsupported.
+      сохраняются и валидируются вместе с supported auxiliary streams.
+- [ ] SRT/ASS→MP4/MKV/MOV и image-subtitle preflight проверены; real PGS
+      roundtrip остаётся NOT VERIFIED из-за отсутствия fixture encoder.
+- [x] MKV attachments, MOV `tmcd` и MP4 JPEG/PNG `attached_pic` сохраняются;
+      несовместимые attachment/data/cover-art combinations явно rejected.
 - [x] SAR/DAR соответствует declared crop transform; square pixels не становятся
       anamorphic случайно.
 - [x] `video.speed` и main-audio tempo сверяются; unsafe aux-stream retiming rejected.
@@ -50,8 +52,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] MP4 regression roundtrip: streams, metadata, chapters, subtitles, AAC priming
       bounds и faststart (`moov` before `mdat`).
-- [ ] MKV roundtrip: streams, attachments, subtitles, chapters.
-- [ ] MOV roundtrip: timecode/edit-list/metadata policy.
+- [x] MKV roundtrip: streams, byte-identical attachment, SRT/ASS, chapters.
+- [x] MOV roundtrip: `tmcd`, edit-list/audio bounds, SRT/ASS conversion и metadata.
 - [ ] CFR: 23.976/24/25/29.97/30/50/59.94/60.
 - [ ] VFR: multi-segment libx264 preserves 220/220 frames and 30/20/60 FPS cadence;
       advertised hardware encoders remain pending.
@@ -185,11 +187,11 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1390 passed, 2 expected skips.
+- [x] Fully provisioned `make check`: 1415 passed, 2 expected skips.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
-- [x] Strict mypy: passed (155 source files).
+- [x] Strict mypy: passed (156 source files).
 - [x] All 16 shipped profiles load.
 - [x] Подтверждённые local P0 correctness regressions исправлены.
 - [x] HDR10/HDR→SDR, Rubber Band и SSCD real model verified locally.

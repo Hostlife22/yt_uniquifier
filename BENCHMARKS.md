@@ -1,9 +1,10 @@
 # Benchmark Methodology and Baseline
 
-Дата: 2026-09-02. Commit: `14df893`. Результаты ниже относятся только к указанному
-локальному environment; они не экстраполируются автоматически на фильмы/HDR/GPU.
+Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
+2026-09-03. Результаты относятся только к указанному локальному environment и не
+экстраполируются автоматически на фильмы/HDR/GPU.
 
-## Production acceptance delta — 2026-09-02 (post-v1.4.0)
+## Production acceptance delta — 2026-09-03 (post-v1.4.0)
 
 На Intel macOS с Homebrew FFmpeg 9.0.1 дополнительно подтверждено:
 
@@ -13,6 +14,8 @@
 | HLG → HEVC VideoToolbox | 100/100 frames, 4.000 s, `yuv420p10le`, HLG/BT.2020/tv | Hardware HLG подтверждён только для этого Mac |
 | 2 × concurrent H.264 VideoToolbox 1080p | 180/180 frames каждый; 7.72 s/job, 8.09 s aggregate wall | `max_parallel=2` подтверждён для этого Mac |
 | MP4/MKV/MOV, 3 s tagged SDR | 7/7 integration tests; all A/V streams decode; chapters/subtitles retained by policy | Container smoke закрыт для synthetic core matrix |
+| MKV attachment / MOV tmcd / MP4 cover art | Attachment bytes exact; `01:00:00:00` retained; JPEG bytes exact | Supported auxiliary topology is preserved and final-contract validated |
+| ASS subtitle → MKV/MOV | ASS copied to MKV; converted to `mov_text` in MOV; language/title retained | Text subtitle policy confirmed; real PGS fixture remains pending |
 | APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
 | Segmented VFR, libx264, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software VFR preserve contract разрешён; hardware paths остаются unverified |
 
@@ -240,6 +243,7 @@ release по [официальным upload settings](https://support.google.com
 - Real licensed/natural 1 h / 2 h / 3 h+ movies and listening/visual inspection.
 - 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
 - HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
+- Real PGS subtitle roundtrip (installed FFmpeg exposes a decoder but no fixture encoder).
 - NVENC/QSV/AMF; VideoToolbox concurrency/static HDR metadata.
 - Rubber Band subjective quality on speech/music (functional/duration path verified).
 - YouTube ingestion/transcode result.

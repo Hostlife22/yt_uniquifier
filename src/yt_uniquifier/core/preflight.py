@@ -11,6 +11,10 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from yt_uniquifier.core.auxiliary_streams import (
+    get_auxiliary_streams,
+    unsupported_auxiliary_streams,
+)
 from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 
@@ -69,10 +73,12 @@ def preflight(
         findings.extend(_check_disk_space(source, work_dir))
     findings.append(_check_container(source))
     findings.append(_check_video_codec(source))
+    findings.extend(_check_video_topology(source))
     findings.extend(_check_audio_streams(source))
     findings.extend(_check_fps(source))
     findings.extend(_check_hdr(source, plan, encoder))
     findings.extend(_check_subtitles(source, plan))
+    findings.extend(_check_auxiliary_streams(source, plan))
     findings.extend(_check_loudnorm(plan))
     findings.extend(_check_bitrate(source))
     findings.extend(_check_pitch_rubberband(plan))
@@ -120,6 +126,23 @@ def _check_container_metadata_loss(plan: Plan) -> list[PreflightFinding]:
             f"represent source stream disposition(s): {names}."
         ),
         suggestion="Use an MKV output profile to preserve the complete disposition set.",
+    )]
+
+
+def _check_video_topology(source: SourceMeta) -> list[PreflightFinding]:
+    if len(source.video) <= 1:
+        return []
+    return [PreflightFinding(
+        code="video.multiple_streams.unsupported",
+        severity="fail",
+        message=(
+            f"The source contains {len(source.video)} program video streams; "
+            "the pipeline transforms exactly one video stream."
+        ),
+        suggestion=(
+            "Select/extract the intended program video before processing. "
+            "Attached cover pictures are preserved separately when supported."
+        ),
     )]
 
 
@@ -986,6 +1009,92 @@ def _check_subtitles(source: SourceMeta, plan: Plan) -> list[PreflightFinding]:
         ),
         suggestion="Use MKV output or convert the subtitles to SRT/ASS first.",
     )]
+
+
+def _check_auxiliary_streams(
+    source: SourceMeta,
+    plan: Plan,
+) -> list[PreflightFinding]:
+    streams = get_auxiliary_streams(source)
+    if not streams:
+        return []
+    unsupported = unsupported_auxiliary_streams(
+        streams, plan.profile.output_container,
+    )
+    findings: list[PreflightFinding] = []
+    attachments = [stream for stream in streams if stream.kind == "attachment"]
+    data = [stream for stream in streams if stream.kind == "data"]
+    attached_pictures = [stream for stream in streams if stream.kind == "attached_pic"]
+    unsupported_attachments = [
+        stream for stream in unsupported if stream.kind == "attachment"
+    ]
+    unsupported_data = [stream for stream in unsupported if stream.kind == "data"]
+    unsupported_pictures = [
+        stream for stream in unsupported if stream.kind == "attached_pic"
+    ]
+    if attachments:
+        if unsupported_attachments:
+            findings.append(PreflightFinding(
+                code="aux.attachments.unsupported",
+                severity="fail",
+                message=(
+                    f"{len(attachments)} attachment stream(s) cannot be preserved "
+                    f"in {plan.profile.output_container.upper()} without data loss."
+                ),
+                suggestion="Use MKV output to preserve source attachments.",
+            ))
+        else:
+            findings.append(PreflightFinding(
+                code="aux.attachments.preserved",
+                severity="ok",
+                message=f"{len(attachments)} attachment stream(s) will be preserved.",
+            ))
+    if data:
+        if unsupported_data:
+            descriptions = ", ".join(
+                stream.codec_tag or stream.codec or "unknown"
+                for stream in unsupported_data
+            )
+            findings.append(PreflightFinding(
+                code="aux.data.unsupported",
+                severity="fail",
+                message=(
+                    f"Data stream(s) [{descriptions}] cannot be preserved in "
+                    f"{plan.profile.output_container.upper()} without data loss."
+                ),
+                suggestion=(
+                    "Use MOV for tmcd timecode; otherwise externalize or remove "
+                    "the data stream before processing."
+                ),
+            ))
+        else:
+            findings.append(PreflightFinding(
+                code="aux.data.preserved",
+                severity="ok",
+                message=f"{len(data)} MOV timecode data stream(s) will be preserved.",
+            ))
+    if attached_pictures:
+        if unsupported_pictures:
+            findings.append(PreflightFinding(
+                code="aux.attached_pic.unsupported",
+                severity="fail",
+                message=(
+                    f"{len(attached_pictures)} attached picture stream(s) cannot "
+                    f"be preserved in {plan.profile.output_container.upper()} "
+                    "with their cover-art semantics."
+                ),
+                suggestion="Use MP4 output with JPEG or PNG cover art.",
+            ))
+        else:
+            findings.append(PreflightFinding(
+                code="aux.attached_pic.preserved",
+                severity="ok",
+                message=(
+                    f"{len(attached_pictures)} attached picture stream(s) will "
+                    "be preserved."
+                ),
+            ))
+    return findings
 
 
 def _check_loudnorm(plan: Plan) -> list[PreflightFinding]:

@@ -16,10 +16,10 @@ probe, bounded streaming FFmpeg logs и stall watchdog, static HDR10 metadata
 contract, stream title/disposition validation, bounded persistent web run store и
 уникальная identity каждого queue-worker процесса.
 
-Post-fix verification на этом хосте:
+Post-fix verification на этом хосте (обновлено 2026-09-03):
 
 - Ruff и strict mypy: passed (`155` source files).
-- Canonical `make check`: `1390 passed, 2 skipped` на полностью установленном
+- Canonical `make check`: `1415 passed, 2 skipped` на полностью установленном
   optional environment (финальный повтор после fixes).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
@@ -137,17 +137,17 @@ Web / distributed worker: QA is not automatic
 
 | Component | File / API | Responsibility | Input → Output | Audit result |
 |---|---|---|---|---|
-| Probe | `core/probe.py::probe` | ffprobe JSON → `SourceMeta` | media path → stream metadata | Хорошая defensive parsing; недостаточно HDR/timestamp/topology metadata |
+| Probe | `core/probe.py::probe` | ffprobe JSON → `SourceMeta` | media path → stream metadata | A/V/S/chapter/HDR plus internal attachment/data/cover-art topology; stable serialized schema retained |
 | Profile | `core/profile_loader.py`, `core/models.py::Profile` | YAML validation, transform configs | YAML → typed profile | Единый engine сохранён; часть top-level полей не подключена |
 | Plan | `core/orchestrator.py::build_plan` | source/profile/encoder/seed/hash | metadata → `Plan` | Hash не удостоверяет содержимое |
 | Encoder | `core/encoder.py` | availability smoke and selection | FFmpeg build → candidate | Проверяет запуск, но только 640×360 8-bit |
-| Preflight | `core/preflight.py` | policy/capability checks | `Plan` → findings | Полезен; не проверяет mux compatibility/topology и все stream tracks |
+| Preflight | `core/preflight.py` | policy/capability checks | `Plan` → findings | Container-aware subtitle/auxiliary/multi-video policy now blocks known lossy mappings; uncommon codecs need fixtures |
 | Transform registry | `core/transforms/` | typed filter fragments | labels/params/RNG → filter chain | Хорошо унифицирован; есть ошибки параметризации и channel-awareness |
 | Filter graph | `core/pipeline.py` | filter order, mapping, codec args | plan → FFmpeg argv | Основной segmented и legacy full-file paths расходятся |
 | Segmentation | `core/segmenter.py` | keyframe/scene plans, parallel encode, concat | plan → segments → output | Fused path экономит I/O; timestamp/stream/timeout defects |
 | Resume | `core/checkpoint.py` | state, hashes, locks | segment state ↔ JSON | Atomic segment hashes сильны; identity/locking/final validation слабы |
 | Runner | `core/runner.py` | subprocess, progress, cancel, NVENC retry | argv → events/result | Process-tree cancel хорош; нет stall/wall timeout, logs держатся в RAM |
-| Metadata | `core/metadata.py` | sanitize/reapply metadata | source metadata → args | Language partial; chapters/subtitle dispositions/attachments теряются |
+| Metadata | `core/metadata.py`, `core/auxiliary_streams.py` | sanitize/reapply metadata and auxiliary policy | source metadata → args | Selected stream/chapter plus supported attachment/timecode/cover metadata preserved and validated |
 | QA | `core/qa/` | pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | Богатая диагностика; verdict неполон и метрики плохо сопоставлены |
 | Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | Математически неустойчива, SSCD objective ошибочен |
 | CLI | `cli/` | user orchestration | args → core APIs | Полное покрытие функций; `--encoder Force` фактически preference |
@@ -424,7 +424,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1361 passed, 2 skipped на fully provisioned macOS environment |
+| Full `make check` | 1415 passed, 2 skipped на fully provisioned macOS environment |
 | Ruff | Passed |
 | Strict mypy (`155` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
@@ -434,6 +434,10 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | Chapters smoke | Post-fix passed: 2 → 2 chapters |
 | No-audio-transform smoke | Post-fix passed: selected source audio preserved |
 | MKV/SRT→MP4 smoke | Post-fix passed: SubRip → mov_text |
+| MKV attachment | Post-fix passed: filename/mimetype and extracted bytes preserved |
+| MOV timecode | Post-fix passed: tmcd track and `01:00:00:00` preserved |
+| MP4 attached picture | Post-fix passed: one program video plus byte-identical JPEG cover |
+| ASS subtitle | Post-fix passed: MKV copy and MOV mov_text conversion with language/title |
 | Windowed audio 125 s | Post-fix passed: error ≤ 0.03 s |
 | 44.1 kHz `soft` smoke | Post-fix passed: 29.991 s, 48 kHz, -14.0 LUFS |
 | Timestamp smoke | Post-fix passed: video starts 0.000 s, 752/752 frames |

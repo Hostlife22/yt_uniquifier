@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import needs_ffmpeg
+from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.pipeline import build_main_audio_command_windowed
@@ -124,6 +125,117 @@ def multi_audio_source(tmp_path: Path) -> Path:
     return source
 
 
+@pytest.fixture
+def attached_mkv_source(tmp_path: Path) -> Path:
+    attachment = tmp_path / "licensed-font.txt"
+    attachment.write_bytes(b"authorized attachment payload\n")
+    source = tmp_path / "attached.mkv"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-attach", str(attachment),
+            "-metadata:s:t:0", "filename=licensed-font.txt",
+            "-metadata:s:t:0", "mimetype=text/plain",
+            str(source),
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    return source
+
+
+@pytest.fixture
+def timecode_mov_source(tmp_path: Path) -> Path:
+    source = tmp_path / "timecode.mov"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-timecode", "01:00:00:00",
+            str(source),
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    return source
+
+
+@pytest.fixture
+def cover_art_mp4_source(tmp_path: Path) -> Path:
+    cover = tmp_path / "cover.jpg"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=red:size=320x180",
+            "-frames:v", "1", str(cover),
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    source = tmp_path / "cover-source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-i", str(cover),
+            "-map", "0:v:0", "-map", "1:a:0", "-map", "2:v:0",
+            "-c:v:0", "libx264", "-preset:v:0", "ultrafast",
+            "-pix_fmt:v:0", "yuv420p", "-c:a", "aac", "-c:v:1", "copy",
+            "-disposition:v:1", "attached_pic",
+            "-metadata:s:v:1", "title=Cover",
+            str(source),
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    return source
+
+
+@pytest.fixture
+def ass_subtitle_source(tmp_path: Path) -> Path:
+    subtitle = tmp_path / "captions.ass"
+    subtitle.write_text(
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "PlayResX: 160\nPlayResY: 90\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: Default,Arial,14,&H00FFFFFF,&H000000FF,&H00000000,"
+        "&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:00.10,0:00:01.50,Default,,0,0,0,,"
+        "Authorized subtitle\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "ass-source.mkv"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-i", str(subtitle),
+            "-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-c:s", "ass",
+            "-metadata:s:s:0", "language=eng",
+            "-metadata:s:s:0", "title=Styled captions",
+            str(source),
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    return source
+
+
 @needs_ffmpeg
 @pytest.mark.integration
 def test_no_audio_transform_preserves_main_audio_subtitles_and_chapters(
@@ -212,6 +324,123 @@ def test_all_audio_tracks_use_container_compatible_codecs(
     result = probe(output)
     assert [stream.codec for stream in result.audio] == ["aac", "aac"]
     assert [stream.language for stream in result.audio] == ["eng", "spa"]
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_mkv_attachment_survives_full_pipeline(
+    attached_mkv_source: Path, tmp_path: Path, isolated_cache: Path,
+) -> None:
+    soft = load_profile(PROFILES_DIR / "soft.yaml")
+    profile = soft.model_copy(update={"output_container": "mkv"})
+    plan = build_plan(attached_mkv_source, profile, encoder_override="libx264")
+    output = tmp_path / "attached-output.mkv"
+
+    run_full(plan, RunOptions(
+        work_dir=tmp_path / "work-attached", output=output,
+        target_segment_sec=600,
+    ))
+
+    auxiliary = get_auxiliary_streams(probe(output))
+    assert len(auxiliary) == 1
+    assert auxiliary[0].kind == "attachment"
+    assert auxiliary[0].filename == "licensed-font.txt"
+    assert auxiliary[0].mimetype == "text/plain"
+    extracted = tmp_path / "extracted.txt"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-dump_attachment:t:0", str(extracted), "-i", str(output),
+            "-f", "null", "-",
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+    assert extracted.read_bytes() == b"authorized attachment payload\n"
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_mov_timecode_track_survives_full_pipeline(
+    timecode_mov_source: Path, tmp_path: Path, isolated_cache: Path,
+) -> None:
+    soft = load_profile(PROFILES_DIR / "soft.yaml")
+    profile = soft.model_copy(update={"output_container": "mov"})
+    plan = build_plan(timecode_mov_source, profile, encoder_override="libx264")
+    output = tmp_path / "timecode-output.mov"
+
+    run_full(plan, RunOptions(
+        work_dir=tmp_path / "work-timecode", output=output,
+        target_segment_sec=600,
+    ))
+
+    auxiliary = get_auxiliary_streams(probe(output))
+    assert len(auxiliary) == 1
+    assert auxiliary[0].kind == "data"
+    assert auxiliary[0].codec_tag == "tmcd"
+    assert auxiliary[0].timecode == "01:00:00:00"
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_mp4_attached_picture_survives_full_pipeline(
+    cover_art_mp4_source: Path, tmp_path: Path, isolated_cache: Path,
+) -> None:
+    soft = load_profile(PROFILES_DIR / "soft.yaml")
+    plan = build_plan(cover_art_mp4_source, soft, encoder_override="libx264")
+    output = tmp_path / "cover-output.mp4"
+
+    run_full(plan, RunOptions(
+        work_dir=tmp_path / "work-cover", output=output,
+        target_segment_sec=600,
+    ))
+
+    result = probe(output)
+    assert len(result.video) == 1
+    auxiliary = get_auxiliary_streams(result)
+    assert len(auxiliary) == 1
+    assert auxiliary[0].kind == "attached_pic"
+    assert auxiliary[0].codec == "mjpeg"
+    source_cover = tmp_path / "source-cover.jpg"
+    output_cover = tmp_path / "output-cover.jpg"
+    for media, extracted in (
+        (cover_art_mp4_source, source_cover),
+        (output, output_cover),
+    ):
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(media), "-map", "0:v:1", "-c", "copy",
+                "-frames:v", "1", str(extracted),
+            ],
+            check=True, capture_output=True, timeout=60,
+        )
+    assert output_cover.read_bytes() == source_cover.read_bytes()
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_ass_subtitle_policy_for_mkv_and_mov(
+    ass_subtitle_source: Path, tmp_path: Path, isolated_cache: Path,
+) -> None:
+    soft = load_profile(PROFILES_DIR / "soft.yaml")
+    expected_codecs = {"mkv": {"ass"}, "mov": {"mov_text", "tx3g"}}
+    for container in ("mkv", "mov"):
+        profile = soft.model_copy(update={
+            "name": f"ass-{container}",
+            "output_container": container,
+        })
+        plan = build_plan(ass_subtitle_source, profile, encoder_override="libx264")
+        output = tmp_path / f"ass-output.{container}"
+        run_full(plan, RunOptions(
+            work_dir=tmp_path / f"work-ass-{container}", output=output,
+            target_segment_sec=600,
+        ))
+
+        subtitle = probe(output).subtitle
+        assert len(subtitle) == 1
+        assert subtitle[0].codec in expected_codecs[container]
+        assert subtitle[0].language == "eng"
+        assert subtitle[0].title == "Styled captions"
 
 
 @needs_ffmpeg

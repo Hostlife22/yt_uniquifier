@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     import datetime
 
+from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
 from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
@@ -655,6 +656,7 @@ def _run_full_body(
         audio_source_indices=selected_audio_indices,
         audio_streams=[plan.source.audio[index] for index in selected_audio_indices],
         subtitle_codecs=[stream.codec for stream in plan.source.subtitle],
+        auxiliary_streams=list(get_auxiliary_streams(plan.source)),
         target_duration_sec=expected_output_duration(plan),
     )
     # v0.4.3 — optional bitstream sanitization (second-pass libx264).

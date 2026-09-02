@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream, get_auxiliary_streams
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.pipeline import expected_output_duration
@@ -95,6 +96,12 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
             "chapters.count", expected_chapters, len(result.chapters),
         ))
 
+    _compare_auxiliary_streams(
+        failures,
+        get_auxiliary_streams(plan.source),
+        get_auxiliary_streams(result),
+    )
+
     duration_expected = expected_output_duration(plan)
     fps = plan.source.video[0].fps if plan.source.video else 25.0
     # MP4 edit lists and AAC priming can make probed container/stream duration
@@ -113,6 +120,40 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
         _compare_color_contract(failures, plan, result.video[0].color)
 
     return MediaInvariantReport(output=output, failures=tuple(failures))
+
+
+def _compare_auxiliary_streams(
+    failures: list[MediaInvariantFailure],
+    expected: tuple[AuxiliaryStream, ...],
+    actual: tuple[AuxiliaryStream, ...],
+) -> None:
+    for kind in ("attachment", "data", "attached_pic"):
+        expected_kind = [stream for stream in expected if stream.kind == kind]
+        actual_kind = [stream for stream in actual if stream.kind == kind]
+        if len(expected_kind) != len(actual_kind):
+            failures.append(MediaInvariantFailure(
+                f"streams.{kind}", len(expected_kind), len(actual_kind),
+            ))
+            continue
+        fields: tuple[str, ...]
+        if kind == "attachment":
+            fields = ("codec", "codec_tag", "filename", "mimetype", "title")
+        elif kind == "data":
+            fields = ("codec", "codec_tag", "language", "title", "timecode")
+        else:
+            fields = ("codec", "title")
+        for index, (expected_stream, actual_stream) in enumerate(zip(
+            expected_kind, actual_kind, strict=True,
+        )):
+            for field_name in fields:
+                expected_value = getattr(expected_stream, field_name)
+                actual_value = getattr(actual_stream, field_name)
+                if expected_value != actual_value:
+                    failures.append(MediaInvariantFailure(
+                        f"streams.{kind}.{index}.{field_name}",
+                        expected_value,
+                        actual_value,
+                    ))
 
 
 def _compare_color_contract(

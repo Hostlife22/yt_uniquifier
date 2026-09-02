@@ -14,6 +14,12 @@ the last tag.
 
 ### Fixed
 
+- Preserve MKV attachment streams, MOV `tmcd` timecode tracks, and supported
+  MP4 JPEG/PNG cover art through final muxing, including semantic metadata and
+  final media-contract validation.
+- Reject auxiliary/container combinations and multiple program-video inputs
+  that the pipeline cannot preserve instead of silently dropping streams;
+  distinguish MP4/MOV's synthesized chapter carrier from user data streams.
 - Wake checkpoint persistence immediately on pause/resume state transitions,
   avoiding a one-second polling race that could miss short pauses on Windows.
 - Invalidate checkpoint state when a new `--segment-sec` produces different

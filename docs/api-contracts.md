@@ -44,7 +44,7 @@ Every model below has its full JSON schema locked by
 | `AudioStream` | `core/models.py` | `frozen=True`. v1.4 adds optional `title` and `dispositions`. |
 | `SubtitleStream` | `core/models.py` | `frozen=True`. v1.4 adds optional `title`, `is_default`, and `dispositions`. |
 | `Chapter` | `core/models.py` | `frozen=True`. |
-| `SourceMeta` | `core/models.py` | `frozen=True`. The full probe result. |
+| `SourceMeta` | `core/models.py` | `frozen=True`. Stable serialized A/V/subtitle/chapter probe result. Auxiliary attachment/data/cover-art topology is intentionally private/internal so this corrective change does not alter the v1 schema. |
 | `EncoderCandidate` | `core/models.py` | `frozen=True`. `max_parallel ∈ [1, 64]`; includes AV1 software vendors `svtav1` and `libaom`. |
 | `TransformConfig` | `core/models.py` | `extra="forbid"`. `params: dict[str, object]` — the parameter dict is shape-checked at the transform's own `*Params` model, not here. |
 | `SegmentationConfig` | `core/models.py` | `extra="forbid"`. v0.8.0 added `mode="scene"` opt-in. |

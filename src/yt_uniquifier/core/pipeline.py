@@ -23,11 +23,12 @@ import json
 import random
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from yt_uniquifier import __version__
+from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import (
     EncoderCandidate,
@@ -1267,6 +1268,15 @@ def compute_plan_hash(
         "encoder": encoder.name,
         "tool_version": __version__,
     }
+    auxiliary_streams = get_auxiliary_streams(source)
+    if auxiliary_streams:
+        # Keep hashes for the overwhelmingly common no-auxiliary case stable
+        # across this corrective release. Existing checkpoints only need
+        # invalidation when newly-modelled attachment/data/cover topology is
+        # actually present.
+        payload["source_auxiliary"] = [
+            asdict(stream) for stream in auxiliary_streams
+        ]
     raw = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 

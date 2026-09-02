@@ -1,6 +1,6 @@
 # Production Risk Register
 
-Дата: 2026-09-02. Статусы: `RESOLVED`, `PARTIAL`, `OPEN`, `NOT VERIFIED`. Сокращённые
+Дата: 2026-09-03. Статусы: `RESOLVED`, `PARTIAL`, `OPEN`, `NOT VERIFIED`. Сокращённые
 `core/...`, `web/...` и `cli/...` пути в таблице имеют общий префикс
 `src/yt_uniquifier/`.
 
@@ -24,9 +24,9 @@ gate. Это не переносит результат автоматическ
 | P1 | Cached main audio | **RESOLVED:** cached audio не имел integrity check | `core/checkpoint.py`; `segmenter.py::process_main_audio` | Corrupt audio reused | SHA256 + atomic temp replace |
 | P1 | Speed/duration | **PARTIAL:** mismatched/unsafe timeline combinations теперь rejected | `core/preflight.py::_check_timeline_rate`; `pipeline.py::expected_output_duration` | Tail loss/desync | Matching main A/V rate supported; aux streams require future explicit retiming |
 | P1 | SAR/DAR | **RESOLVED:** crop/resize оставлял неверный SAR | `core/transforms/video_geom.py`; real SAR 1:1 test | Искажённое отображение | `setsar=1` after scale |
-| P1 | Stream topology | **PARTIAL:** selected audio/subtitle language, title и dispositions теперь preserved/validated; attachments/data policy остаётся open | `core/probe.py`, `core/metadata.py`, `core/media_validation.py` | Lossy remux для unsupported stream classes | Добавить явную attachment/data policy и полную MKV/MOV codec matrix |
+| P1 | Stream topology | **RESOLVED for declared policy:** selected A/V/S metadata, MKV attachments, MOV tmcd и MP4 JPEG/PNG cover art preserved/validated; incompatible auxiliary and multi-program-video inputs rejected | `core/auxiliary_streams.py`, `core/probe.py`, `core/segmenter.py`, `core/media_validation.py`; byte/timecode integration tests | Silent stream loss prevented | Keep real PGS and uncommon data codecs NOT VERIFIED until licensed fixtures exist |
 | P1 | Profile audio_tracks | **RESOLVED:** extras игнорировали profile selection | `core/stream_policy.py`; orchestrator/concat tests | Contract mismatch/privacy/size surprise | Unified first/all/absolute-index selection |
-| P1 | Metadata | **PARTIAL:** selected stream language/title/dispositions и chapters preserved/validated; attachments/data не поддержаны | `core/metadata.py`, `core/media_validation.py` | Lossy remux для unsupported streams | Явно preserve/externalize/reject attachments/data |
+| P1 | Metadata | **RESOLVED for supported containers:** selected stream/chapter metadata plus attachment filename/mimetype and timecode are preserved/validated | `core/metadata.py`, `core/auxiliary_streams.py`, `core/media_validation.py` | Unsupported metadata no longer disappears silently | Extend only from real muxer-qualified fixtures |
 | P1 | HDR metadata | **PARTIAL:** static ST2086/CLL probe+x265 preservation verified; dynamic HDR rejected; HLG/hardware static path open | `core/probe.py`, `core/pipeline.py`, `core/preflight.py`; real HDR test | Silent HDR loss предотвращён, но matrix неполна | Квалифицировать HLG/natural corpus и каждый hardware encoder отдельно |
 | P1 | Encoder capability | **RESOLVED locally:** discovery дополнен exact job resolution/pixfmt/color/RC probe; cache включает OS/GPU signature | `core/encoder.py::probe_encoder_for_plan`, `core/pipeline.py::build_encoder_capability_probe` | Unsupported job fails before segments | Сохранять per-platform qualification artifacts; invalidate on runtime device failure |
 | P1 | Runner hang | **RESOLVED:** bounded streaming log, 600 s silent-stall watchdog, optional wall policy, process-group termination | `core/runner.py`; real silent/heartbeat/wall tests | Hung job terminates with diagnosis | Оставить wall timeout opt-in для long-form; monitor timeout events |

@@ -12,6 +12,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+from yt_uniquifier.core.auxiliary_streams import (
+    AuxiliaryKind,
+    AuxiliaryStream,
+    set_auxiliary_streams,
+)
 from yt_uniquifier.core.errors import ProbeError
 from yt_uniquifier.core.models import (
     AudioStream,
@@ -95,6 +100,8 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
     for s in streams:
         kind = s.get("codec_type")
         if kind == "video":
+            if bool((s.get("disposition") or {}).get("attached_pic", 0)):
+                continue
             first_frame: dict[str, Any] = next(
                 (
                     frame for frame in frames
@@ -108,7 +115,6 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
             audio.append(_parse_audio(s))
         elif kind == "subtitle":
             subtitle.append(_parse_subtitle(s))
-        # data/attachment streams ignored
 
     duration = _to_float(fmt.get("duration"), 0.0)
     size_bytes = _to_int(fmt.get("size"), 0)
@@ -116,7 +122,7 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
 
     chapters = [_parse_chapter(c) for c in chapters_raw]
 
-    return SourceMeta(
+    result = SourceMeta(
         path=path,
         container=container,
         duration_sec=duration,
@@ -126,6 +132,58 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
         subtitle=subtitle,
         chapters=chapters,
     )
+    set_auxiliary_streams(
+        result,
+        _parse_auxiliary_streams(streams, has_chapters=bool(chapters_raw)),
+    )
+    return result
+
+
+def _parse_auxiliary_streams(
+    streams: list[dict[str, Any]],
+    *,
+    has_chapters: bool = False,
+) -> tuple[AuxiliaryStream, ...]:
+    result: list[AuxiliaryStream] = []
+    for stream in streams:
+        raw_kind = stream.get("codec_type")
+        is_attached_pic = (
+            raw_kind == "video"
+            and bool((stream.get("disposition") or {}).get("attached_pic", 0))
+        )
+        if raw_kind not in {"attachment", "data"} and not is_attached_pic:
+            continue
+        tags = stream.get("tags") or {}
+        if (
+            has_chapters
+            and raw_kind == "data"
+            and str(stream.get("codec_name") or "").lower() == "bin_data"
+            and str(stream.get("codec_tag_string") or "").lower() == "text"
+            and str(tags.get("handler_name") or "") == "SubtitleHandler"
+        ):
+            # FFmpeg's MOV/MP4 muxer synthesizes this data track as the
+            # chapter representation. Chapters are parsed and validated via
+            # SourceMeta.chapters, so counting their carrier again would
+            # report a false unexpected auxiliary stream.
+            continue
+        kind = "attached_pic" if is_attached_pic else raw_kind
+        title = tags.get("title") or tags.get("handler_name")
+        result.append(AuxiliaryStream(
+            index=_to_int(stream.get("index"), 0),
+            kind=cast(AuxiliaryKind, kind),
+            codec=str(stream.get("codec_name") or ""),
+            codec_tag=str(stream.get("codec_tag_string") or ""),
+            filename=_optional_string(tags.get("filename")),
+            mimetype=_optional_string(tags.get("mimetype")),
+            language=_optional_string(tags.get("language")),
+            title=_optional_string(title),
+            timecode=_optional_string(tags.get("timecode")),
+        ))
+    return tuple(result)
+
+
+def _optional_string(value: object) -> str | None:
+    return str(value) if value not in {None, ""} else None
 
 
 def _parse_video(

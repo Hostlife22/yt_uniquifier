@@ -7,9 +7,12 @@ The Plan model is the durable input to the rest of the pipeline.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+
+if TYPE_CHECKING:
+    from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream
 
 ColorTransfer = Literal[
     "bt709",
@@ -137,6 +140,9 @@ class SourceMeta(BaseModel):
     audio: list[AudioStream] = Field(default_factory=list)
     subtitle: list[SubtitleStream] = Field(default_factory=list)
     chapters: list[Chapter] = Field(default_factory=list)
+    # Probe-only topology. PrivateAttr deliberately keeps the stable
+    # SourceMeta JSON schema and serialized Plan contract unchanged.
+    _auxiliary_streams: tuple[AuxiliaryStream, ...] = PrivateAttr(default=())
 
 
 class EncoderCandidate(BaseModel):

@@ -5,7 +5,7 @@ profile engine или QA system не создаются. План был сог�
 Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
-## Статус на 2026-09-02
+## Статус на 2026-09-03
 
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
@@ -99,8 +99,14 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
 
 ### 1.3 Исправить stream/chapter/container mapping
 
+**Status 2026-09-03:** implemented for declared policy. Main/selected audio,
+SRT/ASS, chapters, stream metadata, MKV attachments, MOV `tmcd` and MP4 JPEG/PNG
+cover art are preserved and final-contract validated. Unsupported auxiliary and
+multiple program-video inputs fail preflight. Real PGS remains `NOT VERIFIED`.
+
 - **Files:** `core/orchestrator.py`, `core/segmenter.py`, `core/metadata.py`,
-  `core/preflight.py`, mapping helpers in `core/pipeline.py`.
+  `core/preflight.py`, `core/auxiliary_streams.py`, mapping helpers in
+  `core/pipeline.py`.
 - **Current behavior:** main audio omitted when unfiltered; chapters dropped; all
   subtitles/additional audio copied blindly.
 - **Problem:** data loss and late mux failures.
