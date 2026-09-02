@@ -40,7 +40,8 @@ the last tag.
 - Terminate FFmpeg and its watcher if a frontend progress callback fails, so a
   paused or silent child process cannot be orphaned.
 - Give automatic shared-filesystem workers process-unique heartbeat identities so
-  a live sibling on the same host cannot mask an abandoned lease.
+  a live sibling on the same host cannot mask an abandoned lease, including when
+  cloud hostnames reach the queue's 64-character path-component limit.
 - Preserve `target_vmaf` behavior in distributed worker mode instead of silently
   clearing the profile setting.
 - Keep the Intel-macOS ML extra compatible by constraining it to NumPy 1.x and an

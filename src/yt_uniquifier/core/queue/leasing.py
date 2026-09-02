@@ -118,13 +118,16 @@ class FileQueue:
         self.layout = queue_layout(root)
         explicit_host = host is not None
         self.host = _safe_host_name(host or socket.gethostname())
-        self.worker_id = (
-            self.host
-            if explicit_host
-            else _safe_host_name(
-                f"{self.host}-{os.getpid()}-{secrets.token_hex(4)}"
-            )
-        )
+        if explicit_host:
+            self.worker_id = self.host
+        else:
+            # Preserve the uniqueness suffix when a cloud runner reports a
+            # hostname at (or beyond) the 64-character path-component policy.
+            # Sanitising the combined string used to truncate PID+nonce away,
+            # making every FileQueue instance on that host share one lease dir.
+            suffix = f"-{os.getpid()}-{secrets.token_hex(4)}"
+            host_prefix = self.host[:max(1, _MAX_HOST_LEN - len(suffix))]
+            self.worker_id = f"{host_prefix}{suffix}"
         self.host_dir = self.layout.in_progress / self.worker_id
         self.host_dir.mkdir(parents=True, exist_ok=True)
         # B8 (v0.6.0): cached sorted candidate name list so lease() does

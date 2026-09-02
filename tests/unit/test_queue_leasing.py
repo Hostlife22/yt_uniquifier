@@ -97,12 +97,22 @@ def test_lease_empty_returns_none(tmp_path: Path) -> None:
     assert q.lease() is None
 
 
-def test_implicit_worker_identity_is_unique_per_instance(tmp_path: Path) -> None:
+def test_implicit_worker_identity_is_unique_per_instance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # GitHub's macOS arm64 runner can report a hostname longer than the queue's
+    # 64-character component policy. The PID+nonce must survive truncation.
+    monkeypatch.setattr(
+        "yt_uniquifier.core.queue.leasing.socket.gethostname",
+        lambda: "cloud-runner-" + "a" * 100,
+    )
     init_queue(tmp_path / "q")
     first = FileQueue(tmp_path / "q")
     second = FileQueue(tmp_path / "q")
 
     assert first.host == second.host
+    assert len(first.worker_id) <= 64
+    assert len(second.worker_id) <= 64
     assert first.worker_id != second.worker_id
     assert first.host_dir != second.host_dir
     first.heartbeat()
