@@ -18,6 +18,7 @@ from yt_uniquifier.core.models import (
     HDRInfo,
     Plan,
     Profile,
+    Segment,
     SourceMeta,
     TransformConfig,
     VideoStream,
@@ -25,6 +26,8 @@ from yt_uniquifier.core.models import (
 from yt_uniquifier.core.pipeline import (
     FilterGraph,
     build_encoder_capability_probe,
+    build_video_segment_command,
+    build_video_segment_command_fused,
     compute_plan_hash,
 )
 from yt_uniquifier.core.transforms import audio_loudnorm
@@ -102,6 +105,24 @@ def test_full_graph_and_segment_probe_share_encoder_policy(tmp_path: Path) -> No
     assert all(arg in probe_args for arg in expected)
     assert "testsrc2=s=1920x1080:r=24:d=0.25" in probe_args
     assert probe_args[probe_args.index("-vf") + 1] == "format=yuv420p"
+
+
+def test_video_encode_commands_preserve_input_cadence(tmp_path: Path) -> None:
+    source = _src(tmp_path)
+    plan = _plan(source, [])
+    segment = Segment(idx=0, start_sec=0.0, end_sec=5.0)
+    commands = [
+        FilterGraph(plan, tmp_path / "full.mp4").build().args,
+        build_video_segment_command(
+            plan, source.path, tmp_path / "legacy.mkv",
+        ).args,
+        build_video_segment_command_fused(
+            plan, segment, source.path, tmp_path / "fused.mkv",
+        ).args,
+    ]
+
+    for args in commands:
+        assert args[args.index("-fps_mode") + 1] == "passthrough"
 
 
 def test_encoder_probe_uses_profile_canvas_and_hdr_pix_fmt(tmp_path: Path) -> None:

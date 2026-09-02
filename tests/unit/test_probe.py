@@ -120,6 +120,28 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert a.dispositions == ("default", "original")
 
 
+def test_vfr_video_uses_average_frame_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """r_frame_rate is only a nominal/maximum cadence for VFR sources."""
+    src = tmp_path / "vfr.mp4"
+    src.touch()
+    payload = _ffprobe_json(video=[{
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "h264",
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "60/1",
+        "avg_frame_rate": "110/3",
+        "duration": "6.0",
+        "pix_fmt": "yuv420p",
+    }])
+    _mock_ffprobe(monkeypatch, payload)
+
+    assert probe_mod.probe(src).video[0].fps == pytest.approx(110 / 3)
+
+
 def test_combined_mov_demuxer_uses_file_suffix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

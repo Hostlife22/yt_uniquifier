@@ -133,9 +133,13 @@ def detect_encoders(
     no-op — a cold-cache probe spawns up to 10 sequential ffmpeg
     subprocesses (~5-15 s), during which Cancel did nothing.
     """
+    # Capture once. GUI/background discovery may overlap a caller that swaps
+    # the configured cache location; resolving the module global again after
+    # all probes can redirect an in-flight write into another run's cache.
+    cache_path = _cache_path()
     version_key = _ffmpeg_version_hash()
     if not force:
-        cached = _load_cache(version_key)
+        cached = _load_cache(version_key, cache_path=cache_path)
         if cached is not None:
             return cached
 
@@ -163,7 +167,7 @@ def detect_encoders(
                 raise PipelineError("encoder detection cancelled by user")
             by_key[key] = fut.result()
     results = [by_key[(name, vendor, codec)] for name, vendor, codec in _CANDIDATES]
-    _save_cache(version_key, results)
+    _save_cache(version_key, results, cache_path=cache_path)
     return results
 
 
@@ -420,8 +424,10 @@ def probe_encoder_for_plan(plan: Plan) -> EncoderCapabilityResult:
     return result
 
 
-def _load_cache(version_key: str) -> list[EncoderCandidate] | None:
-    cache_path = _cache_path()
+def _load_cache(
+    version_key: str, *, cache_path: Path | None = None,
+) -> list[EncoderCandidate] | None:
+    cache_path = cache_path or _cache_path()
     if not cache_path.exists():
         return None
     try:
@@ -435,8 +441,13 @@ def _load_cache(version_key: str) -> list[EncoderCandidate] | None:
     return [EncoderCandidate.model_validate(c) for c in raw.get("candidates", [])]
 
 
-def _save_cache(version_key: str, candidates: list[EncoderCandidate]) -> None:
-    cache_path = _cache_path()
+def _save_cache(
+    version_key: str,
+    candidates: list[EncoderCandidate],
+    *,
+    cache_path: Path | None = None,
+) -> None:
+    cache_path = cache_path or _cache_path()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,

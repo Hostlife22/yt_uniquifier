@@ -140,8 +140,8 @@ def test_detect_encoders_runs_probes_in_parallel(
     """
     from yt_uniquifier.core import encoder as enc_mod
 
-    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k: None)
-    monkeypatch.setattr(enc_mod, "_save_cache", lambda _k, _r: None)
+    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k, **_kw: None)
+    monkeypatch.setattr(enc_mod, "_save_cache", lambda _k, _r, **_kw: None)
     monkeypatch.setattr(enc_mod, "_ffmpeg_version_hash", lambda: "dead")
 
     def slow_probe(name: str, vendor: str, codec: str) -> enc_mod.EncoderCandidate:

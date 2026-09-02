@@ -14,6 +14,7 @@
 | 2 × concurrent H.264 VideoToolbox 1080p | 180/180 frames каждый; 7.72 s/job, 8.09 s aggregate wall | `max_parallel=2` подтверждён для этого Mac |
 | MP4/MKV/MOV, 3 s tagged SDR | 7/7 integration tests; all A/V streams decode; chapters/subtitles retained by policy | Container smoke закрыт для synthetic core matrix |
 | APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
+| Segmented VFR, libx264, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software VFR preserve contract разрешён; hardware paths остаются unverified |
 
 Natural-content viewing/listening, NFS cross-host, NVENC/QSV/AMF и YouTube
 ingestion/transcode остаются `NOT VERIFIED`.

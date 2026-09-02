@@ -49,6 +49,30 @@ DEBOUNCE_MAX_SEC = 0.25
 _log = logging.getLogger(__name__)
 
 
+def _segment_topology_matches(
+    stored: object, fresh: list[Segment],
+) -> bool:
+    """Return whether cached and newly planned segment boundaries are identical."""
+    if not isinstance(stored, list) or len(stored) != len(fresh):
+        return False
+    for raw, expected in zip(stored, fresh, strict=True):
+        if not isinstance(raw, dict):
+            return False
+        try:
+            idx = int(raw["idx"])
+            start = float(raw["start_sec"])
+            end = float(raw["end_sec"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if (
+            idx != expected.idx
+            or abs(start - expected.start_sec) > 1e-9
+            or abs(end - expected.end_sec) > 1e-9
+        ):
+            return False
+    return True
+
+
 def _pid_alive(pid: int) -> bool:
     """Cross-platform live-PID probe (POSIX + Windows).
 
@@ -182,16 +206,25 @@ class CheckpointStore:
                         f"state.json is unreadable; delete it or use a different "
                         f"--work-dir. ({exc})"
                     ) from exc
-                if raw.get("plan_hash") == self.plan.plan_hash:
+                same_plan = raw.get("plan_hash") == self.plan.plan_hash
+                same_topology = _segment_topology_matches(
+                    raw.get("segments"), fresh_segments,
+                )
+                if same_plan and same_topology:
                     self._state = raw
                     demoted_any = self._verify_done_segments_on_disk()
                     if demoted_any:
                         self._flush()
                     return [Segment.model_validate(s) for s in raw.get("segments", [])]
-                # Plan changed → invalidate by renaming the stale file aside.
-                # Timestamp suffix preserves history if the user retries the
-                # same work_dir with multiple profile variations.
-                stale = self.state_path.with_suffix(f".json.stale-{int(time.time())}")
+                # Plan or segment topology changed → invalidate by renaming the
+                # stale file aside. Segment layout is a run option rather than
+                # part of Plan, so changing --segment-sec can keep plan_hash
+                # stable while making every cached seg_NNNN.mkv incompatible.
+                # Nanoseconds avoid clobbering multiple invalidations in one
+                # second while preserving the existing stale-* operator glob.
+                stale = self.state_path.with_suffix(
+                    f".json.stale-{time.time_ns()}"
+                )
                 os.replace(self.state_path, stale)
 
             self._state = {

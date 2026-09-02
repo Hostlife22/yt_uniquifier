@@ -53,8 +53,10 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] MKV roundtrip: streams, attachments, subtitles, chapters.
 - [ ] MOV roundtrip: timecode/edit-list/metadata policy.
 - [ ] CFR: 23.976/24/25/29.97/30/50/59.94/60.
-- [ ] VFR: single and multi-segment, software and advertised hardware encoders.
-- [ ] Long-GOP, sparse keyframes, static scene and rapid scene-cut segmentation.
+- [ ] VFR: multi-segment libx264 preserves 220/220 frames and 30/20/60 FPS cadence;
+      advertised hardware encoders remain pending.
+- [ ] Long-GOP, sparse keyframes, static scene and rapid scene-cut segmentation;
+      static/sparse target bounds and minimum edge length are unit-verified.
 - [ ] Every concat seam checked against matching source interval.
 
 ## 5. Audio
@@ -98,6 +100,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] Plan identity contains stable input content + full media topology fingerprint.
 - [x] Same-size/source-replacement test cannot reuse stale artifacts.
+- [x] Changed `--segment-sec` topology invalidates same-plan checkpoint state.
 - [x] Completed segment SHA + existence/size are verified before reuse; full per-segment
       media manifest remains future hardening.
 - [x] Cached main audio and final output SHA/final contract verified before no-op.
@@ -182,7 +185,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1382 passed, 2 expected skips.
+- [x] Fully provisioned `make check`: 1390 passed, 2 expected skips.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

@@ -109,7 +109,7 @@ def test_detect_encoders_raises_on_pre_call_cancel(
 
     # Force cache miss so the probe loop runs.
     from yt_uniquifier.core import encoder as enc_mod
-    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k: None)
+    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k, **_kw: None)
     monkeypatch.setattr(enc_mod, "_ffmpeg_version_hash", lambda: "dead")
 
     with pytest.raises(PipelineError, match="encoder detection cancelled"):
@@ -122,8 +122,8 @@ def test_detect_encoders_completes_normally_without_token(
     """No regression: callers that don't pass a token still work."""
     from yt_uniquifier.core import encoder as enc_mod
 
-    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k: None)
-    monkeypatch.setattr(enc_mod, "_save_cache", lambda _k, _r: None)
+    monkeypatch.setattr(enc_mod, "_load_cache", lambda _k, **_kw: None)
+    monkeypatch.setattr(enc_mod, "_save_cache", lambda _k, _r, **_kw: None)
     monkeypatch.setattr(enc_mod, "_ffmpeg_version_hash", lambda: "dead")
     monkeypatch.setattr(
         enc_mod, "_probe_one",

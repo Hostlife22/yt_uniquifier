@@ -14,6 +14,15 @@ the last tag.
 
 ### Fixed
 
+- Invalidate checkpoint state when a new `--segment-sec` produces different
+  boundaries, even when the source/profile/encoder plan hash is unchanged.
+- Keep each in-flight encoder detection bound to the cache path captured at
+  startup so overlapping GUI/background discovery cannot redirect its result.
+- Preserve decoded frame timestamps explicitly with FFmpeg
+  `-fps_mode passthrough` and report VFR inputs using their measured average
+  frame rate instead of the nominal/maximum `r_frame_rate`.
+- Bound scene-mode gaps using the requested target duration and discard scene
+  cuts that would create tiny leading or trailing segments.
 - Bound Linux CI package installation and retry transient APT failures with
   non-interactive, lock, and network timeouts instead of leaving matrix jobs
   stuck indefinitely on an unhealthy hosted runner or package mirror.

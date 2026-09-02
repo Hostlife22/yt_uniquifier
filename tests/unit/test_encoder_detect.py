@@ -79,6 +79,32 @@ def test_detect_caches_result(
     assert call_counter.call_count == first_calls
 
 
+def test_detect_keeps_cache_path_captured_at_start(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_cache: Path,
+    stub_ffmpeg_version: None,
+) -> None:
+    """A concurrent config change must not redirect an in-flight cache write."""
+    redirected = isolated_cache.with_name("redirected.json")
+    base_run = _stub_run({"libx264": 0, "libx265": 0})
+    switched = False
+
+    def switch_path_during_probe(
+        cmd: list[str], **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal switched
+        if not switched:
+            switched = True
+            monkeypatch.setattr(enc_mod, "CACHE_PATH", redirected)
+        return base_run(cmd, **kwargs)
+
+    monkeypatch.setattr(enc_mod.subprocess, "run", switch_path_during_probe)
+    enc_mod.detect_encoders(force=True)
+
+    assert isolated_cache.exists()
+    assert not redirected.exists()
+
+
 def test_force_bypasses_cache(
     monkeypatch: pytest.MonkeyPatch,
     isolated_cache: Path,

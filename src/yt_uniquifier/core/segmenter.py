@@ -15,6 +15,7 @@ import os
 import secrets
 import subprocess
 import time
+from bisect import bisect_left
 from collections.abc import Callable
 from pathlib import Path
 
@@ -265,7 +266,9 @@ def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
 
     mode = plan.profile.segmentation.mode
     if mode == "scene":
-        return _plan_scene_segments(plan, keyframes, duration)
+        return _plan_scene_segments(
+            plan, keyframes, duration, target_size_sec=target_size_sec,
+        )
     return _plan_keyframe_segments(keyframes, duration, target_size_sec)
 
 
@@ -293,9 +296,20 @@ def _plan_keyframe_segments(
 
 
 def _plan_scene_segments(
-    plan: Plan, keyframes: list[float], duration: float
+    plan: Plan,
+    keyframes: list[float],
+    duration: float,
+    *,
+    target_size_sec: float,
 ) -> list[Segment]:
-    """Scene-detected boundaries, snapped to the nearest keyframe ≤ cut."""
+    """Plan scene-preferred segments while bounding long and tiny spans.
+
+    Scene cuts remain preferred boundaries, but sparse/static content is also
+    split near ``target_size_sec`` using real keyframes. Cuts that would create
+    a leading or trailing segment shorter than ``scene_min_length_sec`` are
+    discarded. This retains resume granularity for feature-length static scenes
+    without sacrificing keyframe-safe scene boundaries.
+    """
     from yt_uniquifier.core.scene_detect import (
         detect_scene_boundaries,
         snap_to_keyframes,
@@ -312,33 +326,76 @@ def _plan_scene_segments(
         keyframes,
         min_length_sec=seg_cfg.scene_min_length_sec,
     )
-    # If nothing survived (e.g. very short clip or all cuts collapsed
-    # into the same keyframe interval), fall back to one whole-source
-    # segment — matches the keyframe-mode short-input behaviour and
-    # keeps resume working sensibly.
-    if not snapped:
-        return [
-            Segment(idx=0, start_sec=0.0, end_sec=duration, status="pending")
-        ]
-
-    segments: list[Segment] = []
-    start = 0.0
-    idx = 0
-    for b in snapped:
-        # Defensive: snap_to_keyframes already excludes <=0, but a
-        # malformed keyframe list could still surface a boundary at or
-        # beyond duration.
-        if b <= start or b >= duration:
-            continue
-        segments.append(
-            Segment(idx=idx, start_sec=start, end_sec=b, status="pending")
-        )
-        idx += 1
-        start = b
-    segments.append(
-        Segment(idx=idx, start_sec=start, end_sec=duration, status="pending")
+    preferred = _filter_scene_edges(
+        snapped, duration=duration, min_length_sec=seg_cfg.scene_min_length_sec,
     )
-    return segments
+    boundaries = _bound_scene_gaps(
+        preferred,
+        keyframes=keyframes,
+        duration=duration,
+        target_size_sec=target_size_sec,
+        min_length_sec=seg_cfg.scene_min_length_sec,
+    )
+    points = [0.0, *boundaries, duration]
+    return [
+        Segment(
+            idx=idx,
+            start_sec=start,
+            end_sec=end,
+            status="pending",
+        )
+        for idx, (start, end) in enumerate(zip(points, points[1:], strict=False))
+    ]
+
+
+def _filter_scene_edges(
+    boundaries: list[float], *, duration: float, min_length_sec: float,
+) -> list[float]:
+    """Remove scene cuts that would create sub-minimum edge segments."""
+    kept: list[float] = []
+    previous = 0.0
+    for boundary in boundaries:
+        if boundary <= previous or boundary >= duration:
+            continue
+        if boundary - previous < min_length_sec:
+            continue
+        kept.append(boundary)
+        previous = boundary
+    while kept and duration - kept[-1] < min_length_sec:
+        kept.pop()
+    return kept
+
+
+def _bound_scene_gaps(
+    preferred: list[float],
+    *,
+    keyframes: list[float],
+    duration: float,
+    target_size_sec: float,
+    min_length_sec: float,
+) -> list[float]:
+    """Add keyframe cuts so no scene gap grows far beyond the target."""
+    sorted_keyframes = sorted(set(keyframes))
+    result: list[float] = []
+    start = 0.0
+    for end in [*preferred, duration]:
+        while end - start > target_size_sec:
+            index = bisect_left(sorted_keyframes, start + target_size_sec)
+            if index >= len(sorted_keyframes):
+                break
+            candidate = sorted_keyframes[index]
+            if candidate <= start or candidate >= end:
+                break
+            # Do not manufacture a tiny segment immediately before a real
+            # scene cut. In that case the scene boundary is the better cut.
+            if end - candidate < min_length_sec:
+                break
+            result.append(candidate)
+            start = candidate
+        if end < duration:
+            result.append(end)
+            start = end
+    return result
 
 
 # ---- per-segment ops ---------------------------------------------------------

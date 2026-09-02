@@ -210,6 +210,135 @@ def test_plan_segments_scene_mode_no_cuts_returns_single_segment(
     assert segments[0].end_sec == 10.0
 
 
+def test_scene_mode_bounds_static_long_source_by_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No scene cuts must not turn a feature-length run into one huge segment."""
+    from yt_uniquifier.core import scene_detect, segmenter
+    from yt_uniquifier.core.models import (
+        EncoderCandidate,
+        Plan,
+        Profile,
+        SegmentationConfig,
+        SourceMeta,
+    )
+
+    src = tmp_path / "static.mp4"
+    src.touch()
+    keyframes = [float(second) for second in range(0, 1801, 100)]
+    monkeypatch.setattr(segmenter, "list_keyframes", lambda _p: keyframes)
+    monkeypatch.setattr(
+        scene_detect,
+        "detect_scene_boundaries",
+        lambda _p, *, threshold, min_length_sec: [],
+    )
+    plan = Plan(
+        source=SourceMeta(
+            path=src, container="mp4", duration_sec=1800.0, size_bytes=1,
+        ),
+        profile=Profile(
+            name="scene-static",
+            segmentation=SegmentationConfig(mode="scene"),
+        ),
+        encoder=EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        ),
+        plan_hash="static",
+    )
+
+    segments = segmenter.plan_segments(plan, target_size_sec=600.0)
+
+    assert [(s.start_sec, s.end_sec) for s in segments] == [
+        (0.0, 600.0),
+        (600.0, 1200.0),
+        (1200.0, 1800.0),
+    ]
+
+
+def test_scene_mode_splits_long_gap_after_last_scene(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A sparse early scene cut must not leave an unbounded final segment."""
+    from yt_uniquifier.core import scene_detect, segmenter
+    from yt_uniquifier.core.models import (
+        EncoderCandidate,
+        Plan,
+        Profile,
+        SegmentationConfig,
+        SourceMeta,
+    )
+
+    src = tmp_path / "sparse-scenes.mp4"
+    src.touch()
+    keyframes = [float(second) for second in range(0, 1801, 100)]
+    monkeypatch.setattr(segmenter, "list_keyframes", lambda _p: keyframes)
+    monkeypatch.setattr(
+        scene_detect,
+        "detect_scene_boundaries",
+        lambda _p, *, threshold, min_length_sec: [100.0],
+    )
+    plan = Plan(
+        source=SourceMeta(
+            path=src, container="mp4", duration_sec=1800.0, size_bytes=1,
+        ),
+        profile=Profile(
+            name="scene-sparse",
+            segmentation=SegmentationConfig(mode="scene"),
+        ),
+        encoder=EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        ),
+        plan_hash="sparse",
+    )
+
+    segments = segmenter.plan_segments(plan, target_size_sec=600.0)
+
+    assert segments[0].end_sec == 100.0
+    assert max(s.end_sec - s.start_sec for s in segments) <= 600.0
+
+
+def test_scene_mode_drops_tiny_leading_and_trailing_segments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from yt_uniquifier.core import scene_detect, segmenter
+    from yt_uniquifier.core.models import (
+        EncoderCandidate,
+        Plan,
+        Profile,
+        SegmentationConfig,
+        SourceMeta,
+    )
+
+    src = tmp_path / "edge-cuts.mp4"
+    src.touch()
+    keyframes = [0.0, 0.5, 2.0, 4.0, 6.0, 8.0, 9.5, 10.0]
+    monkeypatch.setattr(segmenter, "list_keyframes", lambda _p: keyframes)
+    monkeypatch.setattr(
+        scene_detect,
+        "detect_scene_boundaries",
+        lambda _p, *, threshold, min_length_sec: [0.5, 9.5],
+    )
+    plan = Plan(
+        source=SourceMeta(
+            path=src, container="mp4", duration_sec=10.0, size_bytes=1,
+        ),
+        profile=Profile(
+            name="scene-edges",
+            segmentation=SegmentationConfig(
+                mode="scene", scene_min_length_sec=2.0,
+            ),
+        ),
+        encoder=EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        ),
+        plan_hash="edges",
+    )
+
+    segments = segmenter.plan_segments(plan, target_size_sec=600.0)
+
+    assert [(s.start_sec, s.end_sec) for s in segments] == [(0.0, 10.0)]
+
+
 def test_plan_segments_keyframe_mode_unchanged_by_segmentation_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

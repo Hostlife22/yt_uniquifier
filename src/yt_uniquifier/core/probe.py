@@ -171,7 +171,7 @@ def _parse_video(
         codec=s.get("codec_name", "") or "",
         width=_to_int(s.get("width"), 0),
         height=_to_int(s.get("height"), 0),
-        fps=_parse_fps(s.get("r_frame_rate") or s.get("avg_frame_rate")),
+        fps=_video_fps(s),
         duration_sec=duration,
         pix_fmt=s.get("pix_fmt", "") or "",
         bit_rate=_to_int_or_none(s.get("bit_rate")),
@@ -301,6 +301,22 @@ def _parse_fps(value: str | None) -> float:
         den = _to_float(den_s, 0.0)
         return num / den if den else 0.0
     return _to_float(value, 0.0)
+
+
+def _video_fps(stream: dict[str, Any]) -> float:
+    """Return measured average cadence, falling back to the nominal rate.
+
+    For VFR inputs FFprobe commonly reports ``r_frame_rate`` as the maximum or
+    codec nominal cadence (for example 60) while ``avg_frame_rate`` reflects
+    the decoded timeline (for example 36.67). Diagnostics and frame-based
+    tolerances need the latter. Degenerate ``0/0`` averages still fall back to
+    ``r_frame_rate`` for attached pictures and unusual containers.
+    """
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        parsed = _parse_fps(stream.get(key))
+        if parsed > 0:
+            return parsed
+    return 0.0
 
 
 def _parse_fraction(value: str) -> float:

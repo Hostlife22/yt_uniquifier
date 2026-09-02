@@ -498,6 +498,7 @@ class FilterGraph:
             args += ["-map_chapters", "-1"]
 
         args += self._encoder_args()
+        args += _video_cadence_args()
         args += _color_output_args(self.plan)
         args += self._audio_output_args(has_main=a_label is not None)
         args += self._container_args()
@@ -671,6 +672,7 @@ def build_video_segment_command(
     args += ["-an", "-sn"]
     args += ["-map_chapters", "-1"]
     args += _encoder_args_for(plan, crf_override=crf_override)
+    args += _video_cadence_args()
     args += _color_output_args(plan)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
@@ -762,6 +764,7 @@ def build_video_segment_command_fused(
     args += ["-an", "-sn"]
     args += ["-map_chapters", "-1"]
     args += _encoder_args_for(plan, crf_override=crf_override)
+    args += _video_cadence_args()
     args += _color_output_args(plan)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
@@ -1052,6 +1055,11 @@ _DEFAULT_GPU_QUALITY = 19  # nvenc cq, qsv global_quality, amf qp_i/qp_p
 # reuses the existing 0..51 GPU quality scale because their command-line
 # knobs (cq / global_quality / qp_i / b:v) are the same family.
 _DEFAULT_AV1_CRF = 30
+
+
+def _video_cadence_args() -> list[str]:
+    """Preserve decoded frame timestamps instead of auto-inserting CFR frames."""
+    return ["-fps_mode", "passthrough"]
 
 
 def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[str]:

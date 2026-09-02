@@ -92,6 +92,29 @@ def test_different_plan_hash_invalidates(tmp_path: Path) -> None:
     assert stale_files, "expected one stale snapshot file in work_dir"
 
 
+def test_changed_segment_topology_invalidates_same_plan_resume(tmp_path: Path) -> None:
+    """Changing --segment-sec must not reuse artifacts from the old layout."""
+    work = tmp_path / "work"
+    plan = _plan(tmp_path)
+    store1 = CheckpointStore(work, plan)
+    store1.init_or_resume(_segments())
+    old_output = work / "seg_0000.mkv"
+    old_output.write_bytes(b"old topology payload")
+    store1.mark(0, "done", out_path=old_output)
+    store1.close()
+
+    replacement = [
+        Segment(idx=0, start_sec=0.0, end_sec=30.0),
+        Segment(idx=1, start_sec=30.0, end_sec=60.0),
+    ]
+    store2 = CheckpointStore(work, plan)
+    resumed = store2.init_or_resume(replacement)
+
+    assert [(s.start_sec, s.end_sec) for s in resumed] == [(0.0, 30.0), (30.0, 60.0)]
+    assert all(s.status == "pending" for s in resumed)
+    assert list(work.glob("state.json.stale-*"))
+
+
 def test_mark_invalid_index_raises(tmp_path: Path) -> None:
     store = CheckpointStore(tmp_path / "work", _plan(tmp_path))
     store.init_or_resume(_segments())

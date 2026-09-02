@@ -13,10 +13,13 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   watchdog/bounded logs; persistent bounded web lifecycle; per-process queue IDs.
 - **PARTIAL:** 2.1, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
   platform/HDR/channel matrix ещё не подтверждена.
+- **PARTIAL 2.4:** software multi-segment VFR сохраняет decoded frames/cadence;
+  scene gaps bounded target duration; hardware VFR и long-GOP corpus pending.
 - **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
-  H.264/HEVC VideoToolbox smoke, synthetic 1/2/3 h and crash/no-op resume.
-- **NOT VERIFIED / planned:** HLG/natural long-form corpus, NVENC/QSV/AMF,
-  VideoToolbox concurrency, distributed fencing and aligned transform-quality metrics.
+  HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
+  crash/no-op resume and APFS distributed fencing.
+- **NOT VERIFIED / planned:** natural long-form corpus, NVENC/QSV/AMF, hardware VFR,
+  NFS/network partitions and aligned transform-quality metrics.
 
 ## Принципы реализации
 

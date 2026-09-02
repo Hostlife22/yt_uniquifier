@@ -19,7 +19,7 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте:
 
 - Ruff и strict mypy: passed (`155` source files).
-- Canonical `make check`: `1361 passed, 2 skipped` на полностью установленном
+- Canonical `make check`: `1390 passed, 2 skipped` на полностью установленном
   optional environment (финальный повтор после fixes).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
@@ -34,9 +34,13 @@ Post-fix verification на этом хосте:
   duration drift не более `13.8 ms`; peak RSS `107/136/158 MB`.
 - Kill/resume: два completed segment сохранили SHA-256 и mtime, итог `7200/7200`
   frames; 3 h no-op resume сохранил output SHA и занял `4.24 s`.
+- Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
+  monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
+- Scene planning теперь ограничивает static/sparse gaps target duration и не
+  создаёт sub-minimum edge segments; changed segment topology invalidates resume.
 
-Это не означает готовность всей заявленной matrix: HLG, real licensed/natural
-1–3 h corpus, NVENC/QSV/AMF, VideoToolbox concurrency, multi-segment VFR и YouTube
+Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
+corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube
 ingestion/transcode остаются `NOT VERIFIED`. Synthetic и unit tests нельзя выдавать
 за доказательство этих платформенных сценариев.
 
