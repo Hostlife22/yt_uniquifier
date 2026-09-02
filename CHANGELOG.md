@@ -14,6 +14,9 @@ the last tag.
 
 ### Fixed
 
+- Bound Linux CI package installation and retry transient APT failures with
+  non-interactive, lock, and network timeouts instead of leaving matrix jobs
+  stuck indefinitely on an unhealthy hosted runner or package mirror.
 - Infer 10/12/16-bit video depth from the pixel format when FFprobe omits
   `bits_per_raw_sample`, so HEVC HDR diagnostics no longer report 10-bit
   `yuv420p10le` or `p010le` streams as 8-bit.
