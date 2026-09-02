@@ -1,6 +1,6 @@
 [project]
 name = "yt-uniquifier"
-version = "1.3.0"
+version = "1.3.1"
 description = "Production-grade re-encoder with controlled micro-transforms for owned/licensed video content."
 readme = "README.md"
 requires-python = ">=3.11"

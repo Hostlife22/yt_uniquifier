@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
+from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 
 _log = _logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def preflight(
     findings.extend(_check_audio_streams(source))
     findings.extend(_check_fps(source))
     findings.extend(_check_hdr(source, plan, encoder))
-    findings.extend(_check_subtitles(source))
+    findings.extend(_check_subtitles(source, plan))
     findings.extend(_check_loudnorm(plan))
     findings.extend(_check_bitrate(source))
     findings.extend(_check_pitch_rubberband(plan))
@@ -82,7 +83,97 @@ def preflight(
     findings.extend(_check_tonemap_sdr_input(plan, source))
     findings.extend(_check_blend_b_input(plan))
     findings.extend(_check_subtitle_burnin(plan))
+    findings.extend(_check_timeline_rate(plan))
+    findings.extend(_check_audio_channel_layout(plan))
     return findings
+
+
+def _check_audio_channel_layout(plan: Plan) -> list[PreflightFinding]:
+    """Reject transforms whose filter topology is stereo-only."""
+    has_haas = any(
+        transform.enabled and transform.id == "audio.haas_stereo"
+        for transform in plan.profile.transforms
+    )
+    if not has_haas:
+        return []
+
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    if not selected_audio:
+        return []
+    main_audio = plan.source.audio[selected_audio[0]]
+    if main_audio.channels == 2:
+        return []
+    return [PreflightFinding(
+        code="audio.haas_requires_stereo",
+        severity="fail",
+        message=(
+            "audio.haas_stereo requires a two-channel main audio stream; "
+            f"the selected stream has {main_audio.channels} channel(s)."
+        ),
+        suggestion=(
+            "Disable audio.haas_stereo or explicitly prepare a stereo mix "
+            "before processing. Automatic downmixing is intentionally avoided."
+        ),
+    )]
+
+
+def _check_timeline_rate(plan: Plan) -> list[PreflightFinding]:
+    """Reject independent video/audio rate changes that silently cut content."""
+    video_rate = 1.0
+    audio_rate = 1.0
+    for transform in plan.profile.transforms:
+        if not transform.enabled:
+            continue
+        if transform.id == "video.speed":
+            raw_rate = transform.params.get("rate", 1.0)
+            if isinstance(raw_rate, (int, float)):
+                video_rate *= float(raw_rate)
+        elif transform.id == "audio.pitch_tempo":
+            raw_tempo = transform.params.get("tempo", 1.0)
+            if isinstance(raw_tempo, (int, float)):
+                audio_rate *= float(raw_tempo)
+
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    if selected_audio and abs(video_rate - audio_rate) > 1e-6:
+        return [PreflightFinding(
+            code="timeline.rate_mismatch", severity="fail",
+            message=(
+                f"Video playback rate ({video_rate:g}) and selected main-audio "
+                f"tempo ({audio_rate:g}) differ; output would be out of sync."
+            ),
+            suggestion=(
+                "Set video.speed.rate and audio.pitch_tempo.tempo to the same "
+                "value, or remove both rate changes."
+            ),
+        )]
+    if len(selected_audio) > 1 and abs(video_rate - 1.0) > 1e-6:
+        return [PreflightFinding(
+            code="timeline.passthrough_audio_rate", severity="fail",
+            message=(
+                "Playback-rate changes cannot preserve additional stream-copy "
+                "audio tracks in sync."
+            ),
+            suggestion="Use audio_tracks: first, or remove the playback-rate change.",
+        )]
+    if abs(video_rate - 1.0) > 1e-6 and (
+        plan.source.subtitle or plan.source.chapters
+    ):
+        return [PreflightFinding(
+            code="timeline.aux_stream_rate", severity="fail",
+            message=(
+                "Playback-rate changes require retiming subtitle and chapter "
+                "timestamps, which is not yet supported safely."
+            ),
+            suggestion=(
+                "Remove video.speed for this source, or remove/retime subtitles "
+                "and chapters before processing."
+            ),
+        )]
+    return []
 
 
 def _check_tonemap_sdr_input(
@@ -786,14 +877,25 @@ def _ffmpeg_has_filter(name: str) -> bool:
         return name in _FFMPEG_FILTERS_CACHE[version_key]
 
 
-def _check_subtitles(source: SourceMeta) -> list[PreflightFinding]:
+def _check_subtitles(source: SourceMeta, plan: Plan) -> list[PreflightFinding]:
     image_based = [s for s in source.subtitle if s.is_image_based]
     if not image_based:
         return []
+    if plan.profile.output_container == "mkv":
+        return [PreflightFinding(
+            code="subs.image_based", severity="ok",
+            message=(
+                f"{len(image_based)} image-based subtitle stream(s) will be "
+                "preserved in MKV."
+            ),
+        )]
     return [PreflightFinding(
-        code="subs.image_based", severity="warn",
-        message=f"{len(image_based)} image-based subtitle stream(s) (pgs/dvb) will be skipped.",
-        suggestion="Convert to srt/ass before processing if you need to preserve them.",
+        code="subs.image_based", severity="fail",
+        message=(
+            f"{len(image_based)} image-based subtitle stream(s) cannot be muxed "
+            f"into {plan.profile.output_container.upper()} without data loss."
+        ),
+        suggestion="Use MKV output or convert the subtitles to SRT/ASS first.",
     )]
 
 
@@ -804,7 +906,10 @@ def _check_loudnorm(plan: Plan) -> list[PreflightFinding]:
     if has_loudnorm:
         return [PreflightFinding(
             code="loudnorm.ok", severity="ok",
-            message=f"Loudness will be normalized to {_LOUDNORM_TARGET} LUFS.",
+            message=(
+                f"Loudness will be normalized to "
+                f"{plan.profile.target_loudness_lufs:g} LUFS."
+            ),
         )]
     return [PreflightFinding(
         code="loudnorm.missing", severity="warn",

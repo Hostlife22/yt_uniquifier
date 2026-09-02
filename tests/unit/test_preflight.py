@@ -33,6 +33,7 @@ def _source(
     height: int = 1080,
     bit_rate: int | None = 5_000_000,
     image_subs: bool = False,
+    audio_channels: int = 2,
 ) -> SourceMeta:
     src = tmp_path / "x.mp4"
     src.touch()
@@ -53,7 +54,7 @@ def _source(
                            pix_fmt="yuv420p10le" if hdr else "yuv420p",
                            bit_rate=bit_rate, color=color)],
         audio=[AudioStream(index=1, codec=audio_codec, sample_rate=audio_sr,
-                           channels=2)],
+                           channels=audio_channels)],
         subtitle=subs,
     )
 
@@ -74,6 +75,19 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     plan = _plan(src, [TransformConfig(id="audio.loudnorm")])
     f = preflight(src, plan, plan.encoder)
     assert not has_fail(f)
+
+
+@pytest.mark.parametrize("channels", [1, 6])
+def test_haas_rejects_non_stereo_main_audio(
+    tmp_path: Path, channels: int,
+) -> None:
+    src = _source(tmp_path, audio_channels=channels)
+    plan = _plan(src, [TransformConfig(id="audio.haas_stereo")])
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "audio.haas_requires_stereo" in _codes(findings)
+    assert has_fail(findings)
 
 
 def test_ffmpeg_filter_works_positive() -> None:
@@ -208,9 +222,19 @@ def test_unusual_fps_warns(tmp_path: Path) -> None:
     assert not has_fail(f)
 
 
-def test_image_subs_warns(tmp_path: Path) -> None:
+def test_image_subs_fail_for_mp4(tmp_path: Path) -> None:
     src = _source(tmp_path, image_subs=True)
     plan = _plan(src, [TransformConfig(id="audio.loudnorm")])
+    f = preflight(src, plan, plan.encoder)
+    assert "subs.image_based" in _codes(f)
+    assert has_fail(f)
+
+
+def test_image_subs_are_preserved_in_mkv(tmp_path: Path) -> None:
+    src = _source(tmp_path, image_subs=True)
+    plan = _plan(
+        src, [TransformConfig(id="audio.loudnorm")], output_container="mkv",
+    )
     f = preflight(src, plan, plan.encoder)
     assert "subs.image_based" in _codes(f)
     assert not has_fail(f)
@@ -221,6 +245,27 @@ def test_loudnorm_missing_warns(tmp_path: Path) -> None:
     plan = _plan(src, [])  # no loudnorm in profile
     f = preflight(src, plan, plan.encoder)
     assert "loudnorm.missing" in _codes(f)
+
+
+def test_mismatched_audio_video_playback_rates_fail(tmp_path: Path) -> None:
+    src = _source(tmp_path)
+    plan = _plan(src, [
+        TransformConfig(id="video.speed", params={"rate": 0.99}),
+        TransformConfig(id="audio.pitch_tempo", params={"tempo": 1.0}),
+    ])
+    findings = preflight(src, plan, plan.encoder)
+    assert "timeline.rate_mismatch" in _codes(findings)
+    assert has_fail(findings)
+
+
+def test_matching_audio_video_playback_rates_pass(tmp_path: Path) -> None:
+    src = _source(tmp_path)
+    plan = _plan(src, [
+        TransformConfig(id="video.speed", params={"rate": 0.99}),
+        TransformConfig(id="audio.pitch_tempo", params={"tempo": 0.99}),
+    ])
+    findings = preflight(src, plan, plan.encoder)
+    assert "timeline.rate_mismatch" not in _codes(findings)
 
 
 def test_audio_sr_44k_warns(tmp_path: Path) -> None:

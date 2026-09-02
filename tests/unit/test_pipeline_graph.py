@@ -149,20 +149,28 @@ def test_hdr_source_falls_back_to_8bit_when_keep_hdr_false(tmp_path: Path) -> No
 
 def test_multitrack_audio_passthrough(tmp_path: Path) -> None:
     src = _src(tmp_path, n_audio=3)
-    plan = _plan(src, [
-        TransformConfig(id="video.crop_resize", params={"rng_seed": 7}),
-    ])
+    plan = _plan(
+        src,
+        [TransformConfig(id="video.crop_resize", params={"rng_seed": 7})],
+        audio_tracks="all",
+    )
     built = FilterGraph(plan, tmp_path / "out.mp4").build()
     args = " ".join(built.args)
     # main audio mapped through filter graph, but no audio transforms -> a_label == "0:a:0"
     assert "[0:a:0]" not in built.filter_complex  # no audio chain emitted
-    # `_src` allocates AudioStream index = 1+i, so n_audio=3 -> indices [1, 2, 3].
-    # Main is index 1; passthrough tracks are mapped by their **source** indices
-    # (2 and 3), not by their output slot. `-c:a:1/2 copy` still uses output slots.
+    # FFmpeg's ``a:N`` selector is audio-relative even though probe stream
+    # indices are absolute. Main is a:0; passthrough tracks are a:1 and a:2.
+    assert "-map 0:a:1?" in args
     assert "-map 0:a:2?" in args
-    assert "-map 0:a:3?" in args
     assert "-c:a:1 copy" in args
     assert "-c:a:2 copy" in args
+
+
+def test_first_audio_selection_does_not_copy_extra_tracks(tmp_path: Path) -> None:
+    src = _src(tmp_path, n_audio=3)
+    plan = _plan(src, [], audio_tracks="first")
+    built = FilterGraph(plan, tmp_path / "out.mp4").build()
+    assert built.passthrough_audio_maps == []
 
 
 def test_loudnorm_triggers_measurement(

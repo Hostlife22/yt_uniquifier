@@ -124,12 +124,35 @@ def test_main_audio_roundtrip(tmp_path: Path) -> None:
 
     p = tmp_path / "work" / "main_audio.m4a"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.touch()
+    p.write_bytes(b"valid cached audio")
     store.set_main_audio(p)
 
     store2 = CheckpointStore(tmp_path / "work", _plan(tmp_path))
     store2.init_or_resume(_segments())
     assert store2.get_main_audio() == p
+
+
+def test_corrupt_cached_main_audio_is_rejected(tmp_path: Path) -> None:
+    plan = _plan(tmp_path)
+    store = CheckpointStore(tmp_path / "work", plan)
+    store.init_or_resume(_segments())
+    path = tmp_path / "work" / "main_audio.m4a"
+    path.write_bytes(b"original")
+    store.set_main_audio(path)
+    path.write_bytes(b"corrupt!")
+    assert store.get_main_audio() is None
+
+
+def test_completed_output_requires_recorded_hash(tmp_path: Path) -> None:
+    store = CheckpointStore(tmp_path / "work", _plan(tmp_path))
+    store.init_or_resume(_segments())
+    output = tmp_path / "output.mp4"
+    output.write_bytes(b"valid output")
+    assert not store.output_is_valid(output)
+    store.set_output(output)
+    assert store.output_is_valid(output)
+    output.write_bytes(b"bad output!!")
+    assert not store.output_is_valid(output)
 
 
 def test_all_done(tmp_path: Path) -> None:

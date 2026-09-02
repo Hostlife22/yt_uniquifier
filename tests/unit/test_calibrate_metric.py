@@ -1,8 +1,8 @@
 """v0.8.0 R6 — calibration metric dispatch (chromaprint vs sscd).
 
 Verifies that the new ``metric`` kwarg routes to the correct evaluator,
-the ``evaluator=`` test seam bypasses real model loading, the SSCD
-inversion (``1 - mean_similarity``) is correct, and cancel still wins
+the ``evaluator=`` test seam bypasses real model loading, direct SSCD
+similarity semantics are preserved, and cancel still wins
 the race with mid-iteration ML work.
 """
 
@@ -151,10 +151,10 @@ def test_metric_sscd_via_injected_evaluator(
     assert len(seen) == 1
 
 
-def test_evaluate_sscd_inverts_mean_similarity(
+def test_evaluate_sscd_returns_mean_similarity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``_evaluate_sscd`` must return ``1 - mean_similarity`` clamped to [0, 1]."""
+    """``_evaluate_sscd`` returns direct mean similarity clamped to [0, 1]."""
     captured: list[tuple[Path, Path, CancelToken | None]] = []
 
     class _StubResult:
@@ -176,7 +176,7 @@ def test_evaluate_sscd_inverts_mean_similarity(
     ct = CancelToken()
     v = _evaluate_sscd(Path("src.mp4"), Path("out.mp4"), ct)
 
-    assert v == pytest.approx(1.0 - 0.92)
+    assert v == pytest.approx(0.92)
     assert 0.0 <= v <= 1.0
     assert captured == [(Path("src.mp4"), Path("out.mp4"), ct)]
 
@@ -184,26 +184,26 @@ def test_evaluate_sscd_inverts_mean_similarity(
 def test_evaluate_sscd_clamps_pathological_similarity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cosine in [-1, 1] could yield (1 - sim) ∈ [0, 2]; clamp guarantees [0, 1]."""
+    """Pathological cosine values are clamped to the public [0, 1] range."""
     import yt_uniquifier.core.qa.sscd as sscd_mod
 
     class _Negative:
-        mean_similarity = -0.30  # 1 - (-0.30) = 1.30 → must clamp to 1.0
+        mean_similarity = -0.30
         min_similarity = -0.30
         per_frame = (-0.30,)
 
     class _OverUnity:
-        mean_similarity = 1.05   # float-rounding edge → must clamp to 0.0
+        mean_similarity = 1.05
         min_similarity = 1.05
         per_frame = (1.05,)
 
     monkeypatch.setattr(sscd_mod, "compute_sscd",
                         lambda *_a, **_kw: _Negative())
-    assert _evaluate_sscd(Path("a"), Path("b"), None) == 1.0
+    assert _evaluate_sscd(Path("a"), Path("b"), None) == 0.0
 
     monkeypatch.setattr(sscd_mod, "compute_sscd",
                         lambda *_a, **_kw: _OverUnity())
-    assert _evaluate_sscd(Path("a"), Path("b"), None) == 0.0
+    assert _evaluate_sscd(Path("a"), Path("b"), None) == 1.0
 
 
 # ----- bisect convergence with sscd-style evaluator -----------------------

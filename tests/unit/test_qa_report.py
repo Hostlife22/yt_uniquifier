@@ -85,6 +85,15 @@ def test_verdict_preserves_red_when_duration_mismatch() -> None:
     assert v.band == "red"
 
 
+def test_verdict_red_on_media_correctness_note() -> None:
+    result = report_mod.verdict(_report(
+        phash_similarity=0.80,
+        notes=["correctness: source main audio stream is missing from output"],
+    ))
+    assert result.band == "red"
+    assert any("main audio" in reason for reason in result.reasons)
+
+
 # --- build_report aggregation ------------------------------------------------
 
 @dataclass

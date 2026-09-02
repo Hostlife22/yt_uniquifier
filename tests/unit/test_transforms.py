@@ -35,6 +35,18 @@ def test_crop_resize_different_seed_changes_output() -> None:
     assert a.filter_str != b.filter_str
 
 
+def test_crop_resize_strength_is_total_per_axis() -> None:
+    import re
+
+    spec = get("video.crop_resize")
+    params = CropResizeParams(max_strength=0.03, rng_seed=42)
+    chain = spec.build(params, LabelAllocator(), "0:v:0")
+    match = re.search(r"crop=iw\*([\d.]+):ih\*([\d.]+)", chain.filter_str)
+    assert match is not None
+    assert 0.97 <= float(match.group(1)) <= 1.0
+    assert 0.97 <= float(match.group(2)) <= 1.0
+
+
 def test_rotate_emits_radians() -> None:
     spec = get("video.rotate")
     c = spec.build(RotateParams(degrees=0.5), LabelAllocator(), "v0")

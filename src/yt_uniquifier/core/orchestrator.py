@@ -22,6 +22,7 @@ from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.logging_config import get_logger
+from yt_uniquifier.core.media_validation import require_output_contract
 from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.notifications import (
@@ -31,7 +32,7 @@ from yt_uniquifier.core.notifications import (
 from yt_uniquifier.core.notifications import (
     dispatch as dispatch_notifications,
 )
-from yt_uniquifier.core.pipeline import compute_plan_hash
+from yt_uniquifier.core.pipeline import compute_plan_hash, expected_output_duration
 from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
 from yt_uniquifier.core.probe import probe as probe_file
 from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
@@ -42,6 +43,7 @@ from yt_uniquifier.core.segmenter import (
     process_main_audio,
     process_video_segments_parallel,
 )
+from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.telemetry import TelemetryConfig
 from yt_uniquifier.core.telemetry import record as record_telemetry
 
@@ -369,6 +371,18 @@ def _run_full_impl(
     cancel_token: CancelToken | None,
     pause_token: PauseToken | None = None,
 ) -> RunSummary:
+    expected_suffixes = {
+        "mp4": {".mp4", ".m4v"},
+        "mov": {".mov"},
+        "mkv": {".mkv"},
+    }[plan.profile.output_container]
+    if options.output.suffix.lower() not in expected_suffixes:
+        expected = ", ".join(sorted(expected_suffixes))
+        raise PipelineError(
+            f"output suffix {options.output.suffix!r} conflicts with profile "
+            f"container {plan.profile.output_container!r}; expected {expected}"
+        )
+
     findings = preflight(
         plan.source, plan, plan.encoder, work_dir=options.work_dir,
         accept_watermark_risk=options.accept_watermark_risk,
@@ -416,6 +430,7 @@ def _run_full_impl(
         )
     finally:
         _pause_stop_event.set()
+        store.close()
 
 
 def _run_full_body(
@@ -444,7 +459,7 @@ def _run_full_body(
         and all(s.status == "done" for s in segments)
         and not options.force_new_variant
     ):
-        if options.output.exists() and options.output.stat().st_size > 0:
+        if store.output_is_valid(options.output):
             emit(RunEvent(kind="log", payload={
                 "phase": "resume",
                 "message": "output already exists and all segments done — no-op",
@@ -625,14 +640,21 @@ def _run_full_body(
             f"after re-encode: {missing_finals[:5]}{'…' if len(missing_finals) > 5 else ''}"
         )
     options.output.parent.mkdir(parents=True, exist_ok=True)
+    selected_audio_indices = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
     concat_segments(
         final_segments,
         main_audio,
         options.output,
         build_metadata_args(plan, title_template=options.title_template),
         work_dir=options.work_dir,
-        audio_passthrough_count=max(0, len(plan.source.audio) - 1),
-        target_duration_sec=plan.source.duration_sec,
+        media_source=plan.source.path,
+        map_chapters_from=plan.source.path if plan.source.chapters else None,
+        audio_source_indices=selected_audio_indices,
+        audio_streams=[plan.source.audio[index] for index in selected_audio_indices],
+        subtitle_codecs=[stream.codec for stream in plan.source.subtitle],
+        target_duration_sec=expected_output_duration(plan),
     )
     # v0.4.3 — optional bitstream sanitization (second-pass libx264).
     if options.sanitize_bitstream:
@@ -655,6 +677,9 @@ def _run_full_body(
                 "phase": "sanitize",
                 "message": "encoder is already libx264 — skipping (no-op)",
             }))
+
+    require_output_contract(plan, options.output)
+    store.set_output(options.output)
 
     emit(RunEvent(kind="done", payload={"output": str(options.output)}))
 

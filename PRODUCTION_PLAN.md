@@ -1,0 +1,405 @@
+# Production Improvement Plan
+
+Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
+profile engine или QA system не создаются. План был согласован; Phase 1 и часть
+Phase 2/3 production guardrails реализованы в candidate `v1.3.1`. Остальные пункты
+сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
+
+## Статус на 2026-09-02
+
+- **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
+  2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
+  web guards; correctness-aware QA verdict.
+- **PARTIAL:** 2.1, 2.2, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
+  platform/HDR/channel matrix ещё не подтверждена.
+- **NOT VERIFIED / planned:** hardware HDR matrix, 4K/1–3 h corpus, resource sampler,
+  runner stall watchdog, persistent web scheduler, distributed fencing и aligned
+  transform-quality metrics.
+
+## Принципы реализации
+
+1. Correctness gates отделены от similarity/quality diagnostics.
+2. Любой fix начинается с failing regression test и заканчивается реальным FFmpeg
+   smoke там, где затронут media contract.
+3. Existing public Profile/Plan/RunEvent contracts сохраняются; breaking schema
+   change требует RFC, snapshot update и `CHANGELOG.md`.
+4. Один общий stream/container/timestamp policy используется CLI, GUI, web и worker.
+5. Для unsupported media выдаётся ранняя понятная ошибка, а не silent degradation.
+
+## Phase 0 — Baseline
+
+### 0.1 Зафиксировать media contracts
+
+- **Files:** `core/models.py`, новый/существующий test helper в `tests/integration`,
+  `tests/contracts`, `docs/api-contracts.md`.
+- **Current behavior:** output correctness определяется в основном по existence и
+  container duration.
+- **Problem:** нет формального контракта по streams/timestamps/HDR/chapters.
+- **Proposed behavior:** manifest source→expected output: stream count/order,
+  language/disposition, start/end duration, frame/sample counts, chapters, color/HDR.
+- **Implementation:** расширить probe data и internal `MediaInvariantReport`, не
+  ломая public model до RFC.
+- **Tests:** SDR/HDR10/HLG, CFR/VFR, 44.1/48/96 kHz, stereo/5.1/multi-audio,
+  MP4/MKV/MOV, text/image subtitle fixtures.
+- **Risk:** probe fields различаются между FFmpeg versions.
+- **Expected result:** machine-verifiable definition «output корректен».
+
+### 0.2 Сделать benchmark воспроизводимым
+
+- **Files:** `tools/benchmark.py`, `tools/perf_compare.py`, `BENCHMARKS.md`, workflows.
+- **Current behavior:** wall time + parent RSS + segment count.
+- **Problem:** parent RSS исключает FFmpeg; нет quality/audio/size/resource baseline.
+- **Proposed behavior:** cold/warm runs, exact command/versions/seed, process-tree
+  CPU/RSS, optional GPU telemetry, VMAF/SSIM/PSNR/loudness/true peak/file size.
+- **Implementation:** JSON schema v2 additive; resource sampler; explicit cleanup/no-op
+  detection; separate encode-only reference.
+- **Tests:** schema contract and fake sampler; nightly 30 s fixture, scheduled long run.
+- **Risk:** cross-platform resource APIs.
+- **Expected result:** решения о speed/quality принимаются по данным, не описаниям.
+
+## Phase 1 — Critical fixes
+
+### 1.1 Исправить audio sample-rate/pitch и loudnorm output
+
+- **Files:** `core/transforms/audio_pitch.py`, `core/pipeline.py`, `core/probe.py`,
+  `tests/unit/test_audio_pitch.py`, integration audio tests.
+- **Current behavior:** `asetrate=48000*pitch` для любого source; output SR implicit.
+- **Problem:** 44.1 kHz audio сокращается примерно на 8%; dynamic loudnorm даёт 96 kHz.
+- **Proposed behavior:** tempo зависит только от requested tempo, pitch не меняет
+  duration; final sample rate 48 kHz по profile/platform policy.
+- **Implementation:** передать actual input SR в builder context или использовать
+  FFmpeg expression/source-aware filter; сделать final `aresample=48000` после
+  loudnorm; измерять фактический pre-loudnorm signal.
+- **Tests:** sample-exact duration for 44.1/48/96 kHz, pitch/tempo boundaries,
+  silence, loud/quiet, stereo/5.1; assert LUFS/TP/SR.
+- **Risk:** изменение публичной plugin build signature; предпочтителен compatible
+  context extension.
+- **Expected result:** A/V delta < one audio frame; 48 kHz predictable output.
+
+### 1.2 Нормализовать per-segment timestamps
+
+- **Files:** `core/pipeline.py`, `core/segmenter.py`, integration timestamp tests.
+- **Current behavior:** copied audio priming determines `avoid_negative_ts` shift.
+- **Problem:** video starts at 1.021 s and final `-t` trims frames.
+- **Proposed behavior:** каждый encoded video segment starts at 0 independently;
+  placeholder streams cannot move video timeline; concat has monotonic PTS.
+- **Implementation:** eliminate audio placeholder if concat topology can be normalized,
+  otherwise reset mapped streams independently; add `setpts=PTS-STARTPTS` in correct
+  location and derive duration from frames/PTS, not container clamp. Validate packet
+  timestamps before checkpoint `done`.
+- **Tests:** AAC priming/edit-list fixture, negative/non-zero start PTS, B-frames,
+  multi-segment CFR/VFR; decoded frame counts and first/last content hashes.
+- **Risk:** keyframe seek behavior differs by demuxer.
+- **Expected result:** no lost/duplicated frame; start-time ≈0; no hidden tail cut.
+
+### 1.3 Исправить stream/chapter/container mapping
+
+- **Files:** `core/orchestrator.py`, `core/segmenter.py`, `core/metadata.py`,
+  `core/preflight.py`, mapping helpers in `core/pipeline.py`.
+- **Current behavior:** main audio omitted when unfiltered; chapters dropped; all
+  subtitles/additional audio copied blindly.
+- **Problem:** data loss and late mux failures.
+- **Proposed behavior:** one container-aware stream policy controls selection,
+  copy/transcode/externalize/reject, metadata and dispositions.
+- **Implementation:** pass chapters source; explicit main-audio passthrough; honor
+  `Profile.audio_tracks`; MP4 text subtitles→`mov_text`, unsupported image subtitles
+  early reject/sidecar policy; codec compatibility table; no absolute/relative audio
+  index confusion.
+- **Tests:** MP4/MKV/MOV × AAC/Opus/DTS/5.1/multiple languages × SRT/ASS/PGS;
+  chapters and default dispositions.
+- **Risk:** transcoding subtitle formats can lose styling.
+- **Expected result:** preserved declared topology or explicit preflight decision.
+
+### 1.4 Исправить divergent audio overlap
+
+- **Files:** `core/audio_windows.py`, `core/pipeline.py`, tests for audio windows.
+- **Current behavior:** adjacent inputs overlap 0.2 s, acrossfade removes 0.1 s.
+- **Problem:** +0.1 s per boundary and accumulated content displacement.
+- **Proposed behavior:** exact-length output and continuous sample timeline.
+- **Implementation:** allocate half-overlap per side or overlap only one boundary;
+  derive trims in samples/time base; final exact trim after all latency-aware filters.
+- **Tests:** 119.9/120/125 s, 1/2/120 windows, impulses around boundaries, 44.1/48 kHz.
+- **Risk:** filter latency (rubberband/reverb) needs measured compensation.
+- **Expected result:** length error ≤1 audio frame and no seam click.
+
+### 1.5 Исправить SSCD calibration direction
+
+- **Files:** `core/calibration/loop.py`, `core/qa/sscd.py`, calibration tests/docs.
+- **Current behavior:** returns `1 - cosine`, then minimizes it.
+- **Problem:** identical pair is considered low collision risk.
+- **Proposed behavior:** explicit `similarity` where higher means closer; target and
+  UI labels use the same direction.
+- **Implementation:** return direct similarity, migrate field naming, invalidate old
+  calibration cache/results, correct min/max risk aggregation.
+- **Tests:** identical/perturbed/unrelated stub and real-model opt-in suite.
+- **Risk:** old saved target meaning changes; document migration.
+- **Expected result:** monotonic and semantically correct objective.
+
+### 1.6 Укрепить resume identity и final validation
+
+- **Files:** `core/pipeline.py::compute_plan_hash`, `core/checkpoint.py`, orchestrator.
+- **Current behavior:** path+size+rounded duration+basic video metadata.
+- **Problem:** changed input/topology can reuse old segments/output/audio.
+- **Proposed behavior:** stable cheap content fingerprint plus complete media topology;
+  output and main audio manifests are verified.
+- **Implementation:** reuse proven head+tail+size+mtime cache fingerprint pattern,
+  add stream metadata digest and schema version; SHA/probe main audio/output; atomic
+  lock `O_EXCL`; `CheckpointStore` context lifecycle.
+- **Tests:** same-size replacement, changed audio/subtitles/chapters/HDR, corrupt
+  cached audio/output, concurrent processes, stale cross-host lock.
+- **Risk:** existing work dirs invalidated once.
+- **Expected result:** resume never combines artifacts from another input/plan.
+
+## Phase 2 — Pipeline correctness
+
+### 2.1 Определить duration/speed policy
+
+- **Files:** video/audio speed transforms, pipeline, segmenter, Profile validation.
+- **Current behavior:** video speed and audio tempo independent; final source `-t`.
+- **Problem:** slow-down tail is cut, speed-up may leave padding/gaps.
+- **Proposed behavior:** default preserve duration/content; explicit retime mode changes
+  both streams and expected output duration.
+- **Implementation:** cross-field validation; derive expected timeline; remove masking
+  clamp; pad/trim only by declared policy.
+- **Tests:** 0.5/0.99/1/1.01/2 rates, impulses/start/end hashes, CFR/VFR.
+- **Risk:** profile semantics migration.
+- **Expected result:** no silent content loss.
+
+### 2.2 Унифицировать FFmpeg command builders
+
+- **Files:** `core/pipeline.py`, `core/segmenter.py`, snapshots.
+- **Current behavior:** legacy/full/fused paths use different encoder/mapping policies.
+- **Problem:** fixes drift and tests may cover не production path.
+- **Proposed behavior:** shared typed helpers for input timeline, stream maps, video tail,
+  encoder args and mux policy; two execution shapes remain only where necessary.
+- **Implementation:** extract pure argv fragments, no new orchestrator.
+- **Tests:** snapshot equivalence across paths/vendors/containers.
+- **Risk:** broad diff; perform after P0 regressions lock behavior.
+- **Expected result:** one source of truth without rewrite.
+
+### 2.3 HDR/color pipeline
+
+- **Files:** probe/models, `hdr_wrap.py`, `video_tonemap.py`, encoder args, preflight.
+- **Current behavior:** basic tags/10-bit only.
+- **Problem:** mastering/light/dynamic metadata and encoder capability unknown.
+- **Proposed behavior:** explicit passthrough/tonemap/reject decision with verified
+  input/output metadata and no silent Dolby Vision/HDR10+ loss.
+- **Implementation:** parse side data; preserve ST2086/MaxCLL/FALL where supported;
+  tag primaries/transfer/matrix/range explicitly; capability-specific 10-bit probes.
+- **Tests:** HDR10/HLG with measured metadata on Linux zscale+x265 and HW runners.
+- **Risk:** Dolby Vision/dynamic HDR portability; reject unsupported cases initially.
+- **Expected result:** correct HDR or explicit `NOT SUPPORTED`, never accidental SDR.
+
+### 2.4 VFR and segmentation correctness
+
+- **Files:** probe, segmenter, pipeline, scene_detect.
+- **Current behavior:** basic VFR works; complex paths unspecified; scene ignores max.
+- **Problem:** timestamp/mux behavior and long static/fast-cut segmentation unstable.
+- **Proposed behavior:** preserve VFR by default; optional explicit CFR conversion;
+  scene boundaries constrained by min/target/max and keyframes.
+- **Implementation:** use avg/r frame rate intentionally, explicit `fps_mode`, packet
+  timeline checks; post-process scene candidates.
+- **Tests:** mixed cadence/VFR across seams, long GOP/static/rapid cuts.
+- **Risk:** FFmpeg-version mux differences.
+- **Expected result:** no duplicate/drop except declared temporal transform.
+
+## Phase 3 — Quality
+
+### 3.1 Quality-first profiles
+
+- **Files:** existing YAML profiles, docs, profile validation.
+- **Current behavior:** destructive stacks and unverified VMAF descriptions.
+- **Problem:** noise/sharpen/rescale/audio stacks amplify second-generation artifacts.
+- **Proposed behavior:** `soft` becomes evidence-based quality default; aggressive
+  profiles experimental with warnings; platform aliases retain UX.
+- **Implementation:** benchmark parameter sweeps on licensed corpus; total-crop semantics;
+  no-upscale default; one resampling stage; noise/sharpen content-adaptive bounds.
+- **Tests:** profile snapshots/bounds/incompatible combinations plus corpus quality gates.
+- **Risk:** similarity diagnostics change; not a production correctness concern.
+- **Expected result:** predictable VMAF/size/speed bands backed by reports.
+
+### 3.2 Audio quality and multichannel policy
+
+- **Files:** audio transforms/pipeline/profiles/preflight.
+- **Current behavior:** stereo assumptions, fixed AAC 256k, strong effects stack.
+- **Problem:** 5.1/mono phase/downmix risk and insufficient bitrate policy.
+- **Proposed behavior:** layout-aware transforms; default preserve 5.1 or encode at
+  declared bitrate; effects bypass unsupported layouts.
+- **Implementation:** channel masks/metadata; per-layout AAC/Opus rates; post-chain
+  LUFS/TP verification; remove noise/reverb/Haas from quality defaults.
+- **Tests:** mono/stereo/5.1, downmix correlation, speech/music, clipping/true peak.
+- **Risk:** platform/container codec compatibility.
+- **Expected result:** audible quality and channel intent preserved.
+
+### 3.3 Filter compatibility graph
+
+- **Files:** existing Profile validation/models and transform metadata.
+- **Current behavior:** each transform validates params in isolation.
+- **Problem:** harmful order/combinations pass validation.
+- **Proposed behavior:** constraints for HDR/tonemap, geometry, temporal/speed,
+  channel layout and container.
+- **Implementation:** declarative capabilities on existing `TransformSpec`, cross-field
+  validator/preflight findings.
+- **Tests:** pairwise known conflicts and property tests.
+- **Risk:** third-party plugin compatibility; unknown capability means conservative warn.
+- **Expected result:** bad graph rejected before expensive encode.
+
+## Phase 4 — Performance
+
+### 4.1 Capability-based encoder selection
+
+- **Files:** `core/encoder.py`, encoder args, cache.
+- **Current behavior:** short 8-bit availability probe, hardware-first.
+- **Problem:** runtime failure/quality variability and stale cache.
+- **Proposed behavior:** `quality|balanced|speed` policy; job-specific capability
+  matrix; explicit override either selected or rejected.
+- **Implementation:** probe codec/pixfmt/resolution/rate-control/device; include driver
+  signature; route per GPU; disable unverified `av1_vulkan` path.
+- **Tests:** mocked vendors + self-hosted HW matrix; 10-bit/4K/concurrency.
+- **Risk:** probe startup cost, controlled by keyed cache.
+- **Expected result:** predictable encoder choice and early incompatibility error.
+
+### 4.2 Resource-aware scheduling
+
+- **Files:** segmenter, web app/routes, GUI workers, distributed worker.
+- **Current behavior:** per-run workers only; web unbounded globally.
+- **Problem:** oversubscription and disk exhaustion.
+- **Proposed behavior:** shared resource budget per process/device and backpressure.
+- **Implementation:** bounded job executor, CPU/GPU semaphores, disk reservation,
+  queue status and cancellation.
+- **Tests:** concurrent jobs/failure/cancel/queue-full chaos tests.
+- **Risk:** reduced throughput if defaults too conservative.
+- **Expected result:** bounded RAM/disk/session use.
+
+### 4.3 Streaming logs and timeouts
+
+- **Files:** runner, sanitizer, concat.
+- **Current behavior:** in-memory logs and fixed/unreachable timeouts.
+- **Problem:** memory growth, deadlock and indefinite/falsely killed jobs.
+- **Proposed behavior:** incremental bounded logs, stall watchdog, phase-specific
+  configurable policies.
+- **Implementation:** tee to file + ring tail; monotonic last-progress timestamp;
+  always terminate process group; expose timeout events.
+- **Tests:** silent child, verbose child, grandchild pipe, slow valid job, cancellation.
+- **Risk:** platform signal differences.
+- **Expected result:** diagnosable long-form operation with bounded memory.
+
+## Phase 5 — QA
+
+### 5.1 Correctness-first verdict
+
+- **Files:** `core/qa/report.py`, report models/templates, CLI/GUI/web.
+- **Current behavior:** visual metrics can produce verdict despite missing streams.
+- **Problem:** false GREEN.
+- **Proposed behavior:** `INVALID` on topology/timestamp/decode/HDR failure; quality and
+  similarity reported as independent axes.
+- **Implementation:** run media invariants first; add audio loudness/TP, stream diff,
+  frame/sample/end-content checks; no single synthetic «CID probability».
+- **Tests:** missing audio/chapters/subtitles, shifted PTS, corrupt tail, HDR tags.
+- **Risk:** report schema update requires contract/CHANGELOG/RFC.
+- **Expected result:** report answers correctness, quality and similarity separately.
+
+### 5.2 Metric validity/performance
+
+- **Files:** qa VMAF/SSIM/pHash/audio_fp/SSCD/corpus.
+- **Current behavior:** incomparable fallback, first-600s audio, many FFmpeg processes.
+- **Problem:** misleading optimization and slow long-form QA.
+- **Proposed behavior:** metric-specific thresholds; encode-only reference/alignment;
+  stratified full-duration audio/video; one extraction pass; cached features.
+- **Implementation:** no silent fallback under same threshold; source/candidate feature
+  cache keyed by content; temporal registration and confidence/coverage reporting.
+- **Tests:** known perturbation ladder, shifted/cropped pairs, long synthetic impulses,
+  official SSCD model opt-in.
+- **Risk:** thresholds corpus-dependent; ship as calibrated diagnostics.
+- **Expected result:** metrics correlate with an engineering decision.
+
+### 5.3 Calibration v2 within current engine
+
+- **Files:** `core/calibration/loop.py`, intensity, CLI/GUI/docs.
+- **Current behavior:** unbracketed multiplicative loop on first clip.
+- **Problem:** source bias and random/non-monotone results.
+- **Proposed behavior:** fixed seed/common random numbers, 3–5 stratified clips,
+  feasibility-first Pareto search, cached trials and deterministic resume.
+- **Implementation:** first test baseline and bounds; evaluate independent correctness,
+  quality and diagnostic similarity; stop on plateau/budget/confidence; never convert
+  infrastructure failure into a score.
+- **Tests:** monotone and non-monotone synthetic objectives, retry/cache/seed/source
+  replacement, real corpus study.
+- **Risk:** more compute; parallel/cached clips offset cost.
+- **Expected result:** reproducible tuned profile with explicit confidence/limitations.
+
+## Phase 6 — Production hardening
+
+### 6.1 Long-form recovery qualification
+
+- **Files:** orchestrator/checkpoint/runner tests, `docs/runbook_scale_test.md`.
+- **Current behavior:** unit resume tests, no completed 1/2/3h qualification here.
+- **Problem:** crash/restart/disk pressure/seams not proven.
+- **Proposed behavior:** qualification matrix on 1h/2h/3h+ SDR and HDR.
+- **Implementation:** fault injection at probe/segment/audio/concat/final replace; disk
+  low/full; kill -9; reboot simulation; exact artifact reuse accounting.
+- **Tests:** scheduled self-hosted long-form jobs and retained manifests/reports.
+- **Risk:** CI cost.
+- **Expected result:** completed segments reused and final output bitstream-correct.
+
+### 6.2 Web/distributed lifecycle
+
+- **Files:** web state/routes/security, queue leasing, worker.
+- **Current behavior:** in-memory unbounded web jobs; per-host queue heartbeat.
+- **Problem:** races/leaks/weak failover.
+- **Proposed behavior:** persistent job store, unique output reservation, worker UUID
+  leases/fencing, same QA gates in every frontend.
+- **Implementation:** SQLite job metadata, TTL cleanup, global scheduler, job content ID,
+  per-job heartbeat, stable work path.
+- **Tests:** restart, duplicate name, two workers same host, stale/recovered lease,
+  NFS qualification.
+- **Risk:** migration of queue layout; version it and retain reader compatibility.
+- **Expected result:** deterministic multi-user/multi-worker behavior.
+
+### 6.3 Supply chain/release
+
+- **Files:** workflows, Docker, pyinstaller, dependency locks, security docs.
+- **Current behavior:** strong multi-OS CI, SBOM/signing work, CodeQL currently clear.
+- **Problem:** full integration duplicated on six matrix legs; supported Python policy
+  unclear; optional binaries vary.
+- **Proposed behavior:** fast required matrix + designated media capability runners;
+  explicit supported FFmpeg/Python/dependency bounds and artifact smoke.
+- **Implementation:** shard tests by value, cache fixtures, publish capability manifest.
+- **Tests:** install wheel/app/container, invoke ffmpeg/ffprobe, process canonical clip.
+- **Risk:** reducing matrix must not reduce platform coverage.
+- **Expected result:** faster feedback with stronger release evidence.
+
+## Phase 7 — Documentation
+
+### 7.1 Truthful capability matrix and runbooks
+
+- **Files:** README, CLAUDE, docs architecture/profiles/QA/HDR/web/distributed.
+- **Current behavior:** stale architecture/counts and unverified promises.
+- **Problem:** operators cannot distinguish verified/pass-through/unsupported.
+- **Proposed behavior:** generated version/profile/transform tables; each feature marked
+  `VERIFIED`, `LIMITED`, `NOT VERIFIED`, `UNSUPPORTED` by platform.
+- **Implementation:** source tables from registry/test manifests; document legal-use,
+  similarity diagnostics, recovery and capacity planning.
+- **Tests:** link/docs lint, generated-doc drift check.
+- **Risk:** none material.
+- **Expected result:** documentation matches executable behavior.
+
+## Delivery order and gates
+
+```text
+Phase 0 contract
+  -> 1.1 audio SR/loudnorm
+  -> 1.2 timestamps
+  -> 1.3 streams/chapters/subtitles
+  -> 1.4 windows
+  -> 1.5 SSCD semantics
+  -> 1.6 resume identity
+  -> Phase 2 correctness
+  -> quality/performance/QA
+  -> long-form production qualification
+```
+
+После каждой задачи: focused regression → related integration/smoke → Ruff → mypy →
+full non-visual suite → inspect diff. После каждого phase: `make check`, wheel build,
+profile validation и retained benchmark JSON. Production release разрешён только по
+`PRODUCTION_CHECKLIST.md`.

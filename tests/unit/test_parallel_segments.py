@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -127,3 +129,36 @@ def test_cap_one_forces_sequential(
         segs, plan, tmp_path, workers=4,
     )
     assert calls == [0, 1, 2]
+
+
+def test_parallel_failure_cancels_siblings_without_external_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    barrier = threading.Barrier(2)
+    sibling_cancelled = threading.Event()
+
+    def _worker(seg, plan, work_dir, **kwargs):
+        del plan, work_dir
+        token = kwargs["cancel_token"]
+        barrier.wait(timeout=2)
+        if seg.idx == 0:
+            raise RuntimeError("boom")
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if token.is_cancelled():
+                sibling_cancelled.set()
+                raise RuntimeError("cancelled sibling")
+            time.sleep(0.01)
+        raise AssertionError("sibling never received cancellation")
+
+    monkeypatch.setattr(seg_mod, "process_video_segment", _worker)
+    plan = _plan("libx264", "x264", max_parallel=2)
+    segments = [
+        Segment(idx=0, start_sec=0, end_sec=1),
+        Segment(idx=1, start_sec=1, end_sec=2),
+    ]
+    with pytest.raises(RuntimeError, match="boom"):
+        seg_mod.process_video_segments_parallel(
+            segments, plan, tmp_path, workers=2,
+        )
+    assert sibling_cancelled.is_set()

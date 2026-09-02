@@ -18,6 +18,7 @@ Bisect strategy:
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,10 @@ class CalibrationTarget:
     min_quality: float = 88.0
     max_iterations: int = 5
     test_clip_sec: float = 60.0
+    # Every candidate uses the same stochastic realization. Otherwise a
+    # per-run seed changes both intensity and random pattern between steps,
+    # making the objective noisy and non-reproducible.
+    seed: int = 0
 
 
 @dataclass(frozen=True)
@@ -103,9 +108,8 @@ def calibrate(
     bisection. ``"chromaprint"`` (default) keeps the v0.5 behaviour —
     audio-fingerprint-derived ``predict().match_probability_self``.
     ``"sscd"`` swaps in the SSCD copy-detection embedding (Meta's
-    VSC2022 model); the inverted mean cosine (``1 - mean_similarity``)
-    is treated as the CID-collision proxy on the same 0..1 scale, so
-    ``target.max_self_match`` semantics carry over.
+    VSC2022 model).  Its mean cosine is already a similarity score where
+    higher means more similar, matching the evaluator contract directly.
 
     The ``evaluator`` kwarg is a test seam — pass a callable matching
     ``MetricEvaluator`` to bypass real model loading. In production
@@ -118,48 +122,49 @@ def calibrate(
 
     steps: list[CalibrationStep] = []
     factor = 1.0
+    lower_factor: float | None = None
+    upper_factor: float | None = None
     best: CalibrationStep | None = None
     converged = False
 
     for i in range(1, target.max_iterations + 1):
         if cancel_token is not None and cancel_token.is_cancelled():
             raise PipelineError("calibration cancelled by user")
-        scaled = scale_profile(base_profile, factor)
-        out_path = work_dir / f"iter_{i:02d}.mp4"
+        scaled = scale_profile(base_profile, factor).model_copy(update={
+            "seed_strategy": "fixed",
+            "seed": target.seed,
+        })
+        out_path = work_dir / f"iter_{i:02d}.{scaled.output_container}"
         step_work = work_dir / f"work_{i:02d}"
 
-        try:
-            plan = build_plan(clip, scaled, encoder_override)
-            run_full(plan, RunOptions(
-                work_dir=step_work / plan.plan_hash,
-                output=out_path,
-                encoder_override=encoder_override,
-                enforce_preflight=False,
-                keep_segments=False,
-                force_new_variant=True,
-            ), cancel_token=cancel_token)
-            self_match = eval_fn(clip, out_path, cancel_token)
-            q = quality_score(clip, out_path)
-            q_value = q.value
-            q_metric = q.metric
-            q_note = q.note
-        except Exception as exc:
-            # A6 fix: re-raise on cancel instead of swallowing as
-            # "iteration failed". Pre-fix the inner run_full would
-            # raise PipelineError("cancelled by user") and this
-            # except block converted it into a "try harder" iteration,
-            # so calibration kept encoding after the user clicked
-            # Cancel.
-            if cancel_token is not None and cancel_token.is_cancelled():
-                raise
-            step = _step(i, factor, scaled, cid_self=1.0,
-                         quality=None, quality_metric=None,
-                         note=f"iteration failed: {exc}")
-            steps.append(step)
-            if on_step:
-                on_step(step)
-            factor *= 1.5  # try harder
-            continue
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                plan = build_plan(clip, scaled, encoder_override)
+                run_full(plan, RunOptions(
+                    work_dir=step_work / plan.plan_hash,
+                    output=out_path,
+                    encoder_override=encoder_override,
+                    enforce_preflight=False,
+                    keep_segments=False,
+                    force_new_variant=attempt > 0,
+                ), cancel_token=cancel_token)
+                self_match = eval_fn(clip, out_path, cancel_token)
+                q = quality_score(clip, out_path)
+                q_value = q.value
+                q_metric = q.metric
+                q_note = q.note
+                last_error = None
+                break
+            except Exception as exc:  # noqa: PERF203 - retry boundary is intentional
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    raise
+                last_error = exc
+        if last_error is not None:
+            raise PipelineError(
+                f"calibration iteration {i} failed twice at factor "
+                f"{factor:g}: {last_error}"
+            ) from last_error
 
         step = _step(i, factor, scaled,
                      cid_self=self_match,
@@ -176,9 +181,19 @@ def calibrate(
             break
 
         if self_match > target.max_self_match:
-            factor *= 1.5
+            lower_factor = factor
+            factor = (
+                (lower_factor + upper_factor) / 2
+                if upper_factor is not None
+                else factor * 1.5
+            )
         elif q_value < target.min_quality:
-            factor /= 1.3
+            upper_factor = factor
+            factor = (
+                (lower_factor + upper_factor) / 2
+                if lower_factor is not None
+                else factor / 1.3
+            )
         else:
             converged = True
             break
@@ -250,8 +265,17 @@ def _better(
 
 def _cut_test_clip(source: Path, work_dir: Path, secs: float) -> Path:
     """Stream-copy first `secs` of source into work_dir for fast iterations."""
-    dest = work_dir / "test_clip.mp4"
-    if dest.exists():
+    stat = source.stat()
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(stat.st_size.to_bytes(16, "big", signed=False))
+    with source.open("rb") as handle:
+        digest.update(handle.read(1024 * 1024))
+        if stat.st_size > 1024 * 1024:
+            handle.seek(max(0, stat.st_size - 1024 * 1024))
+            digest.update(handle.read(1024 * 1024))
+    digest.update(f"{secs:.6f}".encode())
+    dest = work_dir / f"test_clip_{digest.hexdigest()}.mkv"
+    if dest.is_file() and dest.stat().st_size > 0:
         return dest
     stream_copy_extract(
         Segment(idx=0, start_sec=0.0, end_sec=secs),
@@ -291,21 +315,18 @@ def _evaluate_chromaprint(
 def _evaluate_sscd(
     source: Path, candidate: Path, cancel: CancelToken | None,
 ) -> float:
-    """Invert SSCD mean similarity into a 0..1 collision-risk score.
+    """Return SSCD mean cosine as the evaluator's direct similarity score.
 
-    SSCD's mean cosine is 1.0 for identical content and trends to ~0
-    for unrelated material. Calibration's invariant is "lower number
-    = safer" (driven below ``target.max_self_match``), so we map
-    similarity → ``1 - similarity``. A converged SSCD calibration with
-    ``--target 0.2`` therefore requires mean SSCD similarity ≤ 0.8
-    between source and re-encode — consistent with the
-    ``sscd_band()`` "caution" boundary at 0.85.
+    SSCD's mean cosine is 1.0 for identical content and trends to ~0 for
+    unrelated material.  Calibration drives this direct similarity below
+    ``target.max_self_match``.  The old ``1 - similarity`` mapping inverted
+    the objective and made an identical pair (risk 0.0) look converged.
     """
     # Lazy import — torch is in the optional ``[ml]`` extra.
     from yt_uniquifier.core.qa.sscd import compute_sscd
 
     result = compute_sscd(source, candidate, cancel_token=cancel)
-    return max(0.0, min(1.0, 1.0 - result.mean_similarity))
+    return max(0.0, min(1.0, result.mean_similarity))
 
 
 # Avoid mypy false-positive on the unused-import that we explicitly need.

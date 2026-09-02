@@ -120,8 +120,8 @@ def test_quality_floor_backs_off(tmp_path: Path,
     assert res.steps[1].intensity_factor < res.steps[0].intensity_factor
 
 
-def test_iteration_exception_continues(tmp_path: Path,
-                                          monkeypatch: pytest.MonkeyPatch) -> None:
+def test_iteration_exception_retries_same_factor(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
     boom = iter([True, False])
 
     monkeypatch.setattr(loop_mod, "_cut_test_clip", lambda src, wd, sec: src)
@@ -151,5 +151,25 @@ def test_iteration_exception_continues(tmp_path: Path,
     res = calibrate(tmp_path / "x.mp4", _profile(),
                     CalibrationTarget(max_iterations=3),
                     work_dir=tmp_path / "w")
-    assert len(res.steps) >= 2
-    assert any("failed" in (s.note or "") for s in res.steps)
+    assert res.converged
+    assert len(res.steps) == 1
+    assert res.factor == pytest.approx(1.0)
+
+
+def test_repeated_iteration_failure_aborts_instead_of_increasing_intensity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(loop_mod, "_cut_test_clip", lambda src, wd, sec: src)
+    monkeypatch.setattr(loop_mod, "build_plan", lambda *_a, **_kw: type(
+        "FakePlan", (), {"plan_hash": "fake"},
+    )())
+    monkeypatch.setattr(
+        loop_mod, "run_full",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("encoder offline")),
+    )
+
+    with pytest.raises(Exception, match="failed twice"):
+        calibrate(
+            tmp_path / "x.mp4", _profile(), CalibrationTarget(max_iterations=3),
+            work_dir=tmp_path / "w",
+        )

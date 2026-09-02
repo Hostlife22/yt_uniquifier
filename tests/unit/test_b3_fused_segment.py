@@ -4,7 +4,7 @@ The fused builder replaces the two-fork ``stream_copy_extract +
 build_video_segment_command`` pattern with a single ffmpeg
 invocation that uses ``-ss/-t`` input seek on the source. This test
 pins the command shape so a future change can't silently drop the
-PTS-handling flags that are load-bearing for concat correctness.
+PTS handling that is load-bearing for concat correctness.
 """
 
 from __future__ import annotations
@@ -82,13 +82,11 @@ def test_fused_command_has_input_seek_and_duration_clamp(tmp_path: Path) -> None
     assert args[t_idx + 1] == f"{span:.6f}"
 
 
-def test_fused_command_uses_avoid_negative_ts(tmp_path: Path) -> None:
-    """B3: ``-avoid_negative_ts make_zero`` anchors output PTS at 0 so
-    concat works without per-segment PTS rewriting. Without this flag
-    a segment whose first frame's PTS is non-zero (because the
-    keyframe sits at e.g. t=29.97 but -ss requested 30) would carry
-    that offset into the concat demuxer, producing audio/video
-    desync at every segment boundary.
+def test_fused_command_rebases_video_pts_without_global_timestamp_shift(
+    tmp_path: Path,
+) -> None:
+    """Decoded video is rebased in-filter; global timestamp shifting is unsafe
+    when copied AAC packets have negative priming timestamps.
     """
     plan = _plan(tmp_path)
     segment = Segment(idx=0, start_sec=0.0, end_sec=10.0, status="pending")
@@ -99,17 +97,13 @@ def test_fused_command_uses_avoid_negative_ts(tmp_path: Path) -> None:
     )
     args = cmd.args
 
-    assert "-avoid_negative_ts" in args
-    anchor_idx = args.index("-avoid_negative_ts")
-    assert args[anchor_idx + 1] == "make_zero"
+    assert "-avoid_negative_ts" not in args
+    graph = args[args.index("-filter_complex") + 1]
+    assert "setpts=PTS-STARTPTS" in graph
 
 
-def test_fused_command_stream_copies_audio_and_subs(tmp_path: Path) -> None:
-    """B3: per-segment audio is stream-copied from the source's
-    segment window. concat replaces track 0 with the separately-
-    processed main_audio, but the segment must still carry SOME audio
-    so the concat demuxer's stream layout is consistent.
-    """
+def test_fused_command_outputs_video_only(tmp_path: Path) -> None:
+    """Audio/subtitles are mapped from the source exactly once at final mux."""
     plan = _plan(tmp_path)
     segment = Segment(idx=1, start_sec=10.0, end_sec=20.0, status="pending")
     out = tmp_path / "seg_0001.mkv"
@@ -119,17 +113,10 @@ def test_fused_command_stream_copies_audio_and_subs(tmp_path: Path) -> None:
     )
     args = cmd.args
 
-    # Find the audio map. The map immediately followed by `-c:a copy`
-    # is the segment's audio passthrough.
-    map_audio_idx = args.index("0:a?")
-    assert args[map_audio_idx - 1] == "-map"
-    assert "-c:a" in args
-    ca_idx = args.index("-c:a")
-    assert args[ca_idx + 1] == "copy"
-
-    # Subs are stream-copied.
-    assert "0:s?" in args
-    assert "-c:s" in args
+    assert "-an" in args
+    assert "-sn" in args
+    assert "0:a?" not in args
+    assert "0:s?" not in args
 
 
 def test_fused_command_includes_filter_complex(tmp_path: Path) -> None:
@@ -148,6 +135,7 @@ def test_fused_command_includes_filter_complex(tmp_path: Path) -> None:
     # transform chain.
     assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in fc_value
     assert "format=yuv420p" in fc_value
+    assert "setpts=PTS-STARTPTS" in fc_value
 
 
 def test_fused_command_outputs_to_segment_path(tmp_path: Path) -> None:

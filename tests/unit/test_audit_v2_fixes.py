@@ -52,7 +52,9 @@ def test_phase1_checkpoint_reads_acquire_lock(tmp_path: Path) -> None:
     def writer() -> None:
         try:
             for i in range(50):
-                store.set_main_audio(tmp_path / f"audio_{i}.wav")
+                path = tmp_path / f"audio_{i}.wav"
+                path.write_bytes(f"audio-{i}".encode())
+                store.set_main_audio(path)
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
@@ -66,8 +68,8 @@ def test_phase1_checkpoint_reads_acquire_lock(tmp_path: Path) -> None:
     assert store.stored_run_seed() == 7
 
 
-def test_phase1_pipeline_audio_passthrough_uses_src_idx() -> None:
-    """Non-contiguous audio track indices map to their actual src index."""
+def test_phase1_pipeline_audio_passthrough_uses_relative_indices() -> None:
+    """FFmpeg audio selectors are relative, not absolute stream indices."""
     from yt_uniquifier.core.pipeline import FilterGraph
 
     audio = [
@@ -83,7 +85,7 @@ def test_phase1_pipeline_audio_passthrough_uses_src_idx() -> None:
     fg.plan = plan
     args = fg._build_audio_passthrough()
     map_args = [args[i + 1] for i in range(len(args)) if args[i] == "-map"]
-    assert map_args == ["0:a:3?", "0:a:4?"]
+    assert map_args == ["0:a:1?", "0:a:2?"]
     assert "-c:a:1" in args
     assert "-c:a:2" in args
     assert "-c:a:3" not in args

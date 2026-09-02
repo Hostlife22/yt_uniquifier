@@ -57,20 +57,23 @@ class LoudnormMeasurement(BaseModel):
     target_offset: float
 
 
-def measure(source: Path, params: LoudnormParams | None = None) -> LoudnormMeasurement:
+def measure(
+    source: Path,
+    params: LoudnormParams | None = None,
+    *,
+    pre_filter_complex: str | None = None,
+    pre_output_label: str | None = None,
+) -> LoudnormMeasurement:
     """Run pass 1 over the full audio. Returns measurement struct.
 
-    B2 (v0.6.0): the filter chain prepends a downsample to 16 kHz mono
-    before ``loudnorm``. EBU R128 is computed over 400 ms gating blocks
-    — sample rates above ~4 kHz contribute no information to the
-    integrated/LRA values, and chromaprint-style transient analysis is
-    not in scope. On a 4-hour 48 kHz stereo AAC source the pass-1
-    decode + filter dropped from ~144 s to ~24 s on a modern x86 CPU
-    (~6× speedup at no loss of measurement accuracy).
+    Pass 1 intentionally keeps the actual channel layout and sample rate.
+    Downmixing stereo/5.1 to mono changes integrated loudness when channels are
+    correlated, while downsampling invalidates true-peak measurement. Those
+    approximations can make FFmpeg reject linear mode and miss the requested
+    target by more than 1 LU.
     """
     p = params or LoudnormParams()
-    flt = (
-        f"aresample=16000,aformat=channel_layouts=mono,"
+    loudnorm_filter = (
         f"loudnorm=I={p.integrated}:TP={p.true_peak}:LRA={p.lra}:print_format=json"
     )
     cmd = [
@@ -80,12 +83,22 @@ def measure(source: Path, params: LoudnormParams | None = None) -> LoudnormMeasu
         "-i",
         str(source),
         "-vn",
-        "-af",
-        flt,
-        "-f",
-        "null",
-        "-",
     ]
+    if pre_filter_complex:
+        if not pre_output_label:
+            raise PipelineError(
+                "loudnorm pass 1 pre-filter graph requires an output label"
+            )
+        measured_label = "loudnorm_measure"
+        cmd += [
+            "-filter_complex",
+            f"{pre_filter_complex};[{pre_output_label}]"
+            f"{loudnorm_filter}[{measured_label}]",
+            "-map", f"[{measured_label}]",
+        ]
+    else:
+        cmd += ["-af", loudnorm_filter]
+    cmd += ["-f", "null", "-"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     except subprocess.TimeoutExpired as exc:

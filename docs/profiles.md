@@ -12,9 +12,9 @@ transforms:                                                   # list
   - id: <transform.id>                                        # see Transform reference
     enabled: bool                                             # default true
     params: { ... }                                           # validated by the transform's schema
-audio_tracks: "first" | "all" | [int, ...]
+audio_tracks: "first" | "all" | [int, ...]                  # list = absolute ffprobe stream indices
 keep_hdr: bool                                                # default false
-output_container: "mp4" | "mov"                               # default mp4
+output_container: "mp4" | "mov" | "mkv"                       # default mp4
 target_codec: "h264" | "hevc" | "av1"          # v1.2.0 Task 22 added av1
 target_loudness_lufs: float                                   # default -14.0
 seed: int | null                                              # used when seed_strategy=fixed
@@ -32,6 +32,17 @@ target_vmaf_max_retries: int                                   # default 2 (cap 
 ```
 
 Unknown top-level fields are rejected (`extra=forbid`).
+
+`audio_tracks: first` selects the first probed audio stream. `all` preserves every
+audio stream in source order. An explicit list contains absolute stream indices from
+`ffprobe`/`SourceMeta.audio[].index`; the output follows the list order and invalid
+indices fail before encoding. The first selected stream is the one processed by audio
+transforms; remaining streams are copied when the target container supports their
+codec and otherwise transcoded according to the mux policy.
+
+`video.crop_resize.max_strength` is the maximum **total** fraction removed on each
+axis. For example, `0.06` removes at most 6% of width in total across left+right, not
+6% independently on each side. Output SAR is reset to 1:1 after rescaling.
 
 ### Segmentation modes (v0.8.0 R3)
 

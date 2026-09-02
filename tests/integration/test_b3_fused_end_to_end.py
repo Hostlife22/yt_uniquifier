@@ -2,8 +2,8 @@
 output equivalent to the legacy two-fork extract+re-encode path.
 
 This is the critical regression test for B3: the fused builder uses
-``-ss <start> -i source -t <span>`` input seek + ``-avoid_negative_ts
-make_zero`` instead of pre-extracting each segment to a ``_src.mkv``
+``-ss <start> -i source -t <span>`` input seek plus an explicit video
+``setpts`` instead of pre-extracting each segment to a ``_src.mkv``
 intermediate. Any silent break in PTS handling here would manifest
 as audio/video desync at segment boundaries in production.
 
@@ -32,6 +32,23 @@ from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
 
 PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
+
+
+def _video_timeline(path: Path) -> tuple[float, int, str]:
+    raw = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+            "-show_entries", "stream=start_time,nb_read_frames,sample_aspect_ratio",
+            "-of", "json", str(path),
+        ],
+        check=True, capture_output=True, text=True, timeout=30,
+    ).stdout
+    stream = json.loads(raw)["streams"][0]
+    return (
+        float(stream.get("start_time", 0.0)),
+        int(stream["nb_read_frames"]),
+        str(stream.get("sample_aspect_ratio", "1:1")),
+    )
 
 
 @pytest.fixture
@@ -98,6 +115,13 @@ def test_fused_path_produces_correct_output(
     assert len(out_meta.video) == 1
     assert len(out_meta.audio) == 1
     assert out_meta.audio[0].codec == "aac"
+    assert out_meta.audio[0].sample_rate == 48_000
+
+    source_start, source_frames, _ = _video_timeline(multi_segment_clip)
+    output_start, output_frames, output_sar = _video_timeline(out)
+    assert abs(output_start - source_start) <= 1 / 24
+    assert output_frames == source_frames
+    assert output_sar == "1:1"
 
 
 @needs_ffmpeg

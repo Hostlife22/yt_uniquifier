@@ -20,7 +20,7 @@ from pathlib import Path
 
 from yt_uniquifier.core.audio_windows import verify_audio_filters_available
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.models import Plan, Segment
+from yt_uniquifier.core.models import AudioStream, Plan, Segment
 from yt_uniquifier.core.pipeline import (
     BuiltCommand,
     build_main_audio_command,
@@ -662,12 +662,13 @@ def process_video_segments_parallel(
     extra_env: dict[str, str] = {}
     if os.environ.get("OMP_NUM_THREADS") is None:
         extra_env["OMP_NUM_THREADS"] = "1"
+    worker_cancel = cancel_token or CancelToken()
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
         futures = {
             pool.submit(
                 process_video_segment, seg, plan, work_dir,
-                on_event=on_event, cancel_token=cancel_token,
+                on_event=on_event, cancel_token=worker_cancel,
                 pause_token=pause_token,
                 extra_env=extra_env or None,
             ): seg
@@ -687,8 +688,7 @@ def process_video_segments_parallel(
             # `cancel_token` between every progress line, so each worker
             # exits within seconds rather than at the next segment
             # boundary (which could be 10+ minutes).
-            if cancel_token is not None:
-                cancel_token.cancel()
+            worker_cancel.cancel()
             for f in futures:
                 f.cancel()
             raise
@@ -711,13 +711,16 @@ def process_main_audio(
     runs in a single pass on the full source (legacy behavior).
     """
     out = work_dir / "main_audio.m4a"
+    temp_out = work_dir / (
+        f".main_audio.{os.getpid()}.{secrets.token_hex(4)}.part.m4a"
+    )
     if plan.profile.seed_strategy == "divergent":
         cmd, measurement = build_main_audio_command_windowed(
-            plan, out, loudnorm_measurement=loudnorm_measurement
+            plan, temp_out, loudnorm_measurement=loudnorm_measurement
         )
     else:
         cmd, measurement = build_main_audio_command(
-            plan, out, loudnorm_measurement=loudnorm_measurement
+            plan, temp_out, loudnorm_measurement=loudnorm_measurement
         )
     if not cmd.args:
         return None, measurement
@@ -726,11 +729,17 @@ def process_main_audio(
     # runtime that burned 18 min of video work on the 2026-05-31 matrix
     # incident (see audio_windows.verify_audio_filters_available docstring).
     verify_audio_filters_available(plan)
-    run_ffmpeg(
-        cmd, output=out, on_event=on_event, cancel_token=cancel_token,
-        pause_token=pause_token,
-        log_path=out.with_suffix(".m4a.log"),
-    )
+    try:
+        run_ffmpeg(
+            cmd, output=temp_out, on_event=on_event, cancel_token=cancel_token,
+            pause_token=pause_token,
+            log_path=out.with_suffix(".m4a.log"),
+        )
+        if not temp_out.is_file() or temp_out.stat().st_size <= 0:
+            raise PipelineError("main audio encode produced no usable output")
+        os.replace(temp_out, out)
+    finally:
+        temp_out.unlink(missing_ok=True)
     return out, measurement
 
 
@@ -743,8 +752,12 @@ def concat_segments(
     metadata_args: list[str],
     *,
     work_dir: Path,
+    media_source: Path | None = None,
     map_chapters_from: Path | None = None,
     audio_passthrough_count: int = 0,
+    audio_source_indices: list[int] | None = None,
+    audio_streams: list[AudioStream] | None = None,
+    subtitle_codecs: list[str] | None = None,
     target_duration_sec: float | None = None,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
@@ -774,27 +787,93 @@ def concat_segments(
         "-hide_banner", "-loglevel", "error", "-y",
         "-f", "concat", "-safe", "0", "-i", str(concat_list),
     ]
-    if main_audio is not None:
-        cmd += ["-i", str(main_audio)]
-    if map_chapters_from is not None:
-        cmd += ["-i", str(map_chapters_from)]
+    input_indices: dict[Path, int] = {}
+    next_input_idx = 1
+
+    def add_input(path: Path | None) -> int | None:
+        nonlocal next_input_idx
+        if path is None:
+            return None
+        key = path.resolve(strict=False)
+        existing = input_indices.get(key)
+        if existing is not None:
+            return existing
+        idx = next_input_idx
+        next_input_idx += 1
+        input_indices[key] = idx
+        cmd.extend(["-i", str(path)])
+        return idx
+
+    main_audio_idx = add_input(main_audio)
+    media_idx = add_input(media_source)
+    chapter_idx = add_input(map_chapters_from)
 
     cmd += ["-map", "0:v:0"]
-    if main_audio is not None:
-        cmd += ["-map", "1:a:0"]
-    # Preserve the requested audio tracks already inside the concatenated
-    # stream beyond track 0. The orchestrator derives this count from the
-    # probed source instead of imposing a hidden three-track ceiling.
-    for n in range(1, audio_passthrough_count + 1):
-        cmd += ["-map", f"0:a:{n}?"]
-    cmd += ["-map", "0:s?"]
-    cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
-    if map_chapters_from is not None:
-        chap_idx = 2 if main_audio is not None else 1
-        cmd += ["-map_chapters", str(chap_idx)]
+    selected_audio = (
+        audio_source_indices
+        if audio_source_indices is not None
+        else list(range(audio_passthrough_count + 1))
+    )
+    if main_audio_idx is not None:
+        cmd += ["-map", f"{main_audio_idx}:a:0"]
+    elif selected_audio:
+        source_idx = media_idx if media_idx is not None else 0
+        cmd += ["-map", f"{source_idx}:a:{selected_audio[0]}?"]
+    passthrough_idx = media_idx if media_idx is not None else 0
+    for relative_idx in selected_audio[1:]:
+        cmd += ["-map", f"{passthrough_idx}:a:{relative_idx}?"]
+    subtitle_idx = media_idx if media_idx is not None else 0
+    cmd += ["-map", f"{subtitle_idx}:s?"]
+
+    output_container = output.suffix.lower()
+    image_subtitle_codecs = {
+        "dvb_subtitle", "dvd_subtitle", "hdmv_pgs_subtitle", "pgs", "xsub",
+    }
+    normalized_subtitle_codecs = {codec.lower() for codec in subtitle_codecs or []}
+    if output_container in {".mp4", ".mov", ".m4v"}:
+        incompatible = normalized_subtitle_codecs & image_subtitle_codecs
+        if incompatible:
+            names = ", ".join(sorted(incompatible))
+            raise PipelineError(
+                f"cannot mux image-based subtitle codec(s) {names} into "
+                f"{output_container}; use MKV or convert subtitles first"
+            )
+        subtitle_args = ["-c:s", "mov_text"]
+    else:
+        subtitle_args = ["-c:s", "copy"]
+    cmd += ["-c:v", "copy"]
+    if main_audio_idx is not None or selected_audio:
+        if audio_streams is None:
+            cmd += ["-c:a", "copy"]
+        else:
+            compatible_mp4_audio = {"aac", "ac3", "eac3", "alac", "mp3"}
+            for output_idx, stream in enumerate(audio_streams):
+                codec = stream.codec.lower()
+                should_copy = (
+                    output_container not in {".mp4", ".mov", ".m4v"}
+                    or codec in compatible_mp4_audio
+                    or (main_audio_idx is not None and output_idx == 0)
+                )
+                if should_copy:
+                    cmd += [f"-c:a:{output_idx}", "copy"]
+                else:
+                    bitrate = "128k" if stream.channels <= 1 else (
+                        "384k" if stream.channels == 2 else "512k"
+                    )
+                    cmd += [
+                        f"-c:a:{output_idx}", "aac",
+                        f"-b:a:{output_idx}", bitrate,
+                        f"-ar:a:{output_idx}", "48000",
+                    ]
+    else:
+        cmd += ["-an"]
+    cmd += subtitle_args
+    if chapter_idx is not None:
+        cmd += ["-map_chapters", str(chapter_idx)]
     else:
         cmd += ["-map_chapters", "-1"]
-    cmd += ["-movflags", "+faststart"]
+    if output_container in {".mp4", ".mov", ".m4v"}:
+        cmd += ["-movflags", "+faststart"]
     # Trim final output to source duration. Some MP4 sources have packet PTS
     # extending past container.duration (edit lists, partial trailing
     # samples); without `-t` the concatenated mkv preserves those packets

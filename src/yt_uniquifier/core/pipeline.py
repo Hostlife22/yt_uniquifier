@@ -36,6 +36,7 @@ from yt_uniquifier.core.models import (
     SourceMeta,
     TransformConfig,
 )
+from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.transforms import all_ids, get
 from yt_uniquifier.core.transforms.audio_loudnorm import (
     LoudnormMeasurement,
@@ -59,6 +60,99 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 LOUDNORM_ID = "audio.loudnorm"
 BLEND_B_ID = "video.blend_b"
+OUTPUT_AUDIO_SAMPLE_RATE = 48_000
+
+
+def _main_audio_bitrate(plan: Plan) -> str:
+    selected = selected_audio_relative_indices(plan.source, plan.profile.audio_tracks)
+    channels = plan.source.audio[selected[0]].channels if selected else 2
+    if channels <= 1:
+        return "128k"
+    if channels == 2:
+        return "384k"
+    if channels <= 6:
+        return "512k"
+    return f"{channels * 128}k"
+
+
+def _audio_transform_params(plan: Plan, tc: TransformConfig) -> Any:
+    """Resolve an audio transform against source/profile-level context.
+
+    Transform schemas intentionally remain profile-facing and pure.  Two values,
+    however, cannot be resolved correctly from the transform YAML alone:
+
+    * the ``asetrate`` pitch path must start from the *input* stream rate or it
+      changes duration whenever a 44.1 kHz source is processed by a profile whose
+      delivery rate is 48 kHz;
+    * ``Profile.target_loudness_lufs`` is the default loudnorm target unless the
+      transform explicitly overrides ``integrated``.
+    """
+    spec = get(tc.id)
+    raw = {**spec.defaults, **tc.params}
+    if (
+        tc.id == "audio.pitch_tempo"
+        and plan.source.audio
+        and raw.get("method", "asetrate") == "asetrate"
+    ):
+        selected_audio = selected_audio_relative_indices(
+            plan.source, plan.profile.audio_tracks,
+        )
+        if selected_audio:
+            raw["sample_rate"] = plan.source.audio[selected_audio[0]].sample_rate
+    if tc.id == LOUDNORM_ID and "integrated" not in tc.params:
+        raw["integrated"] = plan.profile.target_loudness_lufs
+    return spec.schema.model_validate(raw)
+
+
+def _resolve_loudnorm_target(
+    params: LoudnormParams,
+    rng: random.Random,
+) -> LoudnormParams:
+    """Resolve target jitter once so both loudnorm passes use one target."""
+    if params.target_jitter_lufs <= 0:
+        return params
+    integrated = params.integrated + rng.uniform(
+        -params.target_jitter_lufs, params.target_jitter_lufs,
+    )
+    return params.model_copy(update={
+        "integrated": integrated,
+        "target_jitter_lufs": 0.0,
+    })
+
+
+def _measure_before_loudnorm(
+    plan: Plan,
+    audio_transforms: list[TransformConfig],
+) -> LoudnormMeasurement:
+    """Measure the signal that actually enters the first loudnorm transform."""
+    alloc = LabelAllocator()
+    rng = random.Random(plan.run_seed)
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    if not selected_audio:
+        raise PipelineError("cannot measure loudness without a selected audio stream")
+    label = f"0:a:{selected_audio[0]}"
+    chains: list[str] = []
+    for tc in audio_transforms:
+        if tc.id == LOUDNORM_ID:
+            break
+        spec = get(tc.id)
+        resolved = _audio_transform_params(plan, tc)
+        chain = call_build(spec, resolved, alloc, label, rng=rng)
+        chains.append(_wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label))
+        label = chain.out_label
+    params = _resolve_loudnorm_target(
+        _loudnorm_params_from(plan.profile, audio_transforms), rng,
+    )
+    if not chains:
+        return measure(plan.source.path, params)
+    return measure(
+        plan.source.path,
+        params,
+        pre_filter_complex=";".join(chains),
+        pre_output_label=label,
+    )
 
 
 def _video_tail_scale(plan: Plan) -> str:
@@ -77,6 +171,30 @@ def _video_tail_scale(plan: Plan) -> str:
             width, height = _resolve_dims(params)
             return f"scale={width}:{height}"
     return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+
+
+def _color_output_args(plan: Plan) -> list[str]:
+    """Write explicit output color tags matching the declared transform path."""
+    if not plan.source.video:
+        return []
+    color = plan.source.video[0].color
+    if is_tonemap_active(plan.profile.transforms):
+        return [
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-colorspace", "bt709",
+            "-color_range", "tv",
+        ]
+    result: list[str] = []
+    if color.primaries != "unknown":
+        result += ["-color_primaries", color.primaries]
+    if color.transfer != "unknown":
+        result += ["-color_trc", color.transfer]
+    if color.space != "unknown":
+        result += ["-colorspace", color.space]
+    if color.color_range != "unknown":
+        result += ["-color_range", color.color_range]
+    return result
 
 
 def _wrap_chain_str(in_label: str, filter_str: str, out_label: str) -> str:
@@ -256,14 +374,15 @@ class FilterGraph:
 
     def build(self) -> BuiltCommand:
         audio_transforms = self._enabled(kind="audio")
-        rng = random.Random(self.plan.run_seed)
+        video_rng = random.Random(self.plan.run_seed)
+        audio_rng = random.Random(self.plan.run_seed)
 
         # ---- video chain ----
         # Delegated to the module-level helper so the per-segment path
         # (build_video_segment_command) and full-file path produce
         # identical HDR / color handling.
         v_label, v_chains, extra_inputs = _build_video_chain(
-            self.plan, self.alloc, "0:v:0", rng,
+            self.plan, self.alloc, "0:v:0", video_rng,
         )
 
         # Tail: round dims to even (required by libx264/H.264 profiles) and set pix_fmt.
@@ -276,21 +395,25 @@ class FilterGraph:
         if loudnorm_used and self._loudnorm_measurement is None:
             # Use a distinct local so the in-loop `params: BaseModel` below
             # isn't narrowed to LoudnormParams by mypy's flow analysis.
-            ln_params = self._loudnorm_params(audio_transforms)
-            self._loudnorm_measurement = measure(self.plan.source.path, ln_params)
+            self._loudnorm_measurement = _measure_before_loudnorm(
+                self.plan, audio_transforms,
+            )
 
         a_chains: list[str] = []
         a_label: str | None = None
-        if self.plan.source.audio:
+        selected_audio = selected_audio_relative_indices(
+            self.plan.source, self.plan.profile.audio_tracks,
+        )
+        if selected_audio:
             # `0:a:0` is the ffmpeg *relative* audio specifier — "first
             # audio stream of input 0", regardless of absolute container
             # index. The dead `or a_in` fallback that used to live here
             # is removed: `a_label` starts truthy and is reassigned to
             # `chain.out_label` (also truthy) on every iteration.
-            a_label = "0:a:0"
+            a_label = f"0:a:{selected_audio[0]}"
             for tc in audio_transforms:
                 spec = get(tc.id)
-                params = spec.schema.model_validate({**spec.defaults, **tc.params})
+                params = _audio_transform_params(self.plan, tc)
                 if tc.id == LOUDNORM_ID:
                     # A2 (v0.5.5): explicit raises in place of `assert` so
                     # PYTHONOPTIMIZE=1 / PyInstaller -O builds still catch
@@ -305,12 +428,15 @@ class FilterGraph:
                             "loudnorm: measurement missing — "
                             "pass-1 scan was skipped before build()",
                         )
+                    resolved_loudnorm = _resolve_loudnorm_target(params, audio_rng)
                     chain = build_apply(
-                        params, self._loudnorm_measurement, self.alloc,
-                        a_label, rng=rng,
+                        resolved_loudnorm, self._loudnorm_measurement, self.alloc,
+                        a_label, rng=audio_rng,
                     )
                 else:
-                    chain = call_build(spec, params, self.alloc, a_label, rng=rng)
+                    chain = call_build(
+                        spec, params, self.alloc, a_label, rng=audio_rng,
+                    )
                 a_chains.append(
                     _wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label)
                 )
@@ -354,7 +480,10 @@ class FilterGraph:
         args += ["-filter_complex", filter_complex]
         args += ["-map", f"[{v_out}]"]
         if a_label is not None:
-            args += ["-map", f"[{a_label}]"]
+            if a_chains:
+                args += ["-map", f"[{a_label}]"]
+            else:
+                args += ["-map", a_label]
 
         passthrough_audio_maps = self._build_audio_passthrough()
         args += passthrough_audio_maps
@@ -368,6 +497,7 @@ class FilterGraph:
             args += ["-map_chapters", "-1"]
 
         args += self._encoder_args()
+        args += _color_output_args(self.plan)
         args += self._audio_output_args(has_main=a_label is not None)
         args += self._container_args()
         args += self._metadata_args()
@@ -402,10 +532,7 @@ class FilterGraph:
         return result
 
     def _loudnorm_params(self, audio_tcs: list[TransformConfig]) -> LoudnormParams:
-        for tc in audio_tcs:
-            if tc.id == LOUDNORM_ID:
-                return LoudnormParams.model_validate(tc.params or {})
-        return LoudnormParams()
+        return _loudnorm_params_from(self.plan.profile, audio_tcs)
 
     def _target_pix_fmt(self) -> str:
         if not self.plan.source.video:
@@ -421,24 +548,13 @@ class FilterGraph:
 
     def _build_audio_passthrough(self) -> list[str]:
         """Maps for additional audio tracks beyond the main one, with -c copy."""
-        all_audio = self.plan.source.audio
-        if len(all_audio) <= 1:
-            return []
-        opt = self.plan.profile.audio_tracks
-        if opt == "first":
-            indices_for_passthrough = [a.index for a in all_audio[1:]]
-        elif opt == "all":
-            # "all" = main track processed + everything else copied; main is index 0 audio.
-            indices_for_passthrough = [a.index for a in all_audio[1:]]
-        elif isinstance(opt, list):
-            # explicit indices: those NOT chosen as main (0) are passthrough.
-            indices_for_passthrough = [i for i in opt if i != all_audio[0].index]
-        else:  # pragma: no cover - unreachable per type system
-            indices_for_passthrough = []
+        indices_for_passthrough = selected_audio_relative_indices(
+            self.plan.source, self.plan.profile.audio_tracks,
+        )[1:]
 
         args: list[str] = []
-        # `src_idx` is the audio-relative index of each passthrough track in
-        # the source container (e.g. tracks [1, 3]); `n` is just its slot in
+        # `src_idx` is the audio-relative index of each passthrough track;
+        # `n` is just its slot in
         # the assembled output, 1-based because :a:0 is the processed main.
         # Using `n` for `0:a:{...}?` would silently remap non-contiguous
         # tracks (e.g. tracks [1, 3] would become [1, 2] of the source).
@@ -450,10 +566,12 @@ class FilterGraph:
     def _build_subtitle_passthrough(self) -> list[str]:
         if not self.plan.source.subtitle:
             return ["-sn"]
-        # Skip image-based subs in mp4 (they don't fit).
-        any_text = any(not s.is_image_based for s in self.plan.source.subtitle)
-        if not any_text:
-            return ["-sn"]
+        if self.plan.profile.output_container in {"mp4", "mov"}:
+            if any(stream.is_image_based for stream in self.plan.source.subtitle):
+                raise PipelineError(
+                    "image-based subtitles require MKV output or prior conversion"
+                )
+            return ["-map", "0:s?", "-c:s", "mov_text"]
         return ["-map", "0:s?", "-c:s", "copy"]
 
     def _encoder_args(self) -> list[str]:
@@ -495,7 +613,10 @@ class FilterGraph:
     def _audio_output_args(self, *, has_main: bool) -> list[str]:
         if not has_main:
             return []
-        return ["-c:a:0", "aac", "-b:a:0", "256k"]
+        return [
+            "-c:a:0", "aac", "-b:a:0", _main_audio_bitrate(self.plan),
+            "-ar:a:0", str(OUTPUT_AUDIO_SAMPLE_RATE),
+        ]
 
     def _container_args(self) -> list[str]:
         c = self.plan.profile.output_container
@@ -509,7 +630,9 @@ class FilterGraph:
         # writes its own `encoder=Lavf<version>` which is indistinguishable
         # from any other ffmpeg-built output. A custom string would
         # fingerprint the file as tool-generated.
-        return ["-map_metadata", "-1"]
+        from yt_uniquifier.core.metadata import build_metadata_args
+
+        return build_metadata_args(self.plan)
 
 
 def build_video_segment_command(
@@ -521,9 +644,10 @@ def build_video_segment_command(
 ) -> BuiltCommand:
     """Build an ffmpeg command that applies video transforms to one segment.
 
-    The segment file is the input (not the original source). Audio in the
-    segment is passed through with stream copy — main audio is handled
-    separately by build_main_audio_command on the full source.
+    The segment file is the input (not the original source). Segment outputs
+    intentionally contain video only. Audio, subtitles, and chapters are
+    mapped once from the original source during final muxing; carrying copied
+    AAC through segment files can shift the video timeline due to encoder delay.
     """
     alloc = LabelAllocator()
     rng = random.Random(plan.run_seed)
@@ -537,7 +661,10 @@ def build_video_segment_command(
 
     pix_fmt = _segment_pix_fmt(plan)
     v_out = alloc.next("v")
-    v_chains.append(f"[{v_label}]{_video_tail_scale(plan)},format={pix_fmt}[{v_out}]")
+    v_chains.append(
+        f"[{v_label}]setpts=PTS-STARTPTS,{_video_tail_scale(plan)},"
+        f"format={pix_fmt}[{v_out}]"
+    )
 
     filter_complex = ";".join(v_chains)
     for idx, _ in enumerate(extra_inputs, start=1):
@@ -565,11 +692,10 @@ def build_video_segment_command(
 
     args += ["-filter_complex", filter_complex]
     args += ["-map", f"[{v_out}]"]
-    # Copy all audio + subs from the segment as-is.
-    args += ["-map", "0:a?", "-c:a", "copy"]
-    args += ["-map", "0:s?", "-c:s", "copy"]
+    args += ["-an", "-sn"]
     args += ["-map_chapters", "-1"]
     args += _encoder_args_for(plan, crf_override=crf_override)
+    args += _color_output_args(plan)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
 
@@ -578,8 +704,8 @@ def build_video_segment_command(
         filter_complex=filter_complex,
         output_video_label=v_out,
         output_audio_label=None,
-        passthrough_audio_maps=["-map", "0:a?", "-c:a", "copy"],
-        passthrough_sub_maps=["-map", "0:s?", "-c:s", "copy"],
+        passthrough_audio_maps=[],
+        passthrough_sub_maps=[],
         extra_inputs=extra_inputs,
     )
 
@@ -601,20 +727,17 @@ def build_video_segment_command_fused(
     per 1080p segment and cuts per-segment wall time by 15-25 % on
     HDD I/O-bound runs.
 
-    PTS handling matches ``stream_copy_extract`` exactly:
+    PTS handling is explicit and independent of source audio delay:
       - ``-ss <start>`` BEFORE ``-i`` for input seek (keyframe-aligned)
       - ``-t <span>`` AFTER ``-i`` to clamp duration
-      - ``-avoid_negative_ts make_zero`` to anchor output PTS at 0
+      - ``setpts=PTS-STARTPTS`` anchors decoded video at zero
     CRIT-2 (2026-05-30 test report) — we use ``-t``, not ``-to``,
     because some MP4 sources carry packet PTS extending past
     ``container.duration``.
 
-    Audio and subtitles are stream-copied from the source's segment
-    window, matching the legacy behaviour. The concat step replaces
-    the segment's first audio track with the separately-processed
-    ``main_audio`` (loudnorm, pitch, etc.), so the segment-level audio
-    here is just a placeholder for concat-demuxer stream-layout
-    consistency.
+    Audio, subtitles, and chapters are deliberately omitted. They are mapped
+    once from the full source at final mux, preserving stream topology without
+    letting negative AAC priming PTS shift every video segment.
     """
     alloc = LabelAllocator()
     rng = random.Random(plan.run_seed)
@@ -624,7 +747,10 @@ def build_video_segment_command_fused(
 
     pix_fmt = _segment_pix_fmt(plan)
     v_out = alloc.next("v")
-    v_chains.append(f"[{v_label}]{_video_tail_scale(plan)},format={pix_fmt}[{v_out}]")
+    v_chains.append(
+        f"[{v_label}]setpts=PTS-STARTPTS,{_video_tail_scale(plan)},"
+        f"format={pix_fmt}[{v_out}]"
+    )
 
     filter_complex = ";".join(v_chains)
     for idx, _ in enumerate(extra_inputs, start=1):
@@ -648,25 +774,19 @@ def build_video_segment_command_fused(
         "-y",
         # Input seek before -i: ffmpeg jumps to the nearest preceding
         # keyframe (cheap; keyframe-aligned per plan_segments). The
-        # `-avoid_negative_ts make_zero` below anchors the output PTS
-        # at 0 so concat works without per-segment PTS rewriting.
         "-ss", f"{segment.start_sec:.6f}",
         "-i", str(source),
         "-t", f"{span:.6f}",
-        "-avoid_negative_ts", "make_zero",
     ]
     for p in extra_inputs:
         args += ["-i", str(p)]
 
     args += ["-filter_complex", filter_complex]
     args += ["-map", f"[{v_out}]"]
-    # Stream-copy audio + subs from the source's segment window —
-    # concat will overwrite track 0 with main_audio anyway, but the
-    # concat demuxer needs the per-segment stream layout to match.
-    args += ["-map", "0:a?", "-c:a", "copy"]
-    args += ["-map", "0:s?", "-c:s", "copy"]
+    args += ["-an", "-sn"]
     args += ["-map_chapters", "-1"]
     args += _encoder_args_for(plan, crf_override=crf_override)
+    args += _color_output_args(plan)
     args += ["-map_metadata", "-1"]
     args += [str(segment_output)]
 
@@ -675,8 +795,8 @@ def build_video_segment_command_fused(
         filter_complex=filter_complex,
         output_video_label=v_out,
         output_audio_label=None,
-        passthrough_audio_maps=["-map", "0:a?", "-c:a", "copy"],
-        passthrough_sub_maps=["-map", "0:s?", "-c:s", "copy"],
+        passthrough_audio_maps=[],
+        passthrough_sub_maps=[],
         extra_inputs=extra_inputs,
     )
 
@@ -701,7 +821,10 @@ def build_main_audio_command(
         tc for tc in plan.profile.transforms
         if tc.enabled and get(tc.id).kind == "audio"
     ]
-    if not audio_transforms or not plan.source.audio:
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    if not audio_transforms or not selected_audio:
         # Nothing to process; signal caller to skip.
         return (
             BuiltCommand(args=[], filter_complex="", output_video_label=""),
@@ -711,16 +834,19 @@ def build_main_audio_command(
     measurement = loudnorm_measurement
     needs_loudnorm = any(tc.id == LOUDNORM_ID for tc in audio_transforms)
     if needs_loudnorm and measurement is None:
-        ln_params = _loudnorm_params_from(audio_transforms)
-        measurement = measure(plan.source.path, ln_params)
+        measurement = _measure_before_loudnorm(plan, audio_transforms)
 
-    a_label = "0:a:0"
+    a_label = f"0:a:{selected_audio[0]}"
     a_chains: list[str] = []
     for tc in audio_transforms:
         spec = get(tc.id)
-        params = spec.schema.model_validate({**spec.defaults, **tc.params})
+        params = _audio_transform_params(plan, tc)
         if tc.id == LOUDNORM_ID:
-            ln_params = LoudnormParams.model_validate({**spec.defaults, **tc.params})
+            if not isinstance(params, LoudnormParams):
+                raise PipelineError(
+                    f"loudnorm: expected LoudnormParams, got {type(params).__name__}",
+                )
+            ln_params = _resolve_loudnorm_target(params, rng)
             if measurement is None:
                 raise PipelineError(
                     "loudnorm: measurement missing — pass-1 scan "
@@ -743,7 +869,8 @@ def build_main_audio_command(
         "-vn",
         "-filter_complex", filter_complex,
         "-map", f"[{a_label}]",
-        "-c:a", "aac", "-b:a", "256k",
+        "-c:a", "aac", "-b:a", _main_audio_bitrate(plan),
+        "-ar", str(OUTPUT_AUDIO_SAMPLE_RATE),
         "-map_metadata", "-1",
         str(audio_output),
     ]
@@ -803,31 +930,37 @@ def build_main_audio_command_windowed(
     audio_transforms = [tc for tc in audio_transforms_all if tc.id != LOUDNORM_ID]
     needs_loudnorm = any(tc.id == LOUDNORM_ID for tc in audio_transforms_all)
 
-    if not audio_transforms_all or not plan.source.audio:
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    if not audio_transforms_all or not selected_audio:
         return (
             BuiltCommand(args=[], filter_complex="", output_video_label=""),
             loudnorm_measurement,
         )
 
-    # Loudnorm measurement happens once on the full source — same as legacy path.
     measurement = loudnorm_measurement
-    if needs_loudnorm and measurement is None:
-        ln_params = _loudnorm_params_from(audio_transforms_all)
-        measurement = measure(plan.source.path, ln_params)
 
     alloc = LabelAllocator()
     window_chains: list[str] = []
     window_out_labels: list[str] = []
     # Relative audio specifier — same as FilterGraph.build.
-    main_audio_specifier = "0:a:0"
+    main_audio_specifier = f"0:a:{selected_audio[0]}"
 
     for w in windows:
         seg_seed = derive_segment_seed(
             plan.plan_hash, AUDIO_WINDOW_NS_OFFSET + w.idx, plan.run_seed,
         )
         win_rng = random.Random(seg_seed)
-        cut_in = max(0.0, w.start_sec - w.crossfade_in_sec)
-        cut_out = min(plan.source.duration_sec, w.end_sec + w.crossfade_out_sec)
+        # Adjacent logical windows tile the source.  Extend each side by half
+        # the crossfade so the physical overlap is exactly CROSSFADE_SEC.
+        # Extending both sides by the full value created 0.2 s of input overlap
+        # while acrossfade removed only 0.1 s, growing audio by 0.1 s/boundary.
+        cut_in = max(0.0, w.start_sec - w.crossfade_in_sec / 2)
+        cut_out = min(
+            plan.source.duration_sec,
+            w.end_sec + w.crossfade_out_sec / 2,
+        )
 
         # Start the per-window chain: atrim the slice, reset PTS to 0.
         trim_out = alloc.next("a")
@@ -839,7 +972,7 @@ def build_main_audio_command_windowed(
         # Apply each non-loudnorm transform with the per-window rng.
         for tc in audio_transforms:
             spec = get(tc.id)
-            params = spec.schema.model_validate({**spec.defaults, **tc.params})
+            params = _audio_transform_params(plan, tc)
             chain = call_build(spec, params, alloc, a_label, rng=win_rng)
             chain_parts.append(
                 _wrap_chain_str(chain.in_label, chain.filter_str, chain.out_label)
@@ -860,27 +993,34 @@ def build_main_audio_command_windowed(
         )
         accumulator = out_label
 
+    resolved_window_loudnorm: LoudnormParams | None = None
+    if needs_loudnorm:
+        ln_seed = derive_segment_seed(
+            plan.plan_hash, AUDIO_WINDOW_NS_OFFSET - 1, plan.run_seed,
+        )
+        resolved_window_loudnorm = _resolve_loudnorm_target(
+            _loudnorm_params_from(plan.profile, audio_transforms_all),
+            random.Random(ln_seed),
+        )
+    if resolved_window_loudnorm is not None and measurement is None:
+        measurement = measure(
+            plan.source.path,
+            resolved_window_loudnorm,
+            pre_filter_complex=";".join(window_chains + acrossfade_chains),
+            pre_output_label=accumulator,
+        )
+
     # Global loudnorm on the concatenated stream.
     if needs_loudnorm:
-        ln_defaults = get(LOUDNORM_ID).defaults
-        ln_from_profile = _loudnorm_params_from(audio_transforms_all).model_dump()
-        ln_params = LoudnormParams.model_validate({**ln_defaults, **ln_from_profile})
         if measurement is None:
             raise PipelineError(
                 "loudnorm: measurement missing — pass-1 scan was "
                 "skipped before build_main_audio_command_windowed()",
             )
-        # Derive a dedicated seed for the loudnorm jitter so each run/file
-        # under the `divergent` strategy gets a unique target jitter value.
-        # Using `plan.run_seed` raw made the per-call jitter constant
-        # across runs that shared the same seed but were otherwise
-        # supposed to diverge.
-        ln_seed = derive_segment_seed(
-            plan.plan_hash, AUDIO_WINDOW_NS_OFFSET - 1, plan.run_seed,
-        )
+        if resolved_window_loudnorm is None:
+            raise PipelineError("loudnorm parameters were not resolved")
         ln_chain = build_apply(
-            ln_params, measurement, alloc, accumulator,
-            rng=random.Random(ln_seed),
+            resolved_window_loudnorm, measurement, alloc, accumulator,
         )
         final_label = ln_chain.out_label
         loudnorm_str = _wrap_chain_str(
@@ -900,7 +1040,8 @@ def build_main_audio_command_windowed(
         "-vn",
         "-filter_complex", filter_complex,
         "-map", f"[{final_label}]",
-        "-c:a", "aac", "-b:a", "256k",
+        "-c:a", "aac", "-b:a", _main_audio_bitrate(plan),
+        "-ar", str(OUTPUT_AUDIO_SAMPLE_RATE),
         "-map_metadata", "-1",
         str(audio_output),
     ]
@@ -1018,27 +1159,40 @@ def _max_bitrate_for(plan: Plan) -> int:
     return int(base * 1.25)
 
 
-def _loudnorm_params_from(audio_tcs: list[TransformConfig]) -> LoudnormParams:
+def _loudnorm_params_from(
+    profile: Profile, audio_tcs: list[TransformConfig],
+) -> LoudnormParams:
     for tc in audio_tcs:
         if tc.id == LOUDNORM_ID:
-            return LoudnormParams.model_validate(tc.params or {})
-    return LoudnormParams()
+            raw = dict(tc.params or {})
+            raw.setdefault("integrated", profile.target_loudness_lufs)
+            return LoudnormParams.model_validate(raw)
+    return LoudnormParams(integrated=profile.target_loudness_lufs)
+
+
+def expected_output_duration(plan: Plan) -> float:
+    """Return the declared video timeline duration after playback-rate filters."""
+    rate = 1.0
+    for transform in plan.profile.transforms:
+        if transform.enabled and transform.id == "video.speed":
+            raw_rate = transform.params.get("rate", 1.0)
+            if not isinstance(raw_rate, (int, float)):
+                raise PipelineError("video.speed.rate must be numeric")
+            rate *= float(raw_rate)
+    return plan.source.duration_sec / rate
 
 
 def compute_plan_hash(
     source: SourceMeta, profile: Profile, encoder: EncoderCandidate
 ) -> str:
     """Deterministic 16-hex hash of the (content + profile + encoder) triple."""
+    source_meta = source.model_dump(mode="json", exclude={"path"})
     payload: dict[str, Any] = {
-        "source": {
-            "path": str(source.path),
-            "size": source.size_bytes,
-            "duration": round(source.duration_sec, 3),
-            "video_codec": source.video[0].codec if source.video else "",
-            "video_dims": (
-                [source.video[0].width, source.video[0].height] if source.video else []
-            ),
-        },
+        # Include the complete probed topology (all video/audio/subtitle streams,
+        # chapters, container and HDR fields), not only the first video's codec
+        # and dimensions.  Resume artifacts are unsafe when any of those change.
+        "source": source_meta,
+        "source_content": _source_content_fingerprint(source.path),
         # mode="json" forces pydantic to coerce Path / Enum / datetime fields
         # to their JSON-native form (str / member-name / ISO). Without this,
         # a profile containing e.g. `BlendBParams.b_video_path: Path` would
@@ -1053,3 +1207,50 @@ def compute_plan_hash(
     }
     raw = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+_FULL_HASH_LIMIT = 64 * 1024 * 1024
+_SAMPLE_SIZE = 1024 * 1024
+_SAMPLE_COUNT = 9
+
+
+def _source_content_fingerprint(path: Path) -> dict[str, Any]:
+    """Return a path-independent input identity suitable for resume keys.
+
+    Files up to 64 MiB are hashed completely.  Larger media files use nine
+    evenly-spaced 1 MiB samples plus their exact size: this bounds plan startup
+    I/O while detecting ordinary in-place replacements throughout a movie, not
+    just changes in its head/tail.  The full probed stream topology is hashed by
+    :func:`compute_plan_hash` alongside this value.
+
+    A non-existent path is supported for pure model/property tests; real plans
+    are built only after :func:`probe` has verified the input exists.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"scheme": "missing-v1", "path": str(path)}
+
+    digest = hashlib.blake2b(digest_size=32)
+    size = stat.st_size
+    digest.update(size.to_bytes(16, "big", signed=False))
+    try:
+        with path.open("rb") as source_file:
+            if size <= _FULL_HASH_LIMIT:
+                while chunk := source_file.read(_SAMPLE_SIZE):
+                    digest.update(chunk)
+                scheme = "full-blake2b-v1"
+            else:
+                max_offset = max(0, size - _SAMPLE_SIZE)
+                offsets = {
+                    round(max_offset * index / (_SAMPLE_COUNT - 1))
+                    for index in range(_SAMPLE_COUNT)
+                }
+                for offset in sorted(offsets):
+                    source_file.seek(offset)
+                    digest.update(offset.to_bytes(16, "big", signed=False))
+                    digest.update(source_file.read(_SAMPLE_SIZE))
+                scheme = "sampled-blake2b-v1"
+    except OSError as exc:
+        raise PipelineError(f"cannot fingerprint input for safe resume: {path}: {exc}") from exc
+    return {"scheme": scheme, "size": size, "digest": digest.hexdigest()}

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from yt_uniquifier.core.models import Plan, Profile, SourceMeta
+from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 
 
 def resolve_title(template: str, source: SourceMeta, profile: Profile, plan_hash: str) -> str:
@@ -42,9 +43,22 @@ def build_metadata_args(
         title = resolve_title(title_template, plan.source, plan.profile, plan.plan_hash)
         args += ["-metadata", f"title={title}"]
     # Re-attach language tags for streams that had them.
-    for i, a in enumerate(plan.source.audio):
+    selected_audio = selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    )
+    for i, relative_idx in enumerate(selected_audio):
+        a = plan.source.audio[relative_idx]
         if a.language:
             args += [f"-metadata:s:a:{i}", f"language={a.language}"]
+    for i, subtitle in enumerate(plan.source.subtitle):
+        if subtitle.language:
+            args += [f"-metadata:s:s:{i}", f"language={subtitle.language}"]
+    # ``-map_metadata -1`` intentionally strips container fingerprints, but it
+    # also clears chapter titles even when ``-map_chapters`` copies the chapter
+    # timeline. Re-attach only the user-visible title fields from the probe.
+    for i, chapter in enumerate(plan.source.chapters):
+        if chapter.title:
+            args += [f"-metadata:c:{i}", f"title={chapter.title}"]
     return args
 
 

@@ -10,7 +10,54 @@ versioning follows the git tags `v0.1.0`, `v0.2.0`, `v0.3.x`, `v0.4.x`,
 The `[Unreleased]` section, if present, summarises post-tip changes since
 the last tag.
 
-## [Unreleased] — v1.3.0
+## [Unreleased]
+
+## [1.3.1] — 2026-09-02
+
+Production correctness and recovery hardening after the repository-wide audit.
+
+### Fixed
+
+- Preserve video PTS/frame count by encoding video-only segments with an explicit
+  zero-based timeline; separately mux the selected source audio, subtitles, and
+  chapters through a container-aware policy.
+- Build pitch from the probed input sample rate, normalize final audio to 48 kHz,
+  and measure EBU R128 loudness after all preceding audio transforms. Stereo upload
+  audio now uses the documented 384 kbps target; mono and surround use layout-aware
+  rates.
+- Preserve main audio even when a profile has no audio transform. Honour
+  `audio_tracks: first`, `all`, and explicit absolute ffprobe stream indices; convert
+  text subtitles to `mov_text` for MP4/MOV and reject incompatible image subtitles
+  during preflight.
+- Preserve chapter titles and selected audio/subtitle language metadata. Reject
+  unsupported timeline-rate combinations instead of silently desynchronizing copied
+  streams, chapters, or subtitles.
+- Correct divergent-window overlap so duration no longer grows by 0.1 seconds per
+  boundary. Reject the stereo-only Haas filter for mono/surround inputs.
+- Correct SSCD calibration direction, use common fixed random seeds, bracket the
+  search, key clip caches by source content, and abort after bounded retry instead
+  of interpreting an encode failure as an optimization signal.
+- Include source content and complete stream topology in plan identity. Validate and
+  hash cached main audio/final output, acquire work locks atomically, and always
+  release checkpoint ownership.
+- Make parallel segment failures cancel sibling FFmpeg processes even when callers
+  omit a cancellation token. Bound web run concurrency, reject duplicate output
+  reservations, and make SSE completion signalling non-blocking.
+- Restore square-pixel SAR after crop/resize and define `max_strength` as the maximum
+  total crop per axis, rather than independently applying the maximum to both sides.
+- Use the installed package version in FastAPI metadata and prevent QA correctness
+  failures from receiving a green verdict.
+
+### Added
+
+- Mandatory final media-contract validation for video/audio/subtitle/chapter counts,
+  timeline duration, and requested HDR preservation.
+- Regression tests with real FFmpeg for 44.1 kHz audio, LUFS, text subtitles,
+  chapters, mixed AAC/Opus tracks, frame preservation, and 125-second windowed audio.
+- `AUDIT.md`, `RISK_REGISTER.md`, `PRODUCTION_PLAN.md`, `BENCHMARKS.md`, and
+  `PRODUCTION_CHECKLIST.md` with verified/deferred production scope.
+
+## [1.3.0]
 
 AV1 + plugin sandbox + cross-OS quality. Backwards-compatible. MINOR.
 See `.claude/plans/v1.0.1-to-v1.3-roadmap.plan.md` for the full roadmap.

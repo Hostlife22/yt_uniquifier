@@ -34,6 +34,7 @@ from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 
 SCHEMA_VERSION = 1
 LOCK_FILENAME = ".lock.json"
+CROSS_HOST_LOCK_LEASE_SEC = 24 * 3600
 
 # B4 (v0.6.0): debounced flush thresholds. ``mark()`` writes to state
 # but only forces a disk fsync when one of these is exceeded. The
@@ -200,6 +201,9 @@ class CheckpointStore:
                 "run_seed": self.plan.run_seed,
                 "loudnorm_measurement": None,
                 "main_audio_path": None,
+                "main_audio_sha256": None,
+                "output_path": None,
+                "output_sha256": None,
                 "segments": [s.model_dump(mode="json") for s in fresh_segments],
             }
             self._flush()
@@ -326,12 +330,39 @@ class CheckpointStore:
     def get_main_audio(self) -> Path | None:
         with self._lock:
             raw = self._state.get("main_audio_path")
-            return Path(raw) if raw else None
+            if not raw:
+                return None
+            path = Path(raw)
+            if not _artifact_matches(path, self._state.get("main_audio_sha256")):
+                self._state["main_audio_path"] = None
+                self._state["main_audio_sha256"] = None
+                self._flush()
+                return None
+            return path
 
     def set_main_audio(self, path: Path) -> None:
         with self._lock:
             self._state["main_audio_path"] = str(path)
+            self._state["main_audio_sha256"] = sha256_file(path)
             # Phase-boundary write: force-flush instead of debouncing.
+            self._flush()
+
+    def output_is_valid(self, path: Path) -> bool:
+        """Return whether *path* is the exact finalized artifact we recorded."""
+        with self._lock:
+            stored_path = self._state.get("output_path")
+            stored_hash = self._state.get("output_sha256")
+            if not stored_path or Path(stored_path).resolve(strict=False) != path.resolve(
+                strict=False
+            ):
+                return False
+            return _artifact_matches(path, stored_hash, require_hash=True)
+
+    def set_output(self, path: Path) -> None:
+        """Persist the finalized output identity for safe completed-run no-op."""
+        with self._lock:
+            self._state["output_path"] = str(path)
+            self._state["output_sha256"] = sha256_file(path)
             self._flush()
 
     # ---- internals ----
@@ -348,14 +379,36 @@ class CheckpointStore:
         """
         my_pid = os.getpid()
         my_host = socket.gethostname()
-        if self.lock_path.exists():
+        while self.lock_path.exists():
             try:
                 raw = json.loads(self.lock_path.read_text(encoding="utf-8"))
                 owner_pid = int(raw.get("pid", 0))
                 owner_host = str(raw.get("hostname", ""))
+            except FileNotFoundError:
+                continue
             except (OSError, ValueError, json.JSONDecodeError):
-                # Corrupt lock — treat as orphaned and overwrite.
-                owner_pid, owner_host = 0, ""
+                # A competing O_EXCL creator may still be writing. Never
+                # unlink a partially-written lock underneath it. The creator
+                # writes immediately after O_EXCL, so a few short retries close
+                # that visibility window without weakening stale recovery.
+                recovered = None
+                for _ in range(3):
+                    time.sleep(0.01)
+                    try:
+                        recovered = json.loads(
+                            self.lock_path.read_text(encoding="utf-8")
+                        )
+                        break
+                    except FileNotFoundError:
+                        break
+                    except (OSError, ValueError, json.JSONDecodeError):
+                        continue
+                if recovered is not None:
+                    raw = recovered
+                    owner_pid = int(recovered.get("pid", 0))
+                    owner_host = str(recovered.get("hostname", ""))
+                else:
+                    owner_pid, owner_host = 0, ""
 
             same_host = owner_host == my_host
             same_pid = owner_pid == my_pid
@@ -373,32 +426,41 @@ class CheckpointStore:
                     "segment progress. Use a distinct --work-dir per "
                     "input (the typical pattern is work_dir/<plan_hash>).",
                 )
-            # Either cross-host (we cannot safely verify liveness across
-            # hosts via os.kill) or dead-PID-on-same-host. The
-            # distributed batch (`yt-uniq worker`) coordinates via the
-            # queue, not via shared work_dirs, so this should not happen
-            # in practice — but we surface a warning so an operator
-            # notices if it does.
+            if owner_host and not same_host:
+                acquired_at = float(raw.get("acquired_at", 0.0))
+                if time.time() - acquired_at < CROSS_HOST_LOCK_LEASE_SEC:
+                    raise CheckpointError(
+                        f"work_dir {self.work_dir} is locked by PID {owner_pid} "
+                        f"on another host ({owner_host}); refusing an unsafe reclaim"
+                    )
             _log.warning(
                 "checkpoint: reclaiming stale lock at %s "
                 "(prev owner: pid=%s host=%s)",
                 self.lock_path, owner_pid, owner_host,
             )
+            self.lock_path.unlink(missing_ok=True)
 
-        # Atomic-write the new lock.
-        tmp = self.lock_path.with_suffix(f".json.{my_pid}.tmp")
+        # O_EXCL makes ownership acquisition atomic across processes.
         payload = json.dumps({
             "pid": my_pid,
             "hostname": my_host,
             "plan_hash": self.plan.plan_hash,
             "acquired_at": time.time(),
         })
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, self.lock_path)
+        try:
+            fd = os.open(
+                self.lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+            )
+        except FileExistsError:
+            return self._acquire_process_lock()
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except BaseException:
+            self.lock_path.unlink(missing_ok=True)
+            raise
         self._owns_lock = True
 
     def _release_process_lock(self) -> None:
@@ -614,3 +676,20 @@ def sha256_file(path: Path) -> str:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def _artifact_matches(
+    path: Path,
+    stored_hash: object,
+    *,
+    require_hash: bool = False,
+) -> bool:
+    """Validate a cached artifact without allowing zero-byte placeholders."""
+    try:
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+        if not stored_hash:
+            return not require_hash
+        return sha256_file(path) == str(stored_hash)
+    except OSError:
+        return False

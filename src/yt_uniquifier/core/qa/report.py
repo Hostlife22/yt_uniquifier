@@ -35,6 +35,13 @@ def verdict(report: QAReport) -> VerdictResult:
     reasons: list[str] = []
     band: Verdict = "green"
 
+    correctness_notes = [
+        note for note in report.notes if note.startswith("correctness:")
+    ]
+    if correctness_notes:
+        band = "red"
+        reasons.extend(correctness_notes)
+
     # pHash similarity: too high = barely unique; too low = unrecognisable.
     if report.phash_similarity > 0.97:
         band = "red"
@@ -130,6 +137,30 @@ def build_report(
     src_meta = probe_file(input_path)
     out_meta = probe_file(output_path)
     p("probe", 1.0)
+
+    # Keep QA usable with partial/custom probe adapters: missing optional
+    # topology fields mean "unknown", not a report-building exception.
+    src_audio = getattr(src_meta, "audio", ())
+    out_audio = getattr(out_meta, "audio", ())
+    src_subtitles = getattr(src_meta, "subtitle", ())
+    out_subtitles = getattr(out_meta, "subtitle", ())
+    src_chapters = getattr(src_meta, "chapters", ())
+    out_chapters = getattr(out_meta, "chapters", ())
+
+    if not out_meta.video:
+        notes.append("correctness: output has no video stream")
+    if src_audio and not out_audio:
+        notes.append("correctness: source main audio stream is missing from output")
+    if len(out_subtitles) != len(src_subtitles):
+        notes.append(
+            "correctness: subtitle stream count changed "
+            f"({len(src_subtitles)} -> {len(out_subtitles)})"
+        )
+    if len(out_chapters) != len(src_chapters):
+        notes.append(
+            "correctness: chapter count changed "
+            f"({len(src_chapters)} -> {len(out_chapters)})"
+        )
 
     af_sim: float | None = None
     af_hamming: float | None = None

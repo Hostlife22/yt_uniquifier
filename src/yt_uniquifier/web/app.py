@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from yt_uniquifier import __version__
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 _log = logging.getLogger(__name__)
@@ -67,6 +68,9 @@ class WebConfig:
     # v1.1.0 Task 16: append-only JSONL audit log of state-changing
     # requests. ``None`` = disabled (default keeps unit tests hermetic).
     audit_log_path: Path | None = None
+    # Hard process-level backpressure. Each run can itself spawn many FFmpeg
+    # workers, so accepting an unbounded number of run threads is unsafe.
+    max_concurrent_runs: int = 2
 
 
 @dataclass
@@ -122,7 +126,7 @@ def build_app(config: WebConfig) -> Any:
 
     app = FastAPI(
         title="yt-uniquifier",
-        version="0.9.0",
+        version=__version__,
         docs_url="/docs",
         redoc_url=None,
     )

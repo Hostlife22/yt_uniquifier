@@ -1,16 +1,13 @@
 """Haas effect — delay one stereo channel by a few milliseconds.
 
-Smitelli (2010) showed that full stereo phase inversion breaks YouTube
-CID audio fingerprinting. Phase inversion sounds unnatural. The Haas
-("precedence") effect is its mono-compatible cousin: a 5–30 ms delay on
-one channel is perceived as a single fused source, slightly wider in the
-stereo image. It shifts the cross-channel phase relationship that audio
-fingerprinters cross-correlate, without the audible artefact of inversion.
+The Haas ("precedence") effect uses a short inter-channel delay to widen
+stereo material.  It is intentionally restricted to two-channel inputs:
+applying a stereo delay expression to mono or surround material has
+ambiguous channel semantics and can damage the mix.
 
 Filter: `adelay=0|N` — left channel unchanged (0 ms), right delayed by N ms.
 ffmpeg `adelay` since 3.x accepts the per-channel pipe-separated form.
 
-Source: Scott Smitelli, "Fun with YouTube's Audio Content ID System" (2010).
 """
 
 from __future__ import annotations

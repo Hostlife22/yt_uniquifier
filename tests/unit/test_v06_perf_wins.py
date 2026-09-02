@@ -70,16 +70,10 @@ def test_keyframe_cache_key_is_path_independent(tmp_path: Path) -> None:
 # ============================================================== B2
 
 
-def test_loudnorm_measure_command_downsamples_to_16k_mono(
+def test_loudnorm_measure_command_preserves_native_audio_for_accuracy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """B2: measure() must prepend aresample=16000,aformat=mono.
-
-    Pre-fix the loudnorm filter ran at native 48 kHz stereo which
-    decoded ~2.2 GB of PCM for a 4-hour source. Post-fix the chain is
-    aresample=16000,aformat=channel_layouts=mono,loudnorm=… — ~6× less
-    decode work without affecting EBU R128 integrated value.
-    """
+    """Pass 1 must not alter channels/rate before EBU R128 measurement."""
     import yt_uniquifier.core.transforms.audio_loudnorm as ln_mod
     from yt_uniquifier.core.transforms.audio_loudnorm import (
         LoudnormParams,
@@ -110,12 +104,8 @@ def test_loudnorm_measure_command_downsamples_to_16k_mono(
     cmd = captured["cmd"]
     af_idx = cmd.index("-af")
     af = cmd[af_idx + 1]
-    assert af.startswith("aresample=16000"), (
-        f"loudnorm filter must start with aresample=16000; got {af!r}"
-    )
-    assert "aformat=channel_layouts=mono" in af, (
-        f"loudnorm filter must downmix to mono; got {af!r}"
-    )
+    assert "aresample=" not in af
+    assert "aformat=" not in af
     assert "loudnorm=" in af
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -160,7 +161,6 @@ def register(  # noqa: PLR0913
                 pass
             # Best-effort enqueue; if the SSE consumer disappeared,
             # the queue may fill — drop oldest by pulling one item.
-            import contextlib
             try:
                 events_q.put_nowait(ev)
             except queue.Full:
@@ -194,13 +194,37 @@ def register(  # noqa: PLR0913
                     "phase": "runner", "message": record.error,
                 }))
             finally:
-                events_q.put(None)  # sentinel ends SSE stream
+                # Never let a disconnected client's full queue strand this
+                # worker thread while it tries to publish the terminal marker.
+                try:
+                    events_q.put_nowait(None)
+                except queue.Full:
+                    with contextlib.suppress(queue.Empty):
+                        events_q.get_nowait()
+                    events_q.put_nowait(None)
 
         thread = threading.Thread(
             target=_runner, name=f"run-{run_id}", daemon=True,
         )
         record.thread = thread
         with runs_lock:
+            active = [
+                existing for existing in runs.values()
+                if existing.status in {"pending", "running"}
+            ]
+            if any(
+                existing.output_basename == output_path.name
+                for existing in active
+            ):
+                raise http_exception(
+                    status_code=409,
+                    detail="output_name is already reserved by an active run",
+                )
+            if len(active) >= int(config.max_concurrent_runs):
+                raise http_exception(
+                    status_code=429,
+                    detail="maximum concurrent runs reached; retry later",
+                )
             runs[run_id] = record
         thread.start()
         # v1.1.0 Task 16: audit only AFTER the run is actually queued

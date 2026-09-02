@@ -43,13 +43,20 @@ def _build_crop_resize(
     # CLAUDE.md invariant #10 (deterministic per-segment seeds).
     rng = rng or random.Random(params.rng_seed)
     s = params.max_strength
-    left, right, top, bottom = (rng.uniform(0, s) for _ in range(4))
-    cw = max(1 - left - right, 0.5)
-    ch = max(1 - top - bottom, 0.5)
+    # ``max_strength`` is the maximum total crop on an axis. The legacy
+    # implementation sampled each side independently up to that value, so a
+    # documented 3% crop could unexpectedly remove almost 6% of the frame.
+    crop_x = rng.uniform(0, s)
+    crop_y = rng.uniform(0, s)
+    left = rng.uniform(0, crop_x)
+    top = rng.uniform(0, crop_y)
+    cw = max(1 - crop_x, 0.5)
+    ch = max(1 - crop_y, 0.5)
     out = alloc.next("v")
     filt = (
         f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{left:.4f}:ih*{top:.4f},"
-        f"scale=round(iw/{cw:.4f}/2)*2:round(ih/{ch:.4f}/2)*2:flags=lanczos"
+        f"scale=round(iw/{cw:.4f}/2)*2:round(ih/{ch:.4f}/2)*2:flags=lanczos,"
+        "setsar=1"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
 
