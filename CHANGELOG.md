@@ -42,6 +42,8 @@ the last tag.
 - Give automatic shared-filesystem workers process-unique heartbeat identities so
   a live sibling on the same host cannot mask an abandoned lease, including when
   cloud hostnames reach the queue's 64-character path-component limit.
+- Install `psutil` as a Windows runtime dependency so process-tree pause/resume
+  cannot silently degrade to a no-op on a standard installation.
 - Preserve `target_vmaf` behavior in distributed worker mode instead of silently
   clearing the profile setting.
 - Keep the Intel-macOS ML extra compatible by constraining it to NumPy 1.x and an

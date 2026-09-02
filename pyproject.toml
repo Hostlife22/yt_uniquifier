@@ -30,6 +30,10 @@ dependencies = [
     "Pillow>=12.3,<13",
     "structlog~=24.1",
     "jinja2~=3.1",
+    # Pause/resume uses native POSIX signals on Unix. Windows has no
+    # equivalent stdlib API, so psutil is a runtime requirement there;
+    # leaving it optional silently turned the Pause button into a no-op.
+    "psutil>=7.2.2,<8; platform_system == 'Windows'",
 ]
 
 [project.optional-dependencies]

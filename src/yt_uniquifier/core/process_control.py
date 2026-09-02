@@ -22,11 +22,10 @@ Design notes:
   ``psutil.Process.suspend`` does **not** propagate to children by
   default) but it is also useful on POSIX for hardware-encoder paths
   that fork helper processes.
-* ``psutil`` is a soft dependency: POSIX falls back to stdlib
-  ``os.kill`` + ``/proc`` walking if psutil is absent.  Windows
-  requires psutil — without it, ``suspend_process_tree`` returns 0
-  and logs a clear error, but the caller still completes (pause
-  becomes a no-op rather than crashing the run).
+* ``psutil`` is optional on POSIX, which falls back to stdlib ``os.kill``
+  plus ``/proc`` walking. It is an environment-marked runtime dependency
+  on Windows, whose stdlib has no suspend/resume API. The defensive missing-
+  dependency branch remains for broken or manually stripped installations.
 """
 
 from __future__ import annotations

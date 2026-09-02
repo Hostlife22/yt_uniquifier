@@ -232,9 +232,9 @@ second and fires `cancel_token.cancel()` if the pause exceeds
 `PauseToken.AUTO_CANCEL_SEC` (24 h by default).
 
 `core/process_control.py` is the cross-OS abstraction: POSIX uses
-stdlib `os.kill(pid, SIGSTOP|SIGCONT)`; Windows uses a lazy `psutil`
-import (no hard dep — pause becomes a no-op with a warning if psutil
-is absent). Both walk the process tree (psutil children, or `/proc`
+stdlib `os.kill(pid, SIGSTOP|SIGCONT)`; Windows uses `psutil`, installed
+automatically through a platform-specific runtime dependency. Both walk the
+process tree (psutil children, or `/proc`
 fallback on Linux) so descendant ffmpeg helper processes are
 suspended too. All operations are best-effort and never raise — a
 failed `os.kill` is logged at WARN and the return value reports the

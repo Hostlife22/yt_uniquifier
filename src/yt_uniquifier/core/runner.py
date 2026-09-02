@@ -724,10 +724,10 @@ def _signal_proc(proc: subprocess.Popen[str], sig: int) -> None:
 def _suspend_pid_safe(pid: int) -> bool:
     """Best-effort SIGSTOP / psutil.suspend over the process tree.
 
-    Imported lazily so the runner module stays importable on hosts
-    that don't have psutil (Windows pause is then a no-op with a clear
-    warning surfaced by ``process_control``). Returns True iff at
-    least one process in the tree ack'd the signal.
+    Imported lazily so the runner module stays importable on hosts whose
+    Windows installation is broken or manually stripped of its required
+    psutil package. Returns True iff at least one process in the tree ack'd
+    the signal.
     """
     try:
         from yt_uniquifier.core.process_control import suspend_process_tree
