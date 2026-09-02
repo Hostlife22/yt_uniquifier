@@ -17,6 +17,9 @@ from yt_uniquifier.core import segmenter as segmenter_mod
 
 
 def _stub_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    args = _args[0]
+    assert isinstance(args, list)
+    Path(args[-1]).write_bytes(b"muxed")
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
 
@@ -53,6 +56,7 @@ def test_concat_list_isolated_between_parallel_jobs(
     not see each other's concat.txt."""
 
     def _capture(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        Path(args[-1]).write_bytes(b"muxed")
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
@@ -83,3 +87,52 @@ def test_concat_list_isolated_between_parallel_jobs(
     # Job A's concat list must NOT mention job B's segment.
     assert "b_0.mkv" not in a_concat
     assert "a_0.mkv" not in b_concat
+
+
+def test_concat_is_atomic_and_preserves_existing_output_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "final.mp4"
+    output.write_bytes(b"previous-good-output")
+    segment = tmp_path / "seg.mkv"
+    segment.touch()
+
+    def _fail(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        Path(args[-1]).write_bytes(b"partial")
+        raise subprocess.CalledProcessError(1, args, stderr="mux failed")
+
+    monkeypatch.setattr(segmenter_mod.subprocess, "run", _fail)
+
+    with pytest.raises(Exception, match="concat failed"):
+        segmenter_mod.concat_segments(
+            [segment], None, output, [], work_dir=tmp_path / "work",
+        )
+
+    assert output.read_bytes() == b"previous-good-output"
+    assert not list(tmp_path.glob(".*.part.mp4"))
+
+
+def test_concat_maps_all_requested_passthrough_audio_tracks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def _capture(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(args)
+        Path(args[-1]).write_bytes(b"muxed")
+        return subprocess.CompletedProcess(args=args, returncode=0)
+
+    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    segment = tmp_path / "seg.mkv"
+    segment.touch()
+    segmenter_mod.concat_segments(
+        [segment],
+        None,
+        tmp_path / "final.mp4",
+        [],
+        work_dir=tmp_path / "work",
+        audio_passthrough_count=5,
+    )
+
+    maps = [captured[idx + 1] for idx, value in enumerate(captured) if value == "-map"]
+    assert maps == ["0:v:0", "0:a:1?", "0:a:2?", "0:a:3?", "0:a:4?", "0:a:5?", "0:s?"]

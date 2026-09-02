@@ -15,7 +15,6 @@ from pathlib import Path
 from types import TracebackType
 from typing import cast
 
-from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -97,7 +96,10 @@ def _install_global_excepthook() -> None:
         # Show a modal dialog. Only attempt if a QApplication is alive —
         # constructing a QMessageBox without one raises a different error.
         app = QApplication.instance()
-        if app is None:
+        # Headless/offscreen test and server processes may retain a shared
+        # QApplication from an earlier component. A modal exec() there has
+        # no user who can close it and deadlocks the process until timeout.
+        if app is None or QApplication.platformName() in {"offscreen", "minimal"}:
             return
         with contextlib.suppress(Exception):
             dlg = QMessageBox()
@@ -239,34 +241,19 @@ class MainWindow(QMainWindow):
         with contextlib.suppress(Exception):
             self.state.save()
 
-        # Walk every screen, locate any QThread-derived attribute that is
-        # still running, request cooperative cancel, then wait briefly.
+        all_stopped = True
         for i in range(self.stack.count()):
             screen = self.stack.widget(i)
             if screen is None:
                 continue
-            for attr_name in dir(screen):
-                if attr_name.startswith("__"):
-                    continue
-                try:
-                    obj = getattr(screen, attr_name)
-                except Exception:  # noqa: BLE001 - defensive walker
-                    # Surface the exception so a property that raises on
-                    # shutdown doesn't silently leave its underlying
-                    # QThread alive after the window closes.
-                    _log.exception(
-                        "closeEvent: getattr(%s, %s) raised; skipping",
-                        type(screen).__name__, attr_name,
-                    )
-                    continue
-                if isinstance(obj, QThread) and obj.isRunning():
-                    cancel = getattr(obj, "request_cancel", None)
-                    if callable(cancel):
-                        cancel()
-                    obj.quit()
-                    obj.wait(3000)  # cap per worker; total <= 3s × N
+            if isinstance(screen, ScreenBase):
+                all_stopped = screen.shutdown_workers() and all_stopped
         if event is not None:
-            event.accept()
+            if all_stopped:
+                event.accept()
+            else:
+                _log.warning("close deferred: one or more GUI workers are still running")
+                event.ignore()
 
 
 def _maybe_prompt_telemetry_consent(parent: QMainWindow | None = None) -> None:

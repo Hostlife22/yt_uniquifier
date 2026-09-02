@@ -213,10 +213,8 @@ jobs:
           # version fields are PEP-440-ish and not happy with a "v" prefix.
           export YT_UNIQUIFIER_VERSION="${YT_UNIQUIFIER_VERSION#v}"
           appimage-builder --recipe installers/linux/AppImageBuilder.yml \
-            --skip-test --skip-appimage || \
-          appimage-builder --recipe installers/linux/AppImageBuilder.yml \
             --skip-test
-          ls -la *.AppImage *.AppImage.zsync 2>/dev/null || true
+          ls -la *.AppImage *.AppImage.zsync
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4

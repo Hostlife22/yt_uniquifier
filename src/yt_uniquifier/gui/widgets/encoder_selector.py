@@ -83,31 +83,43 @@ class EncoderSelector(QComboBox):
             self._model.appendRow(item)
         self._clear_worker()
 
-    def _clear_worker(self) -> None:
-        """Join the EncoderDetectWorker QThread before dropping the ref.
+    def shutdown_detection(self, wait_ms: int = 16_000) -> bool:
+        """Cancel and join encoder detection without destroying a live QThread.
 
         Cold-start detection can take several seconds. If the user closes
         the window mid-probe, dropping the Python ref while the C++
         QThread is still in run() leads to "QThread: Destroyed while
         thread is still running". EncoderSelector lives inside multiple
-        screens (Run, Batch, Queue, Validation) and the screens'
-        closeEvent walker doesn't see this attribute, so it has to clean
-        up its own worker.
+        screens (Run, Batch, Queue, Validation), so both its own close handler
+        and ScreenBase's nested-worker walker use this explicit shutdown hook.
         """
         if self._detect_worker is None:
-            return
+            return True
+        worker = self._detect_worker
         # Tests sometimes substitute a plain placeholder for the worker
         # (e.g. to assert `_clear_worker` is reached after `failed`);
         # only call quit/wait on a real QThread.
-        if hasattr(self._detect_worker, "quit"):
-            self._detect_worker.quit()
-        if hasattr(self._detect_worker, "wait"):
-            self._detect_worker.wait(1000)
+        cancel = getattr(worker, "request_cancel", None)
+        if callable(cancel):
+            cancel()
+        if hasattr(worker, "quit"):
+            worker.quit()
+        if hasattr(worker, "wait") and not worker.wait(wait_ms):
+            # Preserve the owning reference. Dropping it here aborts the
+            # process on Qt with "QThread: Destroyed while thread is still
+            # running". Encoder probes have a 15 s subprocess timeout, so
+            # the default wait includes one second of scheduling margin.
+            return False
         self._detect_worker = None
+        return True
+
+    def _clear_worker(self) -> None:
+        """Compatibility slot used by worker completion/failure signals."""
+        self.shutdown_detection()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
         """Ensure the detect worker is joined when the parent window closes."""
-        self._clear_worker()
+        self.shutdown_detection()
         super().closeEvent(event)
 
     def _on_changed(self, idx: int) -> None:

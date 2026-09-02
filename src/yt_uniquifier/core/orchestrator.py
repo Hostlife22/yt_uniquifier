@@ -631,6 +631,7 @@ def _run_full_body(
         options.output,
         build_metadata_args(plan, title_template=options.title_template),
         work_dir=options.work_dir,
+        audio_passthrough_count=max(0, len(plan.source.audio) - 1),
         target_duration_sec=plan.source.duration_sec,
     )
     # v0.4.3 — optional bitstream sanitization (second-pass libx264).

@@ -17,11 +17,13 @@ Marked ``@pytest.mark.integration`` because it requires a real ffmpeg
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -31,6 +33,13 @@ from tests.conftest import needs_ffmpeg
 
 # Local default; the CI runner can bump this via env.
 N_ROUNDS = int(os.environ.get("YT_UNIQ_CHAOS_ROUNDS", "3"))
+SOFT_PROFILE = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "yt_uniquifier"
+    / "profiles"
+    / "soft.yaml"
+)
 
 
 def _has_libvmaf() -> bool:
@@ -71,6 +80,17 @@ def chaos_clip(tmp_path: Path) -> Path:
     return out
 
 
+@pytest.fixture
+def fixed_soft_profile(tmp_path: Path) -> Path:
+    """Use one seed so clean and interrupted executions are comparable."""
+    profile = tmp_path / "soft_fixed.yaml"
+    profile.write_text(
+        SOFT_PROFILE.read_text(encoding="utf-8") + "\nseed_strategy: fixed\n",
+        encoding="utf-8",
+    )
+    return profile
+
+
 @needs_ffmpeg
 @needs_libvmaf
 @pytest.mark.integration
@@ -79,7 +99,7 @@ def chaos_clip(tmp_path: Path) -> Path:
     reason="SIGKILL semantics differ on Windows; chaos lane is POSIX-only",
 )
 def test_sigkill_then_resume_produces_equivalent_output(
-    chaos_clip: Path, tmp_path: Path,
+    chaos_clip: Path, fixed_soft_profile: Path, tmp_path: Path,
 ) -> None:
     """After N rounds of (start orchestrator → SIGKILL at random offset
     → resume), the final output must be substantively identical to a
@@ -93,7 +113,7 @@ def test_sigkill_then_resume_produces_equivalent_output(
     """
     # Baseline: clean run.
     baseline = tmp_path / "baseline.mp4"
-    _clean_run(chaos_clip, baseline, tmp_path / "baseline_work")
+    _clean_run(chaos_clip, baseline, tmp_path / "baseline_work", fixed_soft_profile)
     assert baseline.exists() and baseline.stat().st_size > 0
 
     # Chaos: launch + SIGKILL + resume, repeated N times.
@@ -101,18 +121,18 @@ def test_sigkill_then_resume_produces_equivalent_output(
     work = tmp_path / "chaos_work"
     rng = random.Random(42)
     for _ in range(N_ROUNDS):
-        proc = _launch_orchestrator(chaos_clip, out, work)
+        proc = _launch_orchestrator(chaos_clip, out, work, fixed_soft_profile)
         # Sleep a random fraction of an estimated wall-clock then kill.
         # On a 5 s 320x180 clip, ultrafast libx264 takes ~0.5-2 s — kill
         # at 30-70 % of that range.
         sleep_for = rng.uniform(0.15, 0.7)
         time.sleep(sleep_for)
         if proc.poll() is None:  # still alive — kill mid-run
-            proc.send_signal(signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         proc.wait(timeout=15)
 
     # Final clean resume to completion.
-    _clean_run(chaos_clip, out, work)
+    _clean_run(chaos_clip, out, work, fixed_soft_profile)
     assert out.exists() and out.stat().st_size > 0
 
     vmaf = _measure_vmaf(reference=baseline, distorted=out)
@@ -122,24 +142,26 @@ def test_sigkill_then_resume_produces_equivalent_output(
     )
 
 
-def _clean_run(source: Path, output: Path, work: Path) -> None:
+def _clean_run(source: Path, output: Path, work: Path, profile: Path) -> None:
     """Run the orchestrator to completion via the CLI surface."""
     cmd = [
-        "yt-uniq", "run", str(source),
-        "--profile", "soft",
-        "--output", str(output),
+        sys.executable, "-m", "yt_uniquifier", "run", str(source),
+        "--profile", str(profile),
+        "--out", str(output),
         "--work-dir", str(work),
         "--encoder", "libx264",
     ]
     subprocess.run(cmd, check=True, capture_output=True, timeout=120)
 
 
-def _launch_orchestrator(source: Path, output: Path, work: Path) -> subprocess.Popen[bytes]:
+def _launch_orchestrator(
+    source: Path, output: Path, work: Path, profile: Path,
+) -> subprocess.Popen[bytes]:
     """Start the orchestrator and return the Popen for the watchdog."""
     cmd = [
-        "yt-uniq", "run", str(source),
-        "--profile", "soft",
-        "--output", str(output),
+        sys.executable, "-m", "yt_uniquifier", "run", str(source),
+        "--profile", str(profile),
+        "--out", str(output),
         "--work-dir", str(work),
         "--encoder", "libx264",
     ]
@@ -151,20 +173,18 @@ def _launch_orchestrator(source: Path, output: Path, work: Path) -> subprocess.P
 
 def _measure_vmaf(*, reference: Path, distorted: Path) -> float:
     """One-shot libvmaf measurement; returns the mean score in [0, 100]."""
+    log_path = distorted.with_suffix(".vmaf.json")
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-i", str(distorted), "-i", str(reference),
         "-filter_complex",
-        "[0:v][1:v]libvmaf=log_fmt=json:log_path=-:n_threads=2",
+        f"[0:v][1:v]libvmaf=log_fmt=json:log_path={log_path}:n_threads=2",
         "-f", "null", "-",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    # libvmaf logs the per-frame and aggregate scores to stdout when
-    # log_path=- is set.  Parse the "VMAF score: …" line.
-    import re
-    match = re.search(r'"VMAF score":\s*([\d.]+)', proc.stdout)
-    if match is None:
-        match = re.search(r"VMAF score:?\s*([\d.]+)", proc.stderr)
-    if match is None:
-        pytest.skip("could not parse VMAF score from libvmaf output")
-    return float(match.group(1))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        assert proc.returncode == 0, f"libvmaf failed: {proc.stderr}"
+        report = json.loads(log_path.read_text(encoding="utf-8"))
+        return float(report["pooled_metrics"]["vmaf"]["mean"])
+    finally:
+        log_path.unlink(missing_ok=True)

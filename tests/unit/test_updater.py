@@ -29,7 +29,6 @@ from yt_uniquifier.core.updater import (
     check_for_update,
 )
 
-
 # ---------------------------------------------------------------------------
 # semver
 # ---------------------------------------------------------------------------
@@ -194,10 +193,12 @@ def test_fetch_manifest_round_trip(
     }).encode("utf-8")
 
     class _Resp:
-        def __enter__(self) -> "_Resp":
+        def __enter__(self) -> _Resp:
             return self
+
         def __exit__(self, *a: object) -> None:
             return None
+
         def read(self, n: int = -1) -> bytes:
             return payload
 

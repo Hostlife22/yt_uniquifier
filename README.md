@@ -1,7 +1,7 @@
 # yt-uniquifier
 
 > Production-grade re-encoder with controlled, calibrated micro-transforms for
-> owned or licensed video content. **Current release: v1.0.0** — stable API
+> owned or licensed video content. **Current source version: v1.3.0** — stable API
 > under SemVer, signed-ready Linux AppImage + unsigned macOS / Windows
 > bundles, WCAG 2.1 AA desktop GUI, optional FastAPI web UI + Docker image,
 > third-party plugin system, community profile marketplace, opt-in local
@@ -103,7 +103,7 @@ yt-uniq-gui                        # GUI; or `yt-uniq run <input> ...` for CLI
 | `[gui-charts]` | PyQt6-Charts for divergence sparkline + KPI widgets               |
 | `[qa]`       | chromaprint (`pyacoustid`) for audio fingerprinting                 |
 | `[scene]`    | PySceneDetect for content-aware segmentation                        |
-| `[ml]`       | torch + transformers (CPU) for SSCD semantic-similarity QA          |
+| `[ml]`       | torch + torchvision (CPU) for SSCD semantic-similarity QA           |
 | `[web]`      | FastAPI + uvicorn for `yt-uniq-web`                                 |
 | `[docs]`     | mkdocs-material for building the docs site locally                  |
 
@@ -119,7 +119,7 @@ Optional native binaries (graceful skip / fallback when missing):
 SmartScreen bypass, Docker image, troubleshooting, PyInstaller binary
 build: see [`docs/install.md`](./docs/install.md).
 
-## Shipped profiles (14)
+## Shipped profiles (16)
 
 **Quality-family** (`src/yt_uniquifier/profiles/`):
 

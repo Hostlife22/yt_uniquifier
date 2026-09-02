@@ -51,6 +51,7 @@ from yt_uniquifier.gui.a11y import INTERACTIVE_WIDGET_CLASSES
 from yt_uniquifier.gui.app_pyqt import SIDEBAR_ITEMS, _build_screen
 from yt_uniquifier.gui.state import AppState
 from yt_uniquifier.gui.theme import qss_for
+from yt_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 
 # Minimum touch / click target size in CSS-px for desktop Qt. 44×44 is
 # the WCAG 2.5.5 AAA threshold for touch; for desktop we relax per the
@@ -71,6 +72,8 @@ def _stop_background_workers(screen: QWidget) -> None:
     here so the two test files can be run in isolation without an import
     coupling.
     """
+    for selector in screen.findChildren(EncoderSelector):
+        assert selector.shutdown_detection(), "encoder detection did not stop"
     for attr_name in dir(screen):
         if attr_name.startswith("__"):
             continue

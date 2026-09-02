@@ -30,6 +30,7 @@ installed the ``[scene]`` extra.
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -41,11 +42,14 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 _log = logging.getLogger(__name__)
 
-# Match score above which we treat a frame region as a likely watermark.
-# Picked empirically against the synthetic-template corpus + a
-# 50-clip false-positive test set; the v1.3.0 roadmap calls out
-# threshold tuning as a follow-up.
-_MATCH_THRESHOLD = 0.45
+# A generic rectangle is common in ordinary footage, so a single weak
+# full-frame template hit is not evidence of a station bug.  Detection
+# requires a strong match in the same corner/template pair across a
+# majority of temporal samples.
+_MATCH_THRESHOLD = 0.70
+_MIN_PERSISTENCE_RATIO = 0.60
+_MIN_MATCHED_FRAMES = 2
+_CORNER_FRACTION = 0.35
 
 # Number of frames to sample.
 _DEFAULT_FRAME_COUNT = 5
@@ -67,6 +71,7 @@ def detect_watermark(
     *,
     frame_count: int = _DEFAULT_FRAME_COUNT,
     threshold: float = _MATCH_THRESHOLD,
+    duration_sec: float | None = None,
 ) -> WatermarkFinding | None:
     """Run the guardrail.  Returns ``None`` when OpenCV isn't installed.
 
@@ -91,7 +96,12 @@ def detect_watermark(
     with tempfile.TemporaryDirectory(prefix="watermark_") as tmp:
         tmp_dir = Path(tmp)
         try:
-            frames = _extract_sample_frames(source, tmp_dir, frame_count=frame_count)
+            frames = _extract_sample_frames(
+                source,
+                tmp_dir,
+                frame_count=frame_count,
+                duration_sec=duration_sec,
+            )
         except PipelineError as exc:
             _log.warning("watermark guardrail: extract failed (%s); skipping", exc)
             return WatermarkFinding(
@@ -107,56 +117,125 @@ def detect_watermark(
                 note="no templates available (corpus empty)",
             )
 
-        best_score = 0.0
-        matched = 0
-        for fp in frames:
-            frame_img = cv2.imread(str(fp), cv2.IMREAD_GRAYSCALE)
-            if frame_img is None:
-                continue
-            frame_best = 0.0
-            for tmpl in templates:
-                if (frame_img.shape[0] < tmpl.shape[0]
-                        or frame_img.shape[1] < tmpl.shape[1]):
-                    continue
-                score = cv2.matchTemplate(frame_img, tmpl, cv2.TM_CCOEFF_NORMED).max()
-                frame_best = max(frame_best, float(score))
-            best_score = max(best_score, frame_best)
-            if frame_best >= threshold:
-                matched += 1
+        best_score, matched, usable_frames = _persistent_corner_match(
+            frames,
+            templates,
+            cv2,
+            threshold=threshold,
+        )
+
+    required_matches = max(
+        _MIN_MATCHED_FRAMES,
+        math.ceil(usable_frames * _MIN_PERSISTENCE_RATIO),
+    )
 
     return WatermarkFinding(
-        detected=matched > 0,
+        detected=usable_frames > 0 and matched >= required_matches,
         confidence=best_score,
-        sampled_frames=len(frames),
+        sampled_frames=usable_frames,
         matched_frames=matched,
     )
 
 
 def _extract_sample_frames(
-    source: Path, dest_dir: Path, *, frame_count: int,
+    source: Path,
+    dest_dir: Path,
+    *,
+    frame_count: int,
+    duration_sec: float | None = None,
 ) -> list[Path]:
-    """Sample ``frame_count`` uniformly-spaced frames as PNGs."""
+    """Sample midpoint frames uniformly across the complete source.
+
+    Input-side seeks avoid decoding a multi-hour file from the beginning
+    merely to inspect five frames.  The previous ``thumbnail=200`` command
+    stopped after the first five 200-frame buckets, so on long videos it
+    inspected only the opening seconds despite claiming uniform coverage.
+    """
+    if frame_count < 1:
+        raise PipelineError("watermark frame_count must be >= 1")
+    if duration_sec is None or duration_sec <= 0:
+        from yt_uniquifier.core.errors import ProbeError
+        from yt_uniquifier.core.probe import probe
+
+        try:
+            duration_sec = probe(source).duration_sec
+        except ProbeError as exc:
+            raise PipelineError(f"watermark duration probe failed: {exc}") from exc
+    if duration_sec <= 0:
+        raise PipelineError("watermark guardrail: source duration is unknown")
+
     dest_dir.mkdir(parents=True, exist_ok=True)
-    pattern = str(dest_dir / "frame_%03d.png")
-    # ``thumbnail=200`` picks one representative frame per 200; biased
-    # toward many candidates, then we cap at frame_count via -frames:v.
-    cmd = [
-        ffmpeg_bin(),
-        "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(source),
-        "-vf", "thumbnail=200,scale=640:-1",
-        "-frames:v", str(frame_count),
-        "-vsync", "vfr",
-        pattern,
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
-    except subprocess.CalledProcessError as exc:
-        raise PipelineError(
-            f"watermark frame extraction failed: {exc.stderr!r}"
-        ) from exc
+    for idx in range(frame_count):
+        timestamp = duration_sec * (idx + 0.5) / frame_count
+        output = dest_dir / f"frame_{idx:03d}.png"
+        cmd = [
+            ffmpeg_bin(),
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", f"{timestamp:.6f}",
+            "-i", str(source),
+            "-map", "0:v:0",
+            "-frames:v", "1",
+            "-vf", "scale=640:-2",
+            "-an", "-sn",
+            str(output),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            raise PipelineError(
+                f"watermark frame extraction failed at {timestamp:.3f}s: "
+                f"{getattr(exc, 'stderr', exc)!r}"
+            ) from exc
     frames = sorted(dest_dir.glob("frame_*.png"))
     return frames
+
+
+def _persistent_corner_match(
+    frames: list[Path],
+    templates: list[Any],
+    cv2: Any,
+    *,
+    threshold: float,
+) -> tuple[float, int, int]:
+    """Return confidence and persistence of the dominant corner/template.
+
+    Broadcaster bugs are stationary corner overlays.  Matching over the
+    whole image made ordinary rectangles and test patterns false-positive;
+    counting any one frame as a detection made that false positive fatal.
+    """
+    hits: dict[tuple[int, int], list[float]] = {}
+    usable_frames = 0
+    for fp in frames:
+        frame_img = cv2.imread(str(fp), cv2.IMREAD_GRAYSCALE)
+        if frame_img is None:
+            continue
+        usable_frames += 1
+        height, width = frame_img.shape[:2]
+        corner_h = max(1, int(height * _CORNER_FRACTION))
+        corner_w = max(1, int(width * _CORNER_FRACTION))
+        corners = (
+            frame_img[:corner_h, :corner_w],
+            frame_img[:corner_h, width - corner_w :],
+            frame_img[height - corner_h :, :corner_w],
+            frame_img[height - corner_h :, width - corner_w :],
+        )
+        for corner_idx, region in enumerate(corners):
+            for template_idx, template in enumerate(templates):
+                if (
+                    region.shape[0] < template.shape[0]
+                    or region.shape[1] < template.shape[1]
+                ):
+                    continue
+                score = float(
+                    cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max()
+                )
+                if score >= threshold:
+                    hits.setdefault((corner_idx, template_idx), []).append(score)
+
+    if not hits:
+        return 0.0, 0, usable_frames
+    dominant_scores = max(hits.values(), key=lambda scores: (len(scores), max(scores)))
+    return max(dominant_scores), len(dominant_scores), usable_frames
 
 
 def _load_templates(cv2: Any) -> list[Any]:

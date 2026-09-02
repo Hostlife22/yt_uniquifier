@@ -37,6 +37,8 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 _log = logging.getLogger(__name__)
 
 KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
+_CACHE_REPLACE_ATTEMPTS = 12
+_CACHE_REPLACE_MAX_DELAY_SEC = 0.1
 
 
 def _keyframe_cache_dir() -> Path:
@@ -200,7 +202,36 @@ def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
         fh.write(json.dumps(payload))
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    try:
+        _replace_cache_file(tmp, path)
+    finally:
+        # Usually ``tmp`` no longer exists after a successful replace.  If all
+        # retries fail, do not leave stale per-call files in the shared cache.
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            _log.debug("could not remove keyframe cache temp file %s", tmp)
+
+
+def _replace_cache_file(tmp: Path, destination: Path) -> None:
+    """Atomically replace a cache entry, tolerating transient Windows locks.
+
+    Windows can briefly return ``PermissionError`` when two writers replace
+    the same destination or an antivirus scanner opens it without delete
+    sharing.  The operation is atomic once it succeeds, so a short bounded
+    retry preserves the no-torn-write guarantee without serialising unrelated
+    cache entries.
+    """
+    delay = 0.01
+    for attempt in range(_CACHE_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, destination)
+            return
+        except PermissionError:
+            if attempt == _CACHE_REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, _CACHE_REPLACE_MAX_DELAY_SEC)
 
 
 def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:
@@ -713,7 +744,7 @@ def concat_segments(
     *,
     work_dir: Path,
     map_chapters_from: Path | None = None,
-    audio_passthrough_count: int = 2,
+    audio_passthrough_count: int = 0,
     target_duration_sec: float | None = None,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
@@ -751,11 +782,9 @@ def concat_segments(
     cmd += ["-map", "0:v:0"]
     if main_audio is not None:
         cmd += ["-map", "1:a:0"]
-    # Preserve any audio tracks already inside the concatenated stream
-    # beyond track 0. `audio_passthrough_count` lets callers extend the
-    # range for sources with > 2 extra audio dorozhki without dropping
-    # tracks silently. The default (2) preserves legacy behaviour for
-    # the 99% common case.
+    # Preserve the requested audio tracks already inside the concatenated
+    # stream beyond track 0. The orchestrator derives this count from the
+    # probed source instead of imposing a hidden three-track ceiling.
     for n in range(1, audio_passthrough_count + 1):
         cmd += ["-map", f"0:a:{n}?"]
     cmd += ["-map", "0:s?"]
@@ -775,11 +804,15 @@ def concat_segments(
     if target_duration_sec is not None and target_duration_sec > 0:
         cmd += ["-t", f"{target_duration_sec:.6f}"]
     cmd += metadata_args
-    cmd += [str(output)]
+    tmp_output = output.with_name(
+        f".{output.stem}.{os.getpid()}.{secrets.token_hex(4)}.part{output.suffix}"
+    )
+    cmd += [str(tmp_output)]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3600)
     except subprocess.CalledProcessError as exc:
+        tmp_output.unlink(missing_ok=True)
         # Show both head + tail of stderr. ffmpeg often emits the real
         # cause in the first few lines (bad path, codec mismatch) and a
         # tail-only window of 500 chars would silently hide it behind
@@ -789,3 +822,11 @@ def concat_segments(
         tail = full[-500:] if len(full) > 800 else ""
         snippet = head + ("\n…\n" + tail if tail else "")
         raise PipelineError(f"concat failed: {snippet}") from exc
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        tmp_output.unlink(missing_ok=True)
+        raise PipelineError(f"concat failed: {exc}") from exc
+
+    if not tmp_output.exists() or tmp_output.stat().st_size == 0:
+        tmp_output.unlink(missing_ok=True)
+        raise PipelineError("concat reported success but produced no output")
+    os.replace(tmp_output, output)

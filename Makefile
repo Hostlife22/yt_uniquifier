@@ -69,6 +69,8 @@ lock: venv  ## Regenerate requirements-lock.txt via uv pip compile (Python 3.11 
 	}
 	uv pip compile pyproject.toml \
 		--extra dev --extra gui \
+		--python-version 3.11 \
+		--universal \
 		--generate-hashes \
 		--output-file requirements-lock.txt
 	@echo "Wrote requirements-lock.txt — review the diff before committing."

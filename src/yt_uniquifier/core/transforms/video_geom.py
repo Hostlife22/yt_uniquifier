@@ -49,7 +49,7 @@ def _build_crop_resize(
     out = alloc.next("v")
     filt = (
         f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{left:.4f}:ih*{top:.4f},"
-        f"scale=iw/{cw:.4f}:ih/{ch:.4f}:flags=lanczos"
+        f"scale=round(iw/{cw:.4f}/2)*2:round(ih/{ch:.4f}/2)*2:flags=lanczos"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
 

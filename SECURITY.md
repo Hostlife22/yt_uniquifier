@@ -14,10 +14,10 @@ Security fixes land on the most recent MAJOR.MINOR line.
 
 | Version           | Security fixes | End-of-life               |
 | ----------------- | -------------- | ------------------------- |
-| **1.0.x**         | ✅ active      | TBD — see GitHub Releases |
-| 0.9.x and earlier | ❌ no          | superseded                |
+| **1.3.x**         | ✅ active      | TBD — see GitHub Releases |
+| 1.2.x and earlier | ❌ no          | superseded                |
 
-For pre-1.0 users: please upgrade to the 1.0 line. See
+For older users: please upgrade to the 1.3 line. See
 [docs/versioning.md](docs/versioning.md) for the support policy in
 general.
 
@@ -107,7 +107,7 @@ Out of scope:
 
 ## Past advisories
 
-There are no published advisories for `yt-uniquifier` as of v1.0.0.
+There are no published advisories for `yt-uniquifier` as of v1.3.0.
 A past CVE that affected a transitive dependency was mitigated in
 v0.5.5 (A9) by pinning `Pillow>=10.3.1,<11` against CVE-2024-28219;
 no `yt-uniquifier`-specific advisory was issued because the

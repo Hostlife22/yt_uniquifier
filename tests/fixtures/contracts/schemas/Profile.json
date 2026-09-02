@@ -135,6 +135,11 @@
     "segmentation": {
       "$ref": "#/$defs/SegmentationConfig"
     },
+    "skip_watermark_check": {
+      "default": false,
+      "title": "Skip Watermark Check",
+      "type": "boolean"
+    },
     "target_codec": {
       "default": "h264",
       "enum": [

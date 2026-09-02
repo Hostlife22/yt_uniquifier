@@ -880,7 +880,7 @@ def _check_input_watermark(
             ),
         )]
     from yt_uniquifier.core.guardrails.watermark import detect_watermark
-    result = detect_watermark(source.path)
+    result = detect_watermark(source.path, duration_sec=source.duration_sec)
     if result is None:
         return [PreflightFinding(
             code="watermark.unavailable", severity="info",

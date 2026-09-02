@@ -6,10 +6,8 @@
 #   * x86_64 (Intel/AMD64 servers)
 #   * arm64  (M-series Macs, Raspberry Pi 5, AWS Graviton)
 #
-# The Dockerfile already uses python:3.12-slim-bookworm (multi-arch)
-# and jrottenberg/ffmpeg (multi-arch since 5.1). We pin the digest of
-# both base images inside the Dockerfile build args so a base-image
-# rebuild can't silently change the produced image.
+# The Dockerfile uses the official multi-arch Python/Debian base and installs
+# Debian's architecture-matched FFmpeg package inside each platform leg.
 
 name: Docker
 

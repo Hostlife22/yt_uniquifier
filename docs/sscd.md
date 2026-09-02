@@ -27,6 +27,12 @@ SHA-256. A mismatching cached file is deleted and re-downloaded — the
 hash is pinned in `core/qa/sscd.py::_MODEL_SHA256` so a CDN swap fails
 loudly rather than silently using unknown weights.
 
+Only the official TorchScript artifact is supported. Meta's upstream
+project does not publish an ONNX checkpoint; a custom backend must be
+provided explicitly through `model_loader`. The upstream SSCD project
+is published under the MIT license; review that license before
+redistributing the checkpoint.
+
 If `[ml]` is not installed, every public SSCD entry-point raises
 `PipelineError` with the install hint above. The rest of the tool —
 ffmpeg pipeline, chromaprint QA, calibration — stays usable.
@@ -129,8 +135,10 @@ matching the v0.5.5 A6 behaviour for the chromaprint path.
 
 * **Lazy import**: `import torch` lives inside `compute_sscd`, not at
   module top. Importing `yt_uniquifier.core.qa.sscd` is free.
-* **One ffmpeg fork per file**: frames are extracted with a single
-  `thumbnail=200` + scale/crop-to-288 pass, not stdin-piped per frame.
+* **Uniform timeline sampling**: midpoint seeks cover the complete source
+  timeline without decoding every preceding frame of a multi-hour file.
+  Samples are resized to 288×288 and receive the upstream ImageNet
+  mean/std normalization before inference.
 * **Pair-wise cosine**: the model already emits L2-normalised vectors;
   the explicit `clamp([-1, 1])` is a safety net against float drift.
 * **Plugin layer untouched**: SSCD lives entirely in `core/qa/`, so a

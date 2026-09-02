@@ -1,8 +1,8 @@
 {
   "audio_tracks": "first",
-  "description": "HDR (PQ / HLG) preserved through color transforms via zscale linear roundtrip.\nRequires an HDR-capable encoder (libx265 / hevc_nvenc / hevc_videotoolbox)\nand ffmpeg built with zimg.\n",
-  "keep_hdr": true,
-  "name": "medium_hdr",
+  "description": "YouTube 1080p AV1 (1920x1080 16:9) re-encode with balanced micro-transforms. AV1 yields ~30% smaller files than H.264 at equivalent VMAF and is YouTube's preferred codec for ingest as of 2024+.  CPU-bound on libsvtav1 (~3x libx264 wall-clock); set --workers to cpu_count() // 2 or use av1_nvenc / av1_vulkan if available.  Target loudness -14 LUFS (YouTube spec).",
+  "keep_hdr": false,
+  "name": "youtube_av1",
   "output_container": "mp4",
   "seed": 42,
   "seed_strategy": "per_run",
@@ -12,7 +12,7 @@
     "scene_threshold": 27.0
   },
   "skip_watermark_check": false,
-  "target_codec": "hevc",
+  "target_codec": "av1",
   "target_loudness_lufs": -14.0,
   "target_vmaf": null,
   "target_vmaf_max_retries": 2,
@@ -20,9 +20,17 @@
   "transforms": [
     {
       "enabled": true,
+      "id": "video.fit_aspect",
+      "params": {
+        "mode": "crop",
+        "target_aspect": "16:9"
+      }
+    },
+    {
+      "enabled": true,
       "id": "video.crop_resize",
       "params": {
-        "max_strength": 0.025,
+        "max_strength": 0.02,
         "rng_seed": 42
       }
     },
@@ -31,7 +39,7 @@
       "id": "video.color_eq",
       "params": {
         "brightness": 0.008,
-        "contrast": 1.012,
+        "contrast": 1.015,
         "gamma": 0.997,
         "saturation": 1.02
       }
@@ -47,7 +55,7 @@
       "enabled": true,
       "id": "audio.pitch_tempo",
       "params": {
-        "pitch": 1.0008,
+        "pitch": 1.0006,
         "tempo": 1.0
       }
     },
