@@ -1017,9 +1017,10 @@ def _start_pause_observer(
                 with contextlib.suppress(Exception):
                     store.set_paused_at(None)
                 return
-            # 1 s poll — pause is a human-scale event; 1 s gives us
-            # ~instant marker writes without burning CPU on idle runs.
-            stop.wait(1.0)
+            # Wake immediately on pause/resume.  The one-second timeout is
+            # retained for the 24-hour auto-cancel check and as a bounded
+            # delay when the caller asks this observer to stop.
+            pause_token.wait_for_state_change(now_paused, timeout=1.0)
 
     threading.Thread(
         target=_observe, daemon=True, name="pause-observer",

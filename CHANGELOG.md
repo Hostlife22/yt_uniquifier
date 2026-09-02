@@ -14,6 +14,8 @@ the last tag.
 
 ### Fixed
 
+- Wake checkpoint persistence immediately on pause/resume state transitions,
+  avoiding a one-second polling race that could miss short pauses on Windows.
 - Invalidate checkpoint state when a new `--segment-sec` produces different
   boundaries, even when the source/profile/encoder plan hash is unchanged.
 - Keep each in-flight encoder detection bound to the cache path captured at

@@ -107,20 +107,25 @@ class PauseToken:
         self._paused_at_monotonic: float | None = None
         self._paused_at_wall: float | None = None
         self._lock = threading.Lock()
+        self._state_changed = threading.Condition(self._lock)
 
     def pause(self) -> None:
-        with self._lock:
+        with self._state_changed:
             if self._paused.is_set():
                 return
             self._paused.set()
             self._paused_at_monotonic = time.monotonic()
             self._paused_at_wall = time.time()
+            self._state_changed.notify_all()
 
     def resume(self) -> None:
-        with self._lock:
+        with self._state_changed:
+            if not self._paused.is_set():
+                return
             self._paused.clear()
             self._paused_at_monotonic = None
             self._paused_at_wall = None
+            self._state_changed.notify_all()
 
     def is_paused(self) -> bool:
         return self._paused.is_set()
@@ -139,6 +144,19 @@ class PauseToken:
 
     def should_auto_cancel(self) -> bool:
         return self.paused_for_sec() >= self.AUTO_CANCEL_SEC
+
+    def wait_for_state_change(self, paused: bool, timeout: float) -> bool:
+        """Wait until the pause flag differs from *paused*.
+
+        The check and wait share the same lock used by ``pause`` and
+        ``resume``, so a transition cannot be lost between them.  Returns
+        ``True`` when the state changed and ``False`` on timeout.
+        """
+        with self._state_changed:
+            return self._state_changed.wait_for(
+                lambda: self._paused.is_set() != paused,
+                timeout=timeout,
+            )
 
     def wait_while_paused(
         self, *, cancel_token: CancelToken | None = None,

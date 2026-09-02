@@ -78,6 +78,27 @@ def test_resume_is_idempotent() -> None:
     assert not t.is_paused()
 
 
+def test_wait_for_state_change_wakes_on_pause_and_resume() -> None:
+    t = PauseToken()
+
+    def _pause_then_resume() -> None:
+        time.sleep(0.02)
+        t.pause()
+        time.sleep(0.02)
+        t.resume()
+
+    threading.Thread(target=_pause_then_resume, daemon=True).start()
+    assert t.wait_for_state_change(False, timeout=0.5)
+    assert t.is_paused()
+    assert t.wait_for_state_change(True, timeout=0.5)
+    assert not t.is_paused()
+
+
+def test_wait_for_state_change_times_out_without_transition() -> None:
+    t = PauseToken()
+    assert not t.wait_for_state_change(False, timeout=0.01)
+
+
 def test_paused_for_sec_advances() -> None:
     t = PauseToken()
     t.pause()
@@ -369,6 +390,32 @@ def test_pause_observer_persists_and_clears(tmp_path: Path) -> None:
             if store.get_paused_at() is None:
                 break
             time.sleep(0.05)
+        assert store.get_paused_at() is None
+    finally:
+        stop.set()
+        store.close()
+
+
+def test_pause_observer_captures_subsecond_pause(tmp_path: Path) -> None:
+    """State-change notification must not wait for the old one-second poll."""
+    from yt_uniquifier.core.checkpoint import CheckpointStore
+    from yt_uniquifier.core.orchestrator import _start_pause_observer
+
+    store = CheckpointStore(tmp_path, _stub_plan(tmp_path))
+    store.init_or_resume([])
+    pause_token = PauseToken()
+    stop = _start_pause_observer(pause_token, None, store, lambda _ev: None)
+    try:
+        pause_token.pause()
+        deadline = time.monotonic() + 0.75
+        while store.get_paused_at() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert store.get_paused_at() is not None
+
+        pause_token.resume()
+        deadline = time.monotonic() + 0.75
+        while store.get_paused_at() is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert store.get_paused_at() is None
     finally:
         stop.set()

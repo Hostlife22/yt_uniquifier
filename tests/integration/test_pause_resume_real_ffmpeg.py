@@ -178,16 +178,23 @@ def test_pause_resume_produces_valid_output(
                 break
             time.sleep(0.05)
         pause_token.pause()
-        # Give the observer thread one full second to flush paused_at.
-        time.sleep(1.2)
-        if state_path.exists():
-            try:
-                raw = json.loads(state_path.read_text())
-                paused_at_observed.append(raw.get("paused_at"))
-            except (OSError, json.JSONDecodeError):
-                paused_at_observed.append(None)
-        else:
-            paused_at_observed.append(None)
+        # Wait for the observable checkpoint acknowledgement rather than a
+        # fixed sleep.  A fixed 1.2 s window raced the Windows scheduler and
+        # could resume just before the old one-second observer poll ran.
+        sampled: str | None = None
+        marker_deadline = time.monotonic() + 5.0
+        while time.monotonic() < marker_deadline:
+            if state_path.exists():
+                try:
+                    raw = json.loads(state_path.read_text())
+                    value = raw.get("paused_at")
+                    if isinstance(value, str):
+                        sampled = value
+                        break
+                except (OSError, json.JSONDecodeError):
+                    pass
+            time.sleep(0.05)
+        paused_at_observed.append(sampled)
         # Resume so the run can complete.
         pause_token.resume()
 
