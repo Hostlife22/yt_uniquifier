@@ -95,7 +95,7 @@ dev = [
     # See [tool.pytest.ini_options]::timeout in this file.
     "pytest-timeout~=2.3",
     "ruff~=0.5",
-    "mypy~=1.10",
+    "mypy>=1.10,<3.0",
     "types-PyYAML~=6.0",
     # v1.2.0 Task 27 — Hypothesis property tests over Profile / Plan
     # invariants (plan-hash stability, label allocator uniqueness, even-
@@ -207,5 +207,5 @@ ignore_missing_imports = true
 # --strict. The web layer is intentionally a thin shell over typed
 # core/ — we relax the decorator check only inside web/.
 [[tool.mypy.overrides]]
-module = "yt_uniquifier.web.routes.*"
+module = ["yt_uniquifier.web.app", "yt_uniquifier.web.routes.*"]
 disable_error_code = ["untyped-decorator", "no-any-return"]
