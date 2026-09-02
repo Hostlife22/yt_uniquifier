@@ -1131,27 +1131,48 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
         "-c:v", name, "-preset", "medium", "-crf", str(crf),
         "-maxrate", str(mb), "-bufsize", str(mb * 2),
     ]
-    if enc.vendor == "x265" and plan.source.video:
-        color = plan.source.video[0].color
-        if plan.profile.keep_hdr and color.is_hdr:
-            x265_params: list[str] = []
-            if color.primaries != "unknown":
-                x265_params.append(f"colorprim={color.primaries}")
-            if color.transfer != "unknown":
-                x265_params.append(f"transfer={color.transfer}")
-            if color.space != "unknown":
-                x265_params.append(f"colormatrix={color.space}")
-            if color.color_range != "unknown":
-                x265_params.append(
-                    f"range={'full' if color.color_range == 'pc' else 'limited'}"
-                )
-            if color.mastering_display:
-                x265_params.append(f"master-display={color.mastering_display}")
-            if color.max_cll is not None and color.max_fall is not None:
-                x265_params.append(f"max-cll={color.max_cll},{color.max_fall}")
-            if x265_params:
-                result += ["-x265-params", ":".join(x265_params)]
+    if enc.vendor in {"x264", "x265"}:
+        color_params = _x26x_color_params(plan, include_static_hdr=enc.vendor == "x265")
+        if color_params:
+            result += [f"-{enc.vendor}-params", ":".join(color_params)]
     return result
+
+
+def _x26x_color_params(plan: Plan, *, include_static_hdr: bool) -> list[str]:
+    """Write color VUI directly into x264/x265 bitstreams.
+
+    FFmpeg's generic ``-color_*`` output options are sufficient for filters and
+    some muxers, but current libx264 builds can omit primaries/transfer from the
+    encoded VUI unless the corresponding private parameters are also supplied.
+    """
+    if not plan.source.video:
+        return []
+    source_color = plan.source.video[0].color
+    if is_tonemap_active(plan.profile.transforms):
+        primaries = transfer = matrix = "bt709"
+        color_range = "tv"
+    else:
+        primaries = source_color.primaries
+        transfer = source_color.transfer
+        matrix = source_color.space
+        color_range = source_color.color_range
+
+    params: list[str] = []
+    if primaries != "unknown":
+        params.append(f"colorprim={primaries}")
+    if transfer != "unknown":
+        params.append(f"transfer={transfer}")
+    if matrix != "unknown":
+        params.append(f"colormatrix={matrix}")
+    if color_range != "unknown":
+        params.append(f"range={'full' if color_range == 'pc' else 'limited'}")
+
+    if include_static_hdr and plan.profile.keep_hdr and source_color.is_hdr:
+        if source_color.mastering_display:
+            params.append(f"master-display={source_color.mastering_display}")
+        if source_color.max_cll is not None and source_color.max_fall is not None:
+            params.append(f"max-cll={source_color.max_cll},{source_color.max_fall}")
+    return params
 
 
 def _max_bitrate_for(plan: Plan) -> int:

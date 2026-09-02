@@ -168,6 +168,24 @@ def test_libx265_reinjects_static_hdr10_metadata(tmp_path: Path) -> None:
     assert "transfer=smpte2084" in params
 
 
+def test_libx264_writes_sdr_color_vui(tmp_path: Path) -> None:
+    source = _src(tmp_path)
+    source = source.model_copy(update={
+        "video": [source.video[0].model_copy(update={
+            "color": source.video[0].color.model_copy(update={"color_range": "tv"}),
+        })],
+    })
+    plan = _plan(source, [])
+
+    args = pipeline_mod._encoder_args_for(plan)
+    params = args[args.index("-x264-params") + 1]
+
+    assert "colorprim=bt709" in params
+    assert "transfer=bt709" in params
+    assert "colormatrix=bt709" in params
+    assert "range=limited" in params
+
+
 def test_video_only_chain(tmp_path: Path) -> None:
     src = _src(tmp_path)
     plan = _plan(src, [

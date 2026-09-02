@@ -3,6 +3,21 @@
 Дата: 2026-09-02. Commit: `14df893`. Результаты ниже относятся только к указанному
 локальному environment; они не экстраполируются автоматически на фильмы/HDR/GPU.
 
+## Production acceptance delta — 2026-09-02 (post-v1.4.0)
+
+На Intel macOS с Homebrew FFmpeg 9.0.1 дополнительно подтверждено:
+
+| Проверка | Результат | Инженерное решение |
+|---|---:|---|
+| HLG → `medium_hdr` → libx265 | 100/100 frames, video/audio 4.000 s, `yuv420p10le`, HLG/BT.2020/tv | HLG preserve path разрешён; final validator проверяет полный color contract |
+| HLG → HEVC VideoToolbox | 100/100 frames, 4.000 s, `yuv420p10le`, HLG/BT.2020/tv | Hardware HLG подтверждён только для этого Mac |
+| 2 × concurrent H.264 VideoToolbox 1080p | 180/180 frames каждый; 7.72 s/job, 8.09 s aggregate wall | `max_parallel=2` подтверждён для этого Mac |
+| MP4/MKV/MOV, 3 s tagged SDR | 7/7 integration tests; all A/V streams decode; chapters/subtitles retained by policy | Container smoke закрыт для synthetic core matrix |
+| APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
+
+Natural-content viewing/listening, NFS cross-host, NVENC/QSV/AMF и YouTube
+ingestion/transcode остаются `NOT VERIFIED`.
+
 ## Какие решения принимает каждая метрика
 
 | Metric | Engineering decision | Ограничение |

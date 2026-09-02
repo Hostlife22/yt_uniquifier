@@ -22,6 +22,7 @@ Layout:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import secrets
 import socket
@@ -285,6 +286,41 @@ class FileQueue:
         dest = self.layout.done / leased.name
         os.rename(leased, dest)
         return dest
+
+    def staged_output_path(self, output: Path) -> Path:
+        """Return a worker-unique hidden output path beside the final file."""
+        worker_key = hashlib.sha256(self.worker_id.encode("utf-8")).hexdigest()[:12]
+        return output.with_name(
+            f".{output.stem}.{worker_key}.part{output.suffix}"
+        )
+
+    def commit_output(self, leased: Path, staged: Path, output: Path) -> Path:
+        """Fence a completed lease, then atomically publish its staged output.
+
+        Moving ``leased`` to ``done`` is the synchronisation point. If a stale
+        lease was already reaped, this worker cannot publish an obsolete result.
+        The encoded file stays hidden until that ownership transition succeeds.
+        """
+        if leased.parent != self.host_dir or leased.is_symlink() or not leased.is_file():
+            raise QueueError(f"lease ownership lost before output commit: {leased}")
+        if staged.parent != output.parent or not staged.is_file():
+            raise QueueError(f"staged output is missing or on a different directory: {staged}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            done = self.release_done(leased)
+        except OSError as exc:
+            raise QueueError(f"lease ownership lost before output commit: {leased}") from exc
+        try:
+            os.replace(staged, output)
+        except OSError:
+            # Restore the lease so the caller can put it in failed/. This handles
+            # ordinary publish errors; a hard process crash between the two atomic
+            # renames remains an operational recovery case documented in the runbook.
+            with contextlib.suppress(OSError):
+                os.rename(done, leased)
+            raise
+        return done
 
     def release_failed(self, leased: Path, error: str) -> Path:
         """Move a leased file into failed/<host>/ and write the error trace."""

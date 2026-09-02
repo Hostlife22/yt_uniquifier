@@ -12,6 +12,25 @@ the last tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- Infer 10/12/16-bit video depth from the pixel format when FFprobe omits
+  `bits_per_raw_sample`, so HEVC HDR diagnostics no longer report 10-bit
+  `yuv420p10le` or `p010le` streams as 8-bit.
+- Enforce transfer, primaries, matrix, range, and component depth in the final
+  media contract for SDR, preserved HDR, and HDR-to-SDR outputs.
+- Write SDR/HDR color VUI directly through libx264/libx265 private parameters,
+  because generic FFmpeg color options alone can omit transfer and primaries.
+- Report MOV subtitle disposition loss accurately; the MOV muxer on supported
+  FFmpeg versions drops flags such as `forced` that MP4 can retain.
+- Distinguish QuickTime MOV from MP4 using the file suffix when FFprobe returns
+  their shared `mov,mp4,...` demuxer name.
+- Keep GUI queue heartbeats active during long encodes, stage distributed-worker
+  outputs, and fence publication on an atomic lease-to-done transition so a
+  reaped stale worker cannot overwrite a newer result.
+- Use each distributed profile's declared MP4/MKV/MOV suffix instead of always
+  naming worker outputs `.mp4`.
+
 ## [1.4.0] — 2026-09-02
 
 ### Added

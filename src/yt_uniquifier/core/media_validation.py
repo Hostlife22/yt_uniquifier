@@ -10,6 +10,7 @@ from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.pipeline import expected_output_duration
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
+from yt_uniquifier.core.transforms.hdr_wrap import is_tonemap_active
 
 
 @dataclass(frozen=True)
@@ -108,24 +109,69 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
             round(result.duration_sec, 6),
         ))
 
-    if plan.profile.keep_hdr and plan.source.video and plan.source.video[0].color.is_hdr:
-        output_is_hdr = bool(result.video and result.video[0].color.is_hdr)
-        if not output_is_hdr:
-            failures.append(MediaInvariantFailure("color.hdr", True, False))
-        elif result.video:
-            expected_color = plan.source.video[0].color
-            actual_color = result.video[0].color
-            for field_name in (
-                "mastering_display", "max_cll", "max_fall", "dynamic_metadata",
-            ):
-                expected = getattr(expected_color, field_name)
-                actual = getattr(actual_color, field_name)
-                if actual != expected:
-                    failures.append(MediaInvariantFailure(
-                        f"color.{field_name}", expected, actual,
-                    ))
+    if plan.source.video and result.video:
+        _compare_color_contract(failures, plan, result.video[0].color)
 
     return MediaInvariantReport(output=output, failures=tuple(failures))
+
+
+def _compare_color_contract(
+    failures: list[MediaInvariantFailure],
+    plan: Plan,
+    actual_color: object,
+) -> None:
+    """Validate the declared SDR, HDR-preserve, or HDR→SDR output contract."""
+    source_color = plan.source.video[0].color
+    tonemapped = is_tonemap_active(plan.profile.transforms)
+    keeping_hdr = source_color.is_hdr and plan.profile.keep_hdr and not tonemapped
+
+    if tonemapped:
+        expected_fields: dict[str, object] = {
+            "is_hdr": False,
+            "transfer": "bt709",
+            "primaries": "bt709",
+            "space": "bt709",
+            "color_range": "tv",
+            "bit_depth": 8,
+        }
+    else:
+        # Every non-tonemap path ends in yuv420p (SDR) or yuv420p10le
+        # (preserved HDR), regardless of a source decoder's native depth.
+        expected_fields = {
+            "is_hdr": keeping_hdr,
+            "bit_depth": 10 if keeping_hdr else 8,
+        }
+        for field_name in ("transfer", "primaries", "space", "color_range"):
+            source_value = getattr(source_color, field_name)
+            if source_value != "unknown":
+                expected_fields[field_name] = source_value
+
+    if keeping_hdr:
+        for field_name in (
+            "mastering_display", "max_cll", "max_fall", "dynamic_metadata",
+        ):
+            expected_fields[field_name] = getattr(source_color, field_name)
+
+    for field_name, expected in expected_fields.items():
+        actual = getattr(actual_color, field_name)
+        if (
+            field_name == "color_range"
+            and expected == "tv"
+            and actual == "unknown"
+            and not tonemapped
+            and source_color.transfer == "unknown"
+            and source_color.primaries == "unknown"
+            and source_color.space == "unknown"
+        ):
+            # In H.264/H.265, absent VUI means the normal limited-range
+            # interpretation. FFprobe reports that as ``unknown`` when every
+            # other color descriptor is also absent; do not reject an otherwise
+            # valid untagged legacy source for failing to invent a colorimetry.
+            continue
+        if actual != expected:
+            failures.append(MediaInvariantFailure(
+                f"color.{field_name}", expected, actual,
+            ))
 
 
 def _compare_stream_metadata(
@@ -149,9 +195,12 @@ def _compare_stream_metadata(
                 # ISO BMFF has no representation for Matroska's full
                 # disposition vocabulary. FFmpeg currently carries these
                 # four and drops e.g. original/comment/lyrics.
-                expected_flags &= {
-                    "default", "forced", "hearing_impaired", "visual_impaired",
-                }
+                supported_flags = (
+                    {"default"}
+                    if output_container == "mov"
+                    else {"default", "forced", "hearing_impaired", "visual_impaired"}
+                )
+                expected_flags &= supported_flags
                 if muxer_adds_default:
                     expected_flags.add("default")
             expected = tuple(sorted(expected_flags))

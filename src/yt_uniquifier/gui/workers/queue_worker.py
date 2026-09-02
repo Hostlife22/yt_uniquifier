@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 from pathlib import Path
-from time import sleep, time
+from time import sleep
 
 from PyQt6.QtCore import pyqtSignal
 
@@ -55,41 +56,62 @@ class QueueWorker(WorkerBase):
             return
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        last_heartbeat = time()
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            args=(q, heartbeat_stop, self.heartbeat_sec),
+            daemon=True,
+        )
+        heartbeat_thread.start()
 
-        while not self.cancel_token.is_cancelled():
-            leased = q.lease()
-            if leased is None:
-                if self.stop_after_empty:
-                    self.log.emit("queue empty; exiting")
-                    break
-                sleep(self.poll_sec)
-                continue
+        try:
+            while not self.cancel_token.is_cancelled():
+                leased = q.lease()
+                if leased is None:
+                    if self.stop_after_empty:
+                        self.log.emit("queue empty; exiting")
+                        break
+                    sleep(self.poll_sec)
+                    continue
 
-            self.lease_acquired.emit(str(leased))
-            out = self.out_dir / f"{leased.stem}.uniq.mp4"
-            try:
-                plan = build_plan(leased, self.profile, self.encoder_override)
-                opts = RunOptions(
-                    work_dir=self.work_dir_root / plan.plan_hash,
-                    output=out,
-                    target_segment_sec=600.0,
-                    enforce_preflight=True,
-                    workers=self.workers,
+                self.lease_acquired.emit(str(leased))
+                out = self.out_dir / (
+                    f"{leased.stem}.uniq.{self.profile.output_container}"
                 )
-                run_full(plan, opts, cancel_token=self.cancel_token)
-                q.release_done(leased)
-                self.file_done.emit(str(leased), str(out))
-            except Exception as exc:
-                msg = f"{type(exc).__name__}: {exc}"
-                with contextlib.suppress(Exception):
-                    q.release_failed(leased, msg)
-                self.file_failed.emit(str(leased), msg)
-
-            if time() - last_heartbeat > self.heartbeat_sec:
-                with contextlib.suppress(Exception):
-                    q.heartbeat()
-                last_heartbeat = time()
+                staged = q.staged_output_path(out)
+                try:
+                    plan = build_plan(leased, self.profile, self.encoder_override)
+                    opts = RunOptions(
+                        work_dir=self.work_dir_root / plan.plan_hash,
+                        output=staged,
+                        target_segment_sec=600.0,
+                        enforce_preflight=True,
+                        workers=self.workers,
+                    )
+                    run_full(plan, opts, cancel_token=self.cancel_token)
+                    q.commit_output(leased, staged, out)
+                    self.file_done.emit(str(leased), str(out))
+                except Exception as exc:
+                    staged.unlink(missing_ok=True)
+                    msg = f"{type(exc).__name__}: {exc}"
+                    if leased.exists():
+                        with contextlib.suppress(Exception):
+                            q.release_failed(leased, msg)
+                    self.file_failed.emit(str(leased), msg)
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2)
 
         reason = "cancelled" if self.cancel_token.is_cancelled() else "queue_empty"
         self.finished_ok.emit({"reason": reason})
+
+
+def _heartbeat_loop(
+    queue: FileQueue,
+    stop: threading.Event,
+    interval_sec: float,
+) -> None:
+    while not stop.is_set():
+        with contextlib.suppress(Exception):
+            queue.heartbeat()
+        stop.wait(interval_sec)

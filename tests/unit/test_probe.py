@@ -120,6 +120,20 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert a.dispositions == ("default", "original")
 
 
+def test_combined_mov_demuxer_uses_file_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _ffprobe_json(format_name="mov,mp4,m4a,3gp,3g2,mj2")
+    _mock_ffprobe(monkeypatch, payload)
+    mov = tmp_path / "source.mov"
+    mp4 = tmp_path / "source.mp4"
+    mov.touch()
+    mp4.touch()
+
+    assert probe_mod.probe(mov).container == "mov"
+    assert probe_mod.probe(mp4).container == "mp4"
+
+
 def test_parse_mov_handler_name_as_stream_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -251,6 +265,44 @@ def test_detect_hdr_hlg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     meta = probe_mod.probe(src)
     assert meta.video[0].color.is_hdr is True
     assert meta.video[0].color.transfer == "arib-std-b67"
+    assert meta.video[0].color.bit_depth == 10
+
+
+@pytest.mark.parametrize(
+    ("pix_fmt", "expected"),
+    [
+        ("yuv420p", 8),
+        ("yuv420p10le", 10),
+        ("p010le", 10),
+        ("gbrp12be", 12),
+        ("gray16le", 16),
+    ],
+)
+def test_bit_depth_falls_back_to_pixel_format(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pix_fmt: str,
+    expected: int,
+) -> None:
+    src = tmp_path / "depth.mkv"
+    src.touch()
+    payload = _ffprobe_json(
+        video=[
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "hevc",
+                "width": 16,
+                "height": 16,
+                "r_frame_rate": "24/1",
+                "duration": "1.0",
+                "pix_fmt": pix_fmt,
+                # ffprobe frequently omits bits_per_raw_sample for HEVC.
+            }
+        ],
+    )
+    _mock_ffprobe(monkeypatch, payload)
+    assert probe_mod.probe(src).video[0].color.bit_depth == expected
 
 
 def test_image_based_subtitle_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

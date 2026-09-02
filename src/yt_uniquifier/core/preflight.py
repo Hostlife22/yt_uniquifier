@@ -96,7 +96,11 @@ def _check_container_metadata_loss(plan: Plan) -> list[PreflightFinding]:
     """Report source dispositions the selected container cannot represent."""
     if plan.profile.output_container not in {"mp4", "mov"}:
         return []
-    supported = {"default", "forced", "hearing_impaired", "visual_impaired"}
+    supported = (
+        {"default"}
+        if plan.profile.output_container == "mov"
+        else {"default", "forced", "hearing_impaired", "visual_impaired"}
+    )
     lost: set[str] = set()
     for index in selected_audio_relative_indices(
         plan.source, plan.profile.audio_tracks,

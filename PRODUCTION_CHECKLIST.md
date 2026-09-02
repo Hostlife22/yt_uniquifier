@@ -31,14 +31,16 @@ release blockers, поэтому checklist намеренно не отмече�
       anamorphic случайно.
 - [x] `video.speed` и main-audio tempo сверяются; unsafe aux-stream retiming rejected.
 - [x] Divergent window audio duration error ≤ one encoded audio frame (125 s fixture).
-- [ ] Final output полностью декодируется без errors/warnings classified as corrupt.
+- [x] MP4/MKV/MOV regression outputs полностью декодируются по всем A/V streams;
+      subtitle/data topology проверяется отдельно, без ложного `null`-mux failure.
 
 ## 3. SDR/HDR/color
 
-- [ ] SDR BT.709 tags/range/pixel format verified.
+- [x] Synthetic SDR BT.709: transfer/primaries/matrix/limited range/yuv420p verified.
 - [ ] Full/limited range conversion explicit and tested.
 - [x] Synthetic HDR10: 10-bit, PQ, Rec.2020, ST2086 и MaxCLL/FALL verified на x265.
-- [ ] HLG: 10-bit, HLG/Rec.2020 metadata verified.
+- [x] Synthetic HLG: 10-bit, HLG/Rec.2020/limited range и A/V timeline verified на
+      libx265 и HEVC VideoToolbox этого Mac.
 - [x] HDR10+/Dolby Vision policy explicit: dynamic metadata rejected early.
 - [ ] HDR→SDR zscale/tonemap output BT.709 verified on dark/highlight/skin content.
 - [ ] No SDR transform is accidentally applied in nonlinear HDR domain.
@@ -46,7 +48,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 4. Containers and cadence
 
-- [ ] MP4 roundtrip: streams, metadata, chapters, faststart, no unintended edit list.
+- [x] MP4 regression roundtrip: streams, metadata, chapters, subtitles, AAC priming
+      bounds и faststart (`moov` before `mdat`).
 - [ ] MKV roundtrip: streams, attachments, subtitles, chapters.
 - [ ] MOV roundtrip: timecode/edit-list/metadata policy.
 - [ ] CFR: 23.976/24/25/29.97/30/50/59.94/60.
@@ -85,7 +88,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Encoder cache includes FFmpeg/OS/GPU signature; invalidation after a later runtime
       device failure remains open.
 - [x] libx264/libx265/SVT-AV1 software paths verified locally.
-- [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware.
+- [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
+      H.264 + HEVC VideoToolbox verified on this Intel Mac, other vendors unavailable.
 - [ ] Per-device concurrency measured; jobs routed to a device, not only counted.
 - [ ] GOP/keyframe/B-frame/profile/level policy documented per target.
 - [ ] Hardware-first is not implicit in quality-first mode.
@@ -98,7 +102,9 @@ release blockers, поэтому checklist намеренно не отмече�
       media manifest remains future hardening.
 - [x] Cached main audio and final output SHA/final contract verified before no-op.
 - [x] Work-dir lock acquisition uses atomic exclusive creation.
-- [ ] Cross-host lease has worker UUID/fencing and cannot be stolen while live.
+- [ ] Cross-host lease has worker UUID/fencing and cannot be stolen while live;
+      process UUID, continuous CLI/GUI heartbeat and pre-publish fence verified on APFS,
+      real NFS/network-partition qualification remains open.
 - [x] Checkpoint lock is released in the shared orchestrator `finally` path.
 - [ ] Kill/crash at each phase resumes without reprocessing valid completed segments.
 - [x] Corrupt/zero/truncated segment is reprocessed automatically.
@@ -147,7 +153,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [ ] Ruff, strict mypy, tests, coverage gate pass.
+- [x] Ruff, strict mypy and full local test gate pass; CI coverage gate pending
+      for the post-v1.4.0 commit.
 - [ ] CodeQL has zero open high/critical alerts or documented accepted risk.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
@@ -163,24 +170,27 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1361 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1382 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
-- [ ] FFmpeg SDR/HDR/container smoke matrix (HDR10/SDR core cases pass; HLG/MOV open)
+- [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
 - [x] `make build-wheel` and clean-environment import smoke for v1.4.0
 - [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
 - [ ] Docker multi-arch build/start/health/process smoke
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
-## Текущий статус candidate v1.4.0
+## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1361 passed, 2 expected skips.
+- [x] Fully provisioned `make check`: 1382 passed, 2 expected skips.
+- [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
+      correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
 - [x] Strict mypy: passed (155 source files).
 - [x] All 16 shipped profiles load.
 - [x] Подтверждённые local P0 correctness regressions исправлены.
 - [x] HDR10/HDR→SDR, Rubber Band и SSCD real model verified locally.
 - [x] Synthetic 1h/2h/3h, 4K AV1 и VideoToolbox H.264/HEVC smoke verified locally.
-- [ ] Полная advertised production matrix: **BLOCKED** для HLG, natural long-form,
-      NVENC/QSV/AMF, hardware concurrency и YouTube round-trip.
+- [ ] Полная advertised production matrix: **BLOCKED** для natural long-form,
+      NVENC/QSV/AMF, NFS cross-host и YouTube round-trip. HLG и VideoToolbox
+      concurrency закрыты на текущем Intel Mac.

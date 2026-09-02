@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -30,6 +31,34 @@ def _audio_duration(path: Path) -> float:
     return float(value)
 
 
+def _audio_packet_bounds(path: Path) -> tuple[float, float]:
+    payload = json.loads(subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "a:0",
+            "-show_packets", "-show_entries", "packet=pts_time,duration_time",
+            "-of", "json", str(path),
+        ],
+        check=True, capture_output=True, text=True, timeout=30,
+    ).stdout)
+    packets = payload["packets"]
+    starts = [float(packet["pts_time"]) for packet in packets]
+    ends = [
+        float(packet["pts_time"]) + float(packet.get("duration_time", 0.0))
+        for packet in packets
+    ]
+    return min(starts), max(ends)
+
+
+def _assert_fully_decodable(path: Path) -> None:
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", str(path), "-map", "0:v", "-map", "0:a?", "-f", "null", "-",
+        ],
+        check=True, capture_output=True, timeout=60,
+    )
+
+
 @pytest.fixture
 def media_contract_source(tmp_path: Path) -> Path:
     subtitle = tmp_path / "captions.srt"
@@ -54,6 +83,9 @@ def media_contract_source(tmp_path: Path) -> Path:
             "-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0",
             "-map_metadata", "3", "-map_chapters", "3",
             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-colorspace", "bt709", "-color_range", "tv",
             "-c:a", "aac", "-c:s", "srt",
             "-metadata:s:a:0", "language=eng",
             "-metadata:s:a:0", "title=Main mix",
@@ -79,6 +111,9 @@ def multi_audio_source(tmp_path: Path) -> Path:
             "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
             "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0",
             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-colorspace", "bt709", "-color_range", "tv",
             "-c:a:0", "aac", "-c:a:1", "libopus",
             "-metadata:s:a:0", "language=eng",
             "-metadata:s:a:1", "language=spa",
@@ -177,6 +212,56 @@ def test_all_audio_tracks_use_container_compatible_codecs(
     result = probe(output)
     assert [stream.codec for stream in result.audio] == ["aac", "aac"]
     assert [stream.language for stream in result.audio] == ["eng", "spa"]
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("container", ["mp4", "mkv", "mov"])
+def test_container_roundtrip_is_decodable_and_preserves_media_contract(
+    media_contract_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    container: str,
+) -> None:
+    soft = load_profile(PROFILES_DIR / "soft.yaml")
+    profile = soft.model_copy(update={
+        "name": f"container-{container}",
+        "output_container": container,
+    })
+    plan = build_plan(media_contract_source, profile, encoder_override="libx264")
+    output = tmp_path / f"roundtrip.{container}"
+    run_full(
+        plan,
+        RunOptions(
+            work_dir=tmp_path / f"work-{container}" / plan.plan_hash,
+            output=output,
+            target_segment_sec=600,
+        ),
+    )
+
+    _assert_fully_decodable(output)
+    result = probe(output)
+    assert result.container == container
+    assert result.duration_sec == pytest.approx(3.0, abs=0.05)
+    assert result.video[0].duration_sec == pytest.approx(3.0, abs=0.05)
+    audio_start, audio_end = _audio_packet_bounds(output)
+    # AAC priming may expose one negative packet accompanied by Skip Samples;
+    # decoded program content starts at zero and the tail stays within two frames.
+    assert -0.05 <= audio_start <= 0.0
+    assert audio_end == pytest.approx(3.0, abs=0.05)
+    assert result.video[0].color.transfer == "bt709"
+    assert result.video[0].color.primaries == "bt709"
+    assert result.video[0].color.space == "bt709"
+    assert result.video[0].color.bit_depth == 8
+    assert len(result.audio) == 1
+    assert len(result.subtitle) == 1
+    assert [chapter.title for chapter in result.chapters] == ["Opening", "Ending"]
+    if container in {"mp4", "mov"}:
+        assert result.subtitle[0].codec in {"mov_text", "tx3g"}
+        atoms = output.read_bytes()
+        assert 0 <= atoms.find(b"moov") < atoms.find(b"mdat")
+    else:
+        assert result.subtitle[0].codec in {"subrip", "srt"}
 
 
 @needs_ffmpeg

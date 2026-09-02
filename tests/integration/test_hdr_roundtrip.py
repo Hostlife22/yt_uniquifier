@@ -136,3 +136,61 @@ def test_hdr_roundtrip_preserves_metadata(
     assert out_meta.video[0].color.max_fall == 400
     # Output must remain 10-bit.
     assert "10" in out_meta.video[0].pix_fmt
+    assert out_meta.video[0].color.bit_depth == 10
+
+
+@pytest.fixture(scope="session")
+def hlg_clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Synthetic 2-second HEVC clip tagged as HLG/BT.2020."""
+    out = tmp_path_factory.mktemp("hlg") / "hlg.mp4"
+    cmd = [
+        "ffmpeg",
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=s=1280x720:r=25:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-c:v", "libx265", "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p10le",
+        "-x265-params",
+        "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited",
+        "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+        "-colorspace", "bt2020nc", "-color_range", "tv",
+        "-c:a", "aac", "-shortest", str(out),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"HLG fixture generation failed: {exc}")
+    return out
+
+
+@needs_ffmpeg
+@needs_hdr_stack
+@pytest.mark.integration
+def test_hlg_roundtrip_preserves_transfer_depth_and_timeline(
+    hlg_clip: Path, tmp_path: Path, isolated_cache: Path
+) -> None:
+    out = tmp_path / "hlg_out.mp4"
+    profile = load_profile(PROFILES_DIR / "medium_hdr.yaml")
+    plan = build_plan(hlg_clip, profile, encoder_override="libx265")
+    run_full(
+        plan,
+        RunOptions(
+            work_dir=tmp_path / "work" / plan.plan_hash,
+            output=out,
+            target_segment_sec=600.0,
+            enforce_preflight=True,
+        ),
+    )
+
+    source_meta = probe(hlg_clip)
+    out_meta = probe(out)
+    video = out_meta.video[0]
+    assert video.color.is_hdr is True
+    assert video.color.transfer == "arib-std-b67"
+    assert video.color.primaries == "bt2020"
+    assert video.color.space == "bt2020nc"
+    assert video.color.color_range == "tv"
+    assert video.color.bit_depth == 10
+    assert video.pix_fmt == "yuv420p10le"
+    assert video.duration_sec == pytest.approx(source_meta.video[0].duration_sec, abs=0.05)
+    assert out_meta.audio[0].sample_rate == 48_000

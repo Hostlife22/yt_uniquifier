@@ -99,17 +99,26 @@ def worker_cmd(
                 continue
 
             console.print(f"[bold]→ {leased.name}[/bold]")
+            suffix = f".{prof.output_container}"
+            output = out_dir / f"{leased.stem}.uniq{suffix}"
+            staged = q.staged_output_path(output)
             try:
                 _process_one(leased, prof, out_dir, encoder_override,
                               work_dir, workers, keep_segments,
-                              cancel_token=cancel)
-                q.release_done(leased)
+                              cancel_token=cancel, output=staged)
+                q.commit_output(leased, staged, output)
                 processed += 1
                 console.print(f"[green]✓[/green] {leased.name}")
             except Exception as exc:  # noqa: BLE001 — worker swallows per-file
+                staged.unlink(missing_ok=True)
                 tb = "".join(traceback.format_exception(type(exc), exc,
                                                          exc.__traceback__))
-                q.release_failed(leased, tb)
+                if leased.exists():
+                    q.release_failed(leased, tb)
+                else:
+                    console.print(
+                        f"[yellow]lease lost before publish:[/yellow] {leased.name}"
+                    )
                 failed += 1
                 console.print(f"[red]✗[/red] {leased.name} — {exc}")
     finally:
@@ -134,8 +143,9 @@ def _process_one(
     workers: int, keep_segments: bool,
     *,
     cancel_token: CancelToken | None = None,
+    output: Path | None = None,
 ) -> None:
-    out = out_dir / (leased.stem + ".uniq.mp4")
+    out = output or out_dir / f"{leased.stem}.uniq.{profile.output_container}"
     plan = build_plan(leased, profile, encoder_override)
     options = RunOptions(
         work_dir=work_root / plan.plan_hash,

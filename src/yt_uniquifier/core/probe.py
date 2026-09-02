@@ -7,6 +7,7 @@ unnecessary — ffprobe handles every container we care about).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -111,7 +112,7 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
 
     duration = _to_float(fmt.get("duration"), 0.0)
     size_bytes = _to_int(fmt.get("size"), 0)
-    container = _normalize_container(fmt.get("format_name", ""))
+    container = _normalize_container(fmt.get("format_name", ""), path=path)
 
     chapters = [_parse_chapter(c) for c in chapters_raw]
 
@@ -135,10 +136,10 @@ def _parse_video(
     space = _norm(s.get("color_space"), "unknown")
     crange = _norm(s.get("color_range"), "unknown")
 
-    bit_depth = _to_int(s.get("bits_per_raw_sample"), 8)
-    if bit_depth == 0:
-        pix_fmt = s.get("pix_fmt", "") or ""
-        bit_depth = 10 if "10" in pix_fmt else 8
+    bit_depth = _video_bit_depth(
+        s.get("bits_per_raw_sample"),
+        s.get("pix_fmt", "") or "",
+    )
 
     side_data = [
         *s.get("side_data_list", []),
@@ -334,6 +335,28 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
+def _video_bit_depth(bits_per_raw_sample: Any, pix_fmt: str) -> int:
+    """Return component depth, including when ffprobe omits the explicit field.
+
+    HEVC streams in MP4 commonly have no ``bits_per_raw_sample`` even though
+    ``pix_fmt`` is unambiguously 10/12/16-bit. Treating the missing value as 8
+    made HDR diagnostics disagree with the actual encoder contract.
+    """
+    explicit = _to_int(bits_per_raw_sample, 0)
+    if explicit > 0:
+        return explicit
+
+    # Covers yuv420p10le, gbrp12be and hardware formats such as p010le.
+    match = re.search(r"p0?(9|10|12|14|16)(?:le|be)?$", pix_fmt.lower())
+    if match:
+        return int(match.group(1))
+    # Packed high-depth formats do not use the planar ``pNN`` suffix.
+    packed_match = re.search(r"(?:gray|rgb|bgr|rgba|bgra)(10|12|14|16)", pix_fmt.lower())
+    if packed_match:
+        return int(packed_match.group(1))
+    return 8
+
+
 def _to_int_or_none(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
@@ -383,11 +406,18 @@ def _coerce_range(value: str) -> ColorRange:
     return cast(ColorRange, value) if value in allowed else "unknown"
 
 
-def _normalize_container(format_name: str) -> str:
+def _normalize_container(format_name: str, *, path: Path | None = None) -> str:
     """ffprobe returns comma-joined list like 'mov,mp4,m4a,3gp,...'. Pick first known."""
     if not format_name:
         return "unknown"
     parts = [p.strip() for p in format_name.split(",")]
+    # QuickTime MOV and MP4 share one FFprobe demuxer identifier; retain the
+    # user-visible container identity from the unambiguous file suffix.
+    if "mov" in parts and "mp4" in parts and path is not None:
+        if path.suffix.lower() == ".mov":
+            return "mov"
+        if path.suffix.lower() in {".mp4", ".m4v", ".m4a"}:
+            return "mp4"
     for known in ("mp4", "mov", "mkv", "matroska", "webm", "avi"):
         if known in parts:
             return "mkv" if known == "matroska" else known

@@ -194,6 +194,48 @@ def test_release_failed_writes_err(tmp_path: Path) -> None:
     assert err.read_text() == "Traceback:\nfoo"
 
 
+def test_commit_output_fences_then_atomically_publishes(tmp_path: Path) -> None:
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    q = FileQueue(tmp_path / "q", host="hostA")
+    leased = q.lease()
+    assert leased is not None
+    output = tmp_path / "out" / "a.uniq.mp4"
+    output.parent.mkdir()
+    staged = q.staged_output_path(output)
+    staged.write_bytes(b"complete output")
+
+    done = q.commit_output(leased, staged, output)
+
+    assert done == tmp_path / "q" / "done" / "a.mp4"
+    assert done.exists()
+    assert output.read_bytes() == b"complete output"
+    assert not staged.exists()
+
+
+def test_commit_output_rejects_a_reaped_lease(tmp_path: Path) -> None:
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    worker.heartbeat()
+    alive = tmp_path / "q" / "in_progress" / "worker.alive"
+    old = time.time() - 1_000
+    os.utime(alive, (old, old))
+    assert FileQueue(tmp_path / "q", host="reaper").reap_stale(stale_sec=300) == 1
+
+    output = tmp_path / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"obsolete output")
+    with pytest.raises(QueueError, match="ownership lost"):
+        worker.commit_output(leased, staged, output)
+
+    assert not output.exists()
+    assert staged.exists()
+    assert (tmp_path / "q" / "pending" / "a.mp4").exists()
+
+
 # ---- heartbeat + reaper ---------------------------------------------------
 
 def test_heartbeat_creates_alive_file(tmp_path: Path) -> None:

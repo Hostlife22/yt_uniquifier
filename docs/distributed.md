@@ -11,7 +11,7 @@ worker wins each lease. Compatible setups:
 
 | FS / mount | Status |
 |---|---|
-| **NFSv4** with `noac` mount option | supported |
+| **NFSv4** with `noac` mount option | target configuration; qualify on the real hosts before production |
 | **ZFS** shared via NFSv4 (`sharenfs=on`) | supported |
 | **ext4** on a single host (multi-process on one machine) | supported |
 | **APFS** on macOS (single-host testing) | supported |
@@ -60,15 +60,22 @@ yt-uniq queue status /shared/queue --json
 
 ## Heartbeat and recovery
 
-Each worker touches `<host>.alive` in `in_progress/` every
+Each worker process has a host+PID+nonce identity and touches its `.alive` file every
 `--heartbeat-sec` (default 30s). If the file's mtime is older than
 `stale_sec` (default 300s, configurable via `yt-uniq queue reset
 --stale-sec`), any other worker's next `lease()` will move that host's
 leased files back to `pending/`.
 
-Worker that died **mid-encode** loses its segment progress (each worker's
-`work_dir` is local). The new worker re-encodes from scratch — acceptable
-trade-off for not requiring a distributed work_dir.
+CLI and GUI workers keep this heartbeat running while FFmpeg is active. A completed
+encode is first written to a hidden worker-specific file beside the final output.
+The worker may publish it only after atomically moving its lease to `done/`; if a
+reaper already reclaimed the lease, the stale result is discarded.
+
+The queue provides fenced, at-least-once processing, not a transactional exactly-once
+guarantee. A hard power loss in the very small interval between the lease-to-`done`
+rename and final-output rename can leave a hidden `.part.<container>` file that needs
+operator recovery. Cross-host NFS deployments must therefore run lease/reap/crash
+qualification on the actual mount before production.
 
 ## Per-machine encoder variation
 
@@ -81,9 +88,9 @@ encoder via `--encoder libx264`.
 
 ## Output collisions
 
-Workers write to `out_dir/<input.stem>.uniq.mp4`. If two workers happen to
-lease two inputs with the same stem (e.g. `movie.mp4` from two folders
-that got flattened in `pending/`), the writes race. Avoid by:
+Workers publish to `out_dir/<input.stem>.uniq.<profile-container>`. Queue insertion
+rejects duplicate basenames, but independent queue roots can still target the same
+output directory and race on equal stems. Avoid that deployment by:
 
 1. Ensuring unique basenames in `pending/`, or
 2. Setting per-worker `--out-dir` and merging later.
