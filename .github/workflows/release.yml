@@ -293,8 +293,8 @@ jobs:
           pip install -e ".[gui]"
           pip install "cyclonedx-bom>=4.4,<5"
           cyclonedx-py environment \
-            --output-format json \
-            --output-file _release/sbom.cdx.json
+            --of JSON \
+            -o _release/sbom.cdx.json
           # Sanity: must be valid JSON with the cyclonedx schema marker.
           python -c "import json; \
                      d = json.load(open('_release/sbom.cdx.json')); \

@@ -12,6 +12,14 @@ the last tag.
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-09-02
+
+### Fixed
+
+- Use the CycloneDX 4.x-compatible `-o`/`--of` CLI flags when generating the release
+  SBOM. The application bundles for v1.3.1 built successfully, but its publication
+  job stopped at the obsolete long-form output option; v1.3.2 supersedes that tag.
+
 ## [1.3.1] — 2026-09-02
 
 Production correctness and recovery hardening after the repository-wide audit.
