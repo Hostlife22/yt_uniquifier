@@ -162,13 +162,13 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Visual suite or approved retained baseline review
 - [x] Profile validation for all shipped profiles
 - [ ] FFmpeg SDR/HDR/container smoke matrix
-- [x] `make build-wheel` and clean-environment import smoke (1.3.1 code candidate; 1.3.2 release rebuild)
+- [x] `make build-wheel` and clean-environment import smoke (same application code as 1.3.1; v1.3.3 release rebuild pending)
 - [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
 - [ ] Docker multi-arch build/start/health/process smoke
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
-## Текущий статус candidate v1.3.2
+## Текущий статус candidate v1.3.3
 
 - [x] Unit/contracts/property: 1159 passed, 2 skipped.
 - [x] Integration/smoke: 98 passed, 9 skipped.

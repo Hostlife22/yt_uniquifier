@@ -52,7 +52,8 @@ source
 ## Baseline environment
 
 - macOS x86_64, local FFmpeg 8.1.1.
-- Python project environment `.venv`, baseline package 1.3.0; fixed code introduced in 1.3.1 and released as 1.3.2 after a release-workflow-only fix.
+- Python project environment `.venv`, baseline package 1.3.0; fixed application code
+  introduced in 1.3.1 and superseded by 1.3.3 after release-workflow-only fixes.
 - Available locally: libx264, libx265, libsvtav1, libvmaf,
   H264/HEVC VideoToolbox.
 - Missing locally: `zscale`, `rubberband`, torch/SSCD model.
@@ -109,7 +110,7 @@ project artifact.
 но не является statistical performance baseline (для него нужны 3 cold + 3 warm
 runs и natural-content corpus).
 
-| Metric | Broken `soft` 1.3.0 | Fixed `soft` 1.3.2 candidate |
+| Metric | Broken `soft` 1.3.0 | Fixed `soft` 1.3.3 candidate |
 |---|---:|---:|
 | Wall time | 19.11 s | 16.27 s |
 | User CPU | 115.00 s | 110.37 s |

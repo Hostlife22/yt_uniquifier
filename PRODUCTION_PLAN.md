@@ -2,7 +2,7 @@
 
 Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
 profile engine или QA system не создаются. План был согласован; Phase 1 и часть
-Phase 2/3 production guardrails реализованы в candidate `v1.3.2`. Остальные пункты
+Phase 2/3 production guardrails реализованы в candidate `v1.3.3`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
 ## Статус на 2026-09-02

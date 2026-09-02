@@ -61,8 +61,6 @@ jobs:
             archive_ext: zip
           - os: windows-latest
             artifact_name: yt-uniq-gui-Windows
-            # PowerShell Compress-Archive is built-in; no extra tool needed.
-            archive_cmd: powershell -Command "Compress-Archive -Path dist/yt-uniq-gui -DestinationPath $env:ARTIFACT.zip"
             archive_ext: zip
     runs-on: ${{ matrix.os }}
 
@@ -133,11 +131,25 @@ jobs:
         run: |
           bash installers/macos/codesign-adhoc.sh dist/yt-uniq-gui.app
 
-      - name: Package archive
+      - name: Package archive (Linux / macOS)
+        if: runner.os != 'Windows'
         shell: bash
         env:
           ARTIFACT: ${{ matrix.artifact_name }}
         run: ${{ matrix.archive_cmd }}
+
+      - name: Package archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ARTIFACT: ${{ matrix.artifact_name }}
+        run: |
+          $destination = "$env:ARTIFACT.zip"
+          Compress-Archive -Path "dist/yt-uniq-gui" -DestinationPath $destination -Force
+          if (-not (Test-Path -PathType Leaf $destination)) {
+            throw "Windows release archive was not created: $destination"
+          }
+          Get-Item $destination | Format-List Name,Length
 
       - name: Upload artifact to workflow run
         # Always upload to workflow-level artifacts so a build failure
@@ -147,6 +159,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
           retention-days: 14
+          if-no-files-found: error
 
   appimage:
     # v1.0.0 R5 / F1 R4 — wrap the Linux PyInstaller bundle in an

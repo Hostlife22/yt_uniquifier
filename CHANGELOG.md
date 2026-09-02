@@ -12,6 +12,14 @@ the last tag.
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-09-02
+
+### Fixed
+
+- Package the Windows PyInstaller bundle in a native `pwsh` step and make a missing
+  release archive fatal. Earlier Bash expansion consumed `$env` from the embedded
+  PowerShell command, so v1.3.2 produced a successful draft without a Windows ZIP.
+
 ## [1.3.2] — 2026-09-02
 
 ### Fixed

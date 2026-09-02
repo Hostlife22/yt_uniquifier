@@ -5,7 +5,7 @@
 Режим аудита: исходный production-код не изменялся до согласования плана.
 Implementation status обновлён после подтверждения пользователя.
 
-## Implementation status — v1.3.2 candidate
+## Implementation status — v1.3.3 candidate
 
 Подтверждённые P0 и локально исправимые P1 correctness defects устранены в
 существующем pipeline без rewrite. Добавлены container-aware stream mapping,
@@ -402,7 +402,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | Integration/smoke | Post-fix: 98 passed, 9 skipped |
 | Ruff | Passed |
 | Strict mypy (`155` source files) | Passed |
-| Wheel build | v1.3.1 passed clean import smoke; v1.3.2 rebuilt in release gate |
+| Wheel build | v1.3.1/1.3.2 passed clean import smoke; v1.3.3 release rebuild pending |
 | macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
 | 16 profile loads | Passed |
 | Encoder detection | H264/HEVC VideoToolbox, x264/x265, SVT-AV1 available locally |
