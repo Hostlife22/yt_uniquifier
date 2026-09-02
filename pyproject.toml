@@ -84,10 +84,10 @@ web = [
 # .github/workflows/docs.yml pipeline on tag push.
 docs = [
     "mkdocs-material~=9.5",
-    "pymdown-extensions~=10.9",
+    "pymdown-extensions>=10.9,<12.0",
 ]
 dev = [
-    "pytest~=8.2",
+    "pytest>=8.2,<10.0",
     "pytest-cov~=5.0",
     "pytest-qt~=4.4",         # v0.5.0 — PyQt6 widget testing fixtures
     # v0.7.0 R8 — hard per-test cap so a stalled real-ffmpeg fixture

@@ -142,7 +142,7 @@ jobs:
       - name: Upload artifact to workflow run
         # Always upload to workflow-level artifacts so a build failure
         # in a later step still leaves the bundle inspectable.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
@@ -217,7 +217,7 @@ jobs:
           ls -la *.AppImage *.AppImage.zsync
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: yt-uniq-gui-AppImage
           path: |
