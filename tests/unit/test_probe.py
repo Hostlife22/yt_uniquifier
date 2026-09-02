@@ -120,6 +120,54 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert a.dispositions == ("default", "original")
 
 
+def test_parse_mov_handler_name_as_stream_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FFmpeg 6.x exposes MP4/MOV stream names only as handler_name."""
+    src = tmp_path / "legacy-ffmpeg.mp4"
+    src.touch()
+    payload = _ffprobe_json(
+        audio=[{
+            "index": 0,
+            "codec_type": "audio",
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2,
+            "tags": {"handler_name": "Main mix"},
+        }],
+        subtitle=[{
+            "index": 1,
+            "codec_type": "subtitle",
+            "codec_name": "mov_text",
+            "tags": {"handler_name": "Russian captions"},
+        }],
+    )
+    _mock_ffprobe(monkeypatch, payload)
+
+    meta = probe_mod.probe(src)
+
+    assert meta.audio[0].title == "Main mix"
+    assert meta.subtitle[0].title == "Russian captions"
+
+
+def test_parse_ignores_muxer_default_handler_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "untitled.mp4"
+    src.touch()
+    payload = _ffprobe_json(audio=[{
+        "index": 0,
+        "codec_type": "audio",
+        "codec_name": "aac",
+        "sample_rate": "48000",
+        "channels": 2,
+        "tags": {"handler_name": "SoundHandler"},
+    }])
+    _mock_ffprobe(monkeypatch, payload)
+
+    assert probe_mod.probe(src).audio[0].title is None
+
+
 def test_detect_hdr_pq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "hdr.mp4"
     src.touch()

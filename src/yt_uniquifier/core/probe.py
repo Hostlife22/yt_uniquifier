@@ -35,6 +35,11 @@ _IMAGE_SUB_CODECS = {
     "dvb_teletext",
 }
 
+# MOV/MP4 muxers synthesize these handler names even when the source stream
+# had no title. They are container boilerplate, not user metadata, and must not
+# make the final media contract report a title that never existed.
+_DEFAULT_MOV_HANDLER_NAMES = {"SoundHandler", "VideoHandler", "SubtitleHandler"}
+
 
 def probe(path: Path) -> SourceMeta:
     """Run ffprobe and return a structured SourceMeta. Raises ProbeError on failure."""
@@ -184,8 +189,9 @@ def _parse_audio(s: dict[str, Any]) -> AudioStream:
         channel_layout=s.get("channel_layout"),
         bit_rate=_to_int_or_none(s.get("bit_rate")),
         language=tags.get("language"),
-        # MOV/MP4 writes `-metadata:s:a title=...` as the `name` tag.
-        title=tags.get("title") or tags.get("name"),
+        # MOV/MP4 differs by FFmpeg version: current muxers expose `title`
+        # as `name`, while FFmpeg 6.x reliably preserves `handler_name`.
+        title=_stream_title(tags),
         is_default=bool(s.get("disposition", {}).get("default", 0)),
         dispositions=_parse_dispositions(s),
     )
@@ -198,11 +204,21 @@ def _parse_subtitle(s: dict[str, Any]) -> SubtitleStream:
         index=_to_int(s.get("index"), 0),
         codec=codec,
         language=tags.get("language"),
-        title=tags.get("title") or tags.get("name"),
+        title=_stream_title(tags),
         is_image_based=codec in _IMAGE_SUB_CODECS,
         is_default=bool(s.get("disposition", {}).get("default", 0)),
         dispositions=_parse_dispositions(s),
     )
+
+
+def _stream_title(tags: dict[str, Any]) -> str | None:
+    title = tags.get("title") or tags.get("name")
+    if title:
+        return str(title)
+    handler_name = tags.get("handler_name")
+    if not handler_name or handler_name in _DEFAULT_MOV_HANDLER_NAMES:
+        return None
+    return str(handler_name)
 
 
 def _parse_dispositions(stream: dict[str, Any]) -> tuple[str, ...]:

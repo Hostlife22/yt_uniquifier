@@ -68,6 +68,7 @@ def test_metadata_args_minimum(tmp_path: Path) -> None:
     assert "-metadata:s:a:0" in args
     assert "language=eng" in args
     assert "title=Main mix" in args
+    assert "handler_name=Main mix" in args
     assert "-disposition:a:0" in args
     assert "default+original" in args
 
@@ -82,3 +83,15 @@ def test_metadata_title_template(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     args = build_metadata_args(plan, title_template="{stem} - {profile}")
     assert "title=MyMovie - medium" in args
+
+
+def test_matroska_does_not_gain_mov_handler_name(tmp_path: Path) -> None:
+    plan = _plan(tmp_path)
+    plan = plan.model_copy(update={
+        "profile": plan.profile.model_copy(update={"output_container": "mkv"}),
+    })
+
+    args = build_metadata_args(plan)
+
+    assert "title=Main mix" in args
+    assert "handler_name=Main mix" not in args

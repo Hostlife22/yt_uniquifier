@@ -52,12 +52,22 @@ def build_metadata_args(
             args += [f"-metadata:s:a:{i}", f"language={a.language}"]
         if a.title:
             args += [f"-metadata:s:a:{i}", f"title={a.title}"]
+            if plan.profile.output_container in {"mp4", "mov"}:
+                # FFmpeg 6.x's MOV muxer ignores the generic stream `title`
+                # key. `handler_name` is the interoperable MP4/MOV field;
+                # newer FFmpeg also writes `title` as `name`, so emit both.
+                args += [f"-metadata:s:a:{i}", f"handler_name={a.title}"]
         args += [f"-disposition:a:{i}", _disposition_value(a.dispositions, a.is_default)]
     for i, subtitle in enumerate(plan.source.subtitle):
         if subtitle.language:
             args += [f"-metadata:s:s:{i}", f"language={subtitle.language}"]
         if subtitle.title:
             args += [f"-metadata:s:s:{i}", f"title={subtitle.title}"]
+            if plan.profile.output_container in {"mp4", "mov"}:
+                args += [
+                    f"-metadata:s:s:{i}",
+                    f"handler_name={subtitle.title}",
+                ]
         args += [
             f"-disposition:s:{i}",
             _disposition_value(subtitle.dispositions, subtitle.is_default),

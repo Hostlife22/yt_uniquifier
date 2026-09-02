@@ -44,6 +44,8 @@ the last tag.
   cloud hostnames reach the queue's 64-character path-component limit.
 - Install `psutil` as a Windows runtime dependency so process-tree pause/resume
   cannot silently degrade to a no-op on a standard installation.
+- Preserve MP4/MOV audio and subtitle titles on FFmpeg 6.x by writing and
+  probing the interoperable `handler_name` field alongside newer `name` tags.
 - Preserve `target_vmaf` behavior in distributed worker mode instead of silently
   clearing the profile setting.
 - Keep the Intel-macOS ML extra compatible by constraining it to NumPy 1.x and an
