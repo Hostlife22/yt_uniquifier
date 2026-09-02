@@ -123,14 +123,21 @@ def detect_provider(url: str) -> Provider:
     matches. Unknown hosts fall through to a generic JSON envelope.
     """
     try:
-        host = (urllib.parse.urlparse(url).netloc or "").lower()
+        host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
     except Exception:  # noqa: BLE001 — defensive parse
         return "generic"
-    if "discord.com" in host or "discordapp.com" in host:
+
+    # Match DNS labels, not arbitrary substrings.  Besides classifying
+    # ``discord.com.evil.example`` incorrectly, substring checks are easy to
+    # misread later as a security boundary for provider-specific credentials.
+    def _is_host(domain: str) -> bool:
+        return host == domain or host.endswith(f".{domain}")
+
+    if _is_host("discord.com") or _is_host("discordapp.com"):
         return "discord"
-    if "hooks.slack.com" in host:
+    if _is_host("hooks.slack.com"):
         return "slack"
-    if "api.telegram.org" in host:
+    if _is_host("api.telegram.org"):
         return "telegram"
     return "generic"
 

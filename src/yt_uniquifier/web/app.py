@@ -264,7 +264,10 @@ def build_app(config: WebConfig) -> Any:
             checks["work_dir"] = "writable"
         except OSError as exc:
             ready = False
-            checks["work_dir"] = f"unwritable: {exc}"
+            # The response is unauthenticated and may be Internet-facing.
+            # Keep filesystem paths and OS error details in server logs only.
+            _log.warning("readiness work_dir probe failed: %s", exc)
+            checks["work_dir"] = "unwritable"
 
         payload: dict[str, Any] = {"ready": ready, "checks": checks}
         return JSONResponse(
@@ -306,6 +309,33 @@ def build_app(config: WebConfig) -> Any:
                 ) from exc
         return input_path
 
+    def _validate_profile(profile_path: Path) -> Path:
+        """Resolve a profile only when it belongs to an advertised root."""
+        try:
+            resolved = profile_path.resolve(strict=True)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="profile not found") from exc
+        if not resolved.is_file():
+            raise HTTPException(status_code=404, detail="profile not found")
+
+        roots: list[Path] = []
+        try:
+            from yt_uniquifier.gui.paths import profiles_dir
+
+            roots.append(profiles_dir())
+        except Exception:  # pragma: no cover — gui extra not required for web
+            pass
+        if config.profile_dir is not None:
+            roots.append(Path(config.profile_dir))
+
+        for root in roots:
+            try:
+                resolved.relative_to(root.resolve())
+            except (OSError, ValueError):
+                continue
+            return resolved
+        raise HTTPException(status_code=403, detail="profile is outside allowed roots")
+
     # -- routes wired from sibling modules --------------------------
     from yt_uniquifier.web.routes.profile import register as register_profile
     from yt_uniquifier.web.routes.qa import register as register_qa
@@ -318,6 +348,7 @@ def build_app(config: WebConfig) -> Any:
         runs_lock=runs_lock,
         auth=_auth,
         validate_input=_validate_input,
+        validate_profile=_validate_profile,
         streaming_response=StreamingResponse,
         json_response=JSONResponse,
         http_exception=HTTPException,

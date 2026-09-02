@@ -75,6 +75,7 @@ def register(  # noqa: PLR0913
     runs_lock: threading.Lock,
     auth: Callable[..., None],
     validate_input: Callable[[Path], Path],
+    validate_profile: Callable[[Path], Path],
     streaming_response: Any,
     json_response: Any,
     http_exception: Any,
@@ -97,21 +98,31 @@ def register(  # noqa: PLR0913
         # Resolve paths through the validator so a bad input is a 404
         # before we touch the orchestrator.
         input_path = validate_input(Path(req.input_path).expanduser())
-        profile_path = Path(req.profile_path).expanduser()
-        if not profile_path.exists():
-            raise http_exception(
-                status_code=404, detail=f"profile not found: {profile_path}",
-            )
+        profile_path = validate_profile(Path(req.profile_path).expanduser())
         try:
             profile = load_profile(profile_path)
         except Exception as exc:  # noqa: BLE001
+            _log.warning("profile load failed", exc_info=exc)
             raise http_exception(
-                status_code=400, detail=f"profile load failed: {exc}",
+                status_code=400, detail="profile is invalid",
             ) from exc
 
         out_name = req.output_name or f"{input_path.stem}__{profile.name}.mp4"
-        output_path = config.output_dir / out_name
-        config.output_dir.mkdir(parents=True, exist_ok=True)
+        if (
+            out_name in {"", ".", ".."}
+            or "/" in out_name
+            or "\\" in out_name
+            or Path(out_name).is_absolute()
+            or Path(out_name).name != out_name
+        ):
+            raise http_exception(status_code=400, detail="invalid output_name")
+        output_root = Path(config.output_dir).resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        output_path = (output_root / out_name).resolve()
+        try:
+            output_path.relative_to(output_root)
+        except ValueError as exc:
+            raise http_exception(status_code=400, detail="invalid output_name") from exc
 
         try:
             plan = build_plan(input_path, profile, req.encoder_override)

@@ -263,6 +263,47 @@ def test_run_rejects_input_outside_root(
     assert r.status_code == 403
 
 
+def test_run_rejects_profile_outside_configured_root(
+    client: TestClient, web_dirs: tuple[Path, Path, Path], tmp_path: Path,
+) -> None:
+    _, _, profiles = web_dirs
+    input_path = tmp_path / "input.mp4"
+    input_path.touch()
+    outside_profile = tmp_path / "outside.yaml"
+    outside_profile.write_text("name: outside\ntransforms: []\n", encoding="utf-8")
+
+    r = client.post("/api/run", json={
+        "input_path": str(input_path),
+        "profile_path": str(outside_profile),
+    })
+
+    assert r.status_code == 403
+    assert str(outside_profile) not in r.text
+
+
+@pytest.mark.parametrize("output_name", ["../escape.mp4", "sub/escape.mp4", "sub\\escape.mp4"])
+def test_run_rejects_output_path_traversal(
+    client: TestClient,
+    web_dirs: tuple[Path, Path, Path],
+    tmp_path: Path,
+    output_name: str,
+) -> None:
+    _, output, profiles = web_dirs
+    input_path = tmp_path / "input.mp4"
+    input_path.touch()
+    profile_path = profiles / "safe.yaml"
+    profile_path.write_text("name: safe\ntransforms: []\n", encoding="utf-8")
+
+    r = client.post("/api/run", json={
+        "input_path": str(input_path),
+        "profile_path": str(profile_path),
+        "output_name": output_name,
+    })
+
+    assert r.status_code == 400
+    assert not (output.parent / "escape.mp4").exists()
+
+
 def test_cancel_unknown_run_id(client: TestClient) -> None:
     r = client.post("/api/run/does_not_exist/cancel")
     assert r.status_code == 404
@@ -329,6 +370,28 @@ def test_readyz_returns_503_when_no_working_encoder(
     body = r.json()
     assert body["ready"] is False
     assert "no working encoder" in body["checks"]["encoders"]
+
+
+def test_readyz_does_not_expose_work_dir_error(
+    web_dirs: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core import encoder
+
+    work, output, profiles = web_dirs
+    blocked_work_path = work / "not-a-directory"
+    blocked_work_path.write_text("blocked", encoding="utf-8")
+    monkeypatch.setattr(encoder, "detect_encoders", lambda *a, **kw: [])
+    test_client = TestClient(build_app(WebConfig(
+        work_dir=blocked_work_path,
+        output_dir=output,
+        profile_dir=profiles,
+    )))
+
+    r = test_client.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json()["checks"]["work_dir"] == "unwritable"
+    assert str(blocked_work_path) not in r.text
 
 
 def test_metrics_endpoint_serves_prometheus_text(
@@ -473,7 +536,7 @@ def test_audit_log_records_run_start_and_cancel(
         "yt_uniquifier.web.routes.run.run_full", fake_run_full,
     )
 
-    profile_path = tmp_path / "profile.yaml"
+    profile_path = profiles / "profile.yaml"
     profile_path.write_text("name: t\ntransforms: []\n", encoding="utf-8")
 
     client = TestClient(build_app(config))
