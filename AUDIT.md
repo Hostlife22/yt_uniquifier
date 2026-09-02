@@ -1,33 +1,44 @@
 # Production Audit: yt_uniquifier
 
 Дата аудита: 2026-09-02
-Коммит: `14df893` (`main`)
+Базовый коммит: `2c8d677` (`v1.3.3`, `main`)
 Режим аудита: исходный production-код не изменялся до согласования плана.
 Implementation status обновлён после подтверждения пользователя.
 
-## Implementation status — v1.3.3 candidate
+## Implementation status — v1.4.0 candidate
 
 Подтверждённые P0 и локально исправимые P1 correctness defects устранены в
 существующем pipeline без rewrite. Добавлены container-aware stream mapping,
 zero-based video segments, source-aware audio processing, обязательный final media
 contract, content-bound resume identity, atomic checkpoint/audio handling и
-воспроизводимая calibration.
+воспроизводимая calibration. В v1.4.0 дополнительно добавлены job-specific encoder
+probe, bounded streaming FFmpeg logs и stall watchdog, static HDR10 metadata
+contract, stream title/disposition validation, bounded persistent web run store и
+уникальная identity каждого queue-worker процесса.
 
 Post-fix verification на этом хосте:
 
 - Ruff и strict mypy: passed (`155` source files).
-- Canonical `make check`: `1330 passed, 11 skipped`.
-- Unit/contracts/property: `1159 passed, 2 skipped`.
-- Integration/smoke с реальным FFmpeg: `98 passed, 9 skipped`.
+- Canonical `make check`: `1361 passed, 2 skipped` на полностью установленном
+  optional environment (финальный повтор после fixes).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
 - Windowed audio `125.0 s`: duration contract passed с допуском одного AAC frame.
+- HDR10 keep-HDR и HDR→SDR с реальным `zscale`: passed; ST2086 и MaxCLL/FALL
+  сохранены на libx265. Unsupported dynamic HDR отклоняется до encode.
+- Rubber Band и SSCD с реальной TorchScript model: passed (`5/5`).
+- 4K AV1/profile matrix: passed (`11/11`); VideoToolbox hardware smoke прошёл для
+  H.264 1080p/4K и HEVC 4K 10-bit без software fallback.
+- Synthetic long-form 1/2/3 h: `7200/14400/21600` decoded frames, start `0`,
+  duration drift не более `13.8 ms`; peak RSS `107/136/158 MB`.
+- Kill/resume: два completed segment сохранили SHA-256 и mtime, итог `7200/7200`
+  frames; 3 h no-op resume сохранил output SHA и занял `4.24 s`.
 
-Это не означает готовность всей заявленной matrix: HDR10/HLG с `zscale`, реальные
-NVENC/QSV/AMF/VideoToolbox capabilities, rubberband, SSCD model, 4K и лицензированный
-1–3 h corpus остаются `NOT VERIFIED`. Их нельзя считать production-supported только
-по unit tests.
+Это не означает готовность всей заявленной matrix: HLG, real licensed/natural
+1–3 h corpus, NVENC/QSV/AMF, VideoToolbox concurrency, multi-segment VFR и YouTube
+ingestion/transcode остаются `NOT VERIFIED`. Synthetic и unit tests нельзя выдавать
+за доказательство этих платформенных сценариев.
 
 ## Executive summary
 
@@ -258,14 +269,17 @@ Profiles с одинаковыми transform shapes следует остави�
 
 ### HDR
 
-Probe хранит transfer/primaries/matrix/range/bit depth, но не mastering display,
-MaxCLL/MaxFALL, HDR10+, Dolby Vision side data. Encoder capability probe проверяет
-лишь 640×360 yuv420p 8-bit. YouTube требует корректные PQ/HLG, Rec.2020 primaries и
-matrix, а для PQ рекомендует SMPTE ST 2086 и MaxCLL/MaxFALL metadata:
+Probe v1.4.0 хранит transfer/primaries/matrix/range/bit depth, ST2086 mastering
+display и MaxCLL/MaxFALL. Job-specific encoder probe использует фактические
+resolution/pixel format/rate-control/color args. Static HDR10 метаданные передаются
+через x265 params и валидируются после mux; HDR10+/Dolby Vision ранне отклоняются,
+поскольку их сохранность не доказана. YouTube требует корректные PQ/HLG, Rec.2020
+primaries и matrix, а для PQ рекомендует SMPTE ST 2086 и MaxCLL/MaxFALL metadata:
 [официальные HDR требования YouTube](https://support.google.com/youtube/answer/7126552?hl=en).
 
-Локальный FFmpeg не содержит `zscale`, поэтому HDR→SDR real smoke был skipped.
-HDR10/HLG/4K/HW metadata preservation: **NOT VERIFIED**.
+Локальный FFmpeg-full 9.0.1 содержит `zscale`; real HDR10 keep-HDR и HDR→SDR tests
+прошли. HLG, natural HDR corpus и static metadata через hardware encoder:
+**NOT VERIFIED** (hardware static-HDR path намеренно rejected до доказательства).
 
 ### VFR
 
@@ -376,6 +390,14 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 Оставшиеся operational risks:
 
+- Hash-locked base/dev/GUI dependency set: `pip-audit` reports 0 known
+  vulnerabilities after raising Click/Pillow/cryptography bounds. Fully provisioned
+  Intel macOS `[ml]` still reports 22 records against the platform-limited Torch
+  2.2.2; only the SHA-256-pinned official SSCD model is qualified there.
+- Bandit reports 0 High findings. Five Medium `urlopen` findings were reviewed:
+  updater/marketplace/SSCD enforce HTTPS (SSCD additionally pins SHA-256), while the
+  notification webhook is an operator-configured destination and remains a
+  deployment trust-boundary concern.
 - Web может быть поднят на `0.0.0.0` без auth; rate limiting не заменяет auth/TLS.
 - Unbounded run concurrency — denial-of-service для CPU/RAM/disk/GPU.
 - Plugin import происходит до CLI `--no-plugins`; только environment switch даёт
@@ -398,11 +420,10 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Unit/contracts/property | Post-fix: 1159 passed, 2 skipped |
-| Integration/smoke | Post-fix: 98 passed, 9 skipped |
+| Full `make check` | 1361 passed, 2 skipped на fully provisioned macOS environment |
 | Ruff | Passed |
 | Strict mypy (`155` source files) | Passed |
-| Wheel build | v1.3.1/1.3.2 passed clean import smoke; v1.3.3 release rebuild pending |
+| Wheel build | v1.4.0 wheel + clean import smoke passed |
 | macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
 | 16 profile loads | Passed |
 | Encoder detection | H264/HEVC VideoToolbox, x264/x265, SVT-AV1 available locally |
@@ -413,10 +434,12 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | 44.1 kHz `soft` smoke | Post-fix passed: 29.991 s, 48 kHz, -14.0 LUFS |
 | Timestamp smoke | Post-fix passed: video starts 0.000 s, 752/752 frames |
 | Basic VFR smoke | Passed: 90 frames and average FPS preserved |
-| HDR/HLG tonemap | NOT VERIFIED: local FFmpeg lacks `zscale` |
-| Rubberband path | NOT VERIFIED: local FFmpeg lacks `rubberband` |
-| SSCD real model | NOT VERIFIED: torch/model unavailable; objective direction proven by code/stub |
-| 1h/2h/3h+, 4K, GPU, crash recovery | NOT VERIFIED in this environment/time window |
+| HDR10 keep/HDR→SDR | Passed with FFmpeg-full `zscale`; HLG/natural corpus NOT VERIFIED |
+| Rubberband path | Passed: real FFmpeg integration |
+| SSCD real model | Passed: self-similarity and unrelated-content discrimination |
+| 4K | AV1 profile plus H.264/HEVC VideoToolbox smoke passed |
+| 1h/2h/3h+ synthetic | Passed with exact decoded frame counts; natural movie corpus NOT VERIFIED |
+| Crash/no-op resume | Passed; completed segment bytes/mtime and final SHA reused |
 
 GitHub read-only check на момент завершения аудита: latest CI, docs и CodeQL runs для
 `14df893` завершились успешно; open pull requests — 0; open CodeQL alerts — 0.

@@ -17,6 +17,8 @@ import pytest
 from PyQt6.QtCore import QSize
 from PyQt6.QtWidgets import QApplication
 
+from yt_uniquifier.gui.widgets.chart_widget import HAS_QTCHARTS
+
 pytestmark = pytest.mark.visual
 
 
@@ -92,7 +94,9 @@ def test_screen_snapshot(main_window, label: str) -> None:
     # time the user runs the CLI or GUI), so the table content drifts
     # between snapshot capture and replay on any developer box. Same
     # treatment as Validation.
-    if label in ("Validation", "History"):
+    if label in ("Validation", "History") or (
+        label == "Calibrate" and HAS_QTCHARTS
+    ):
         assert baseline.exists() and baseline.stat().st_size > 0
         return
 

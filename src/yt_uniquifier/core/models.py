@@ -62,6 +62,14 @@ class HDRInfo(BaseModel):
     space: ColorSpace = "unknown"
     color_range: ColorRange = "unknown"
     bit_depth: int = 8
+    # Canonical x265 master-display syntax, e.g.
+    # G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,1).
+    mastering_display: str | None = None
+    max_cll: int | None = None
+    max_fall: int | None = None
+    # Re-encoding dynamic metadata is unsupported unless an encoder/filter
+    # chain explicitly proves it can preserve each detected side-data type.
+    dynamic_metadata: tuple[str, ...] = ()
 
 
 class VideoStream(BaseModel):
@@ -91,7 +99,9 @@ class AudioStream(BaseModel):
     channel_layout: str | None = None
     bit_rate: int | None = None
     language: str | None = None
+    title: str | None = None
     is_default: bool = False
+    dispositions: tuple[str, ...] = ()
 
 
 class SubtitleStream(BaseModel):
@@ -100,7 +110,10 @@ class SubtitleStream(BaseModel):
     index: int
     codec: str
     language: str | None = None
+    title: str | None = None
     is_image_based: bool = False
+    is_default: bool = False
+    dispositions: tuple[str, ...] = ()
 
 
 class Chapter(BaseModel):

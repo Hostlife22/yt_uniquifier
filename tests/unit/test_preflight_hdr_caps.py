@@ -78,6 +78,51 @@ def test_hdr_keep_libx265_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert not has_fail(f)
 
 
+def test_hdr_dynamic_metadata_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works", lambda _s, _k: True)
+    src = _hdr_source(tmp_path)
+    src = src.model_copy(update={
+        "video": [src.video[0].model_copy(update={
+            "color": src.video[0].color.model_copy(update={
+                "dynamic_metadata": ("Dolby Vision RPU Data",),
+            }),
+        })],
+    })
+    plan = _plan(src, "libx265", keep_hdr=True)
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "hdr.dynamic_metadata.unsupported" in _codes(findings)
+    assert has_fail(findings)
+
+
+def test_hdr_static_metadata_requires_verified_libx265(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works", lambda _s, _k: True)
+    src = _hdr_source(tmp_path)
+    src = src.model_copy(update={
+        "video": [src.video[0].model_copy(update={
+            "color": src.video[0].color.model_copy(update={
+                "mastering_display": (
+                    "G(8500,39850)B(6550,2300)R(35400,14600)"
+                    "WP(15635,16450)L(10000000,1)"
+                ),
+                "max_cll": 1000,
+                "max_fall": 400,
+            }),
+        })],
+    })
+    plan = _plan(src, "hevc_videotoolbox", keep_hdr=True, target_codec="hevc")
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "hdr.static_metadata.encoder_unverified" in _codes(findings)
+    assert has_fail(findings)
+
+
 def test_hdr_keep_missing_zscale_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
                         lambda _spec, _kind: False)

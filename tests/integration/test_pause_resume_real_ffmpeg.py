@@ -104,7 +104,10 @@ def _build_plan_and_options(
     lands before the run completes even on a fast box.
     """
     profile = load_profile(PROFILES_DIR / "soft.yaml")
-    plan = build_plan(src, profile, encoder_override=None)
+    # Pause/resume is the behavior under test. Pin the software encoder so
+    # optional host hardware does not make this fixture resolution-dependent
+    # (Intel VideoToolbox, for example, rejects 320x180 hardware sessions).
+    plan = build_plan(src, profile, encoder_override="libx264")
     options = RunOptions(
         work_dir=work_dir,
         output=output,

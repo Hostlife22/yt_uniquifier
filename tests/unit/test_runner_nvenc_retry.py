@@ -113,7 +113,9 @@ def test_nvenc_oom_retries_once(tmp_path: Path,
     monkeypatch.setattr(runner_mod.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(runner_mod.time, "sleep", lambda s: sleeps.append(s))
 
-    res = run(_cmd(tmp_path), output=tmp_path / "out.mp4")
+    res = run(
+        _cmd(tmp_path), output=tmp_path / "out.mp4", stall_timeout_sec=0,
+    )
     assert res.returncode == 0
     assert calls["n"] == 2
     assert sleeps == [2.0]
@@ -135,7 +137,7 @@ def test_nvenc_oom_retry_only_once(tmp_path: Path,
     monkeypatch.setattr(runner_mod.time, "sleep", lambda _s: None)
 
     with pytest.raises(PipelineError, match="ffmpeg exited"):
-        run(_cmd(tmp_path), output=tmp_path / "out.mp4")
+        run(_cmd(tmp_path), output=tmp_path / "out.mp4", stall_timeout_sec=0)
     assert calls["n"] == 2
 
 
@@ -153,5 +155,5 @@ def test_non_oom_error_no_retry(tmp_path: Path,
     monkeypatch.setattr(runner_mod.time, "sleep", lambda _s: None)
 
     with pytest.raises(PipelineError):
-        run(_cmd(tmp_path), output=tmp_path / "out.mp4")
+        run(_cmd(tmp_path), output=tmp_path / "out.mp4", stall_timeout_sec=0)
     assert calls["n"] == 1

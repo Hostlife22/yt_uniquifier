@@ -213,6 +213,21 @@ brew install ffmpeg          # обычно включает libvmaf, librubberb
 brew install chromaprint     # для fpcalc (audio FP)
 ```
 
+На актуальном Homebrew минимальная формула `ffmpeg` может не включать `zscale`
+или `rubberband`. Для HDR/rubberband matrix используй keg-only full build и
+явные overrides:
+
+```bash
+brew install ffmpeg-full
+export YT_UNIQ_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+export YT_UNIQ_FFPROBE="$(brew --prefix ffmpeg-full)/bin/ffprobe"
+```
+
+FFmpeg subprocesses have a 600-second no-output watchdog by default. Set
+`YT_UNIQ_STALL_TIMEOUT_SEC=0` to disable it or another number of seconds to tune
+it. `YT_UNIQ_WALL_TIMEOUT_SEC` is disabled by default and can impose a hard
+per-process wall limit when required by an unattended deployment.
+
 **Ubuntu / Debian:**
 ```bash
 sudo apt update
@@ -381,7 +396,7 @@ mypy src/yt_uniquifier
 
 ```bash
 pip install pyinstaller
-pyinstaller pyinstaller/yt-uniq-gui.spec --clean
+pyinstaller pyinstaller/yt-uniq-gui.spec --clean --noconfirm
 ```
 
 | OS | Результат | Запуск |

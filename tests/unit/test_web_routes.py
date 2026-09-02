@@ -10,6 +10,8 @@ run-lifecycle test so we don't fork ffmpeg).
 from __future__ import annotations
 
 import importlib.util
+import json
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +57,65 @@ def test_healthz_returns_ok(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.text == "ok"
+
+
+def test_run_status_survives_restart_and_marks_active_interrupted(
+    web_dirs: tuple[Path, Path, Path],
+) -> None:
+    work, output, profiles = web_dirs
+    now = time.time()
+    (work / "web_runs.json").write_text(json.dumps({
+        "schema_version": 1,
+        "runs": [{
+            "run_id": "before-restart",
+            "status": "running",
+            "error": None,
+            "output_basename": "movie.mp4",
+            "created_at": now - 60,
+            "updated_at": now - 1,
+        }],
+    }), encoding="utf-8")
+
+    restarted = TestClient(build_app(WebConfig(
+        work_dir=work,
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=work.parent,
+    )))
+    response = restarted.get("/api/run/before-restart/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert "restarted" in response.json()["error"]
+    persisted = json.loads((work / "web_runs.json").read_text(encoding="utf-8"))
+    assert persisted["runs"][0]["status"] == "failed"
+    assert str(work.parent) not in (work / "web_runs.json").read_text(encoding="utf-8")
+
+
+def test_expired_run_status_is_pruned_on_startup(
+    web_dirs: tuple[Path, Path, Path],
+) -> None:
+    work, output, profiles = web_dirs
+    (work / "web_runs.json").write_text(json.dumps({
+        "schema_version": 1,
+        "runs": [{
+            "run_id": "expired",
+            "status": "completed",
+            "output_basename": "old.mp4",
+            "created_at": 1,
+            "updated_at": 1,
+        }],
+    }), encoding="utf-8")
+
+    restarted = TestClient(build_app(WebConfig(
+        work_dir=work,
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=work.parent,
+        run_retention_sec=60,
+    )))
+
+    assert restarted.get("/api/run/expired/status").status_code == 404
 
 
 def test_index_renders(client: TestClient) -> None:

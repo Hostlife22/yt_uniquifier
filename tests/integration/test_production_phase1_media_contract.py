@@ -56,7 +56,11 @@ def media_contract_source(tmp_path: Path) -> Path:
             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-c:s", "srt",
             "-metadata:s:a:0", "language=eng",
+            "-metadata:s:a:0", "title=Main mix",
+            "-disposition:a:0", "default+original",
             "-metadata:s:s:0", "language=rus",
+            "-metadata:s:s:0", "title=Russian captions",
+            "-disposition:s:0", "forced",
             str(source),
         ],
         check=True, capture_output=True, timeout=60,
@@ -114,9 +118,16 @@ def test_no_audio_transform_preserves_main_audio_subtitles_and_chapters(
     result = probe(output)
     assert len(result.audio) == 1
     assert result.audio[0].language == "eng"
+    assert result.audio[0].title == "Main mix"
+    # MP4 cannot represent Matroska's `original` disposition; preflight
+    # reports the normalization and the muxer retains the representable flag.
+    assert result.audio[0].dispositions == ("default",)
     assert len(result.subtitle) == 1
     assert result.subtitle[0].codec in {"mov_text", "tx3g"}
     assert result.subtitle[0].language == "rus"
+    assert result.subtitle[0].title == "Russian captions"
+    # MOV/MP4 marks the first subtitle default when no source subtitle was.
+    assert result.subtitle[0].dispositions == ("default", "forced")
     assert [chapter.title for chapter in result.chapters] == ["Opening", "Ending"]
 
 

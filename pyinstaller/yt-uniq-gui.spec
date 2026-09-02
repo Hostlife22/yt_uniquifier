@@ -12,6 +12,8 @@
 # Caveats:
 # - Unsigned. macOS Gatekeeper / Windows SmartScreen will warn on first launch.
 # - PyQt6-WebEngine pulls ~150 MB of Chromium; resulting bundle is large.
+# - Optional ML/web/scene/observability stacks are deliberately excluded. Their
+#   availability in a developer venv must not change the release artifact.
 # - If your platform fails, fall back to: pipx install 'yt-uniquifier[gui]'
 
 import sys
@@ -42,7 +44,19 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    excludes=["tests"],
+    excludes=[
+        "tests",
+        "torch",
+        "torchvision",
+        "scipy",
+        "cv2",
+        "scenedetect",
+        "fastapi",
+        "uvicorn",
+        "opentelemetry",
+        "mkdocs",
+        "pytest",
+    ],
 )
 pyz = PYZ(a.pure, a.zipped_data)
 

@@ -31,7 +31,7 @@ _log = logging.getLogger(__name__)
 _INSTALL_HINT = (
     "PySceneDetect is required for segmentation.mode='scene'. "
     "Install with `pip install yt-uniquifier[scene]` (or "
-    "`pip install 'scenedetect~=0.6.6'` if you manage extras yourself)."
+    "`pip install 'scenedetect~=0.7.1'` if you manage extras yourself)."
 )
 
 
@@ -80,7 +80,9 @@ def detect_scene_boundaries(
     boundaries: list[float] = []
     for start, _end in scene_list:
         try:
-            t = float(start.get_seconds())
+            # PySceneDetect 0.7 deprecates get_seconds(); the property exists on
+            # both the supported 0.7 API and its FrameTimecode return type.
+            t = float(start.seconds)
         except Exception:  # noqa: BLE001 — defensive against API drift
             continue
         if t > 0.0:

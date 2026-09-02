@@ -25,8 +25,16 @@ def _plan(tmp_path: Path, lang: str | None = "eng") -> Plan:
         video=[VideoStream(index=0, codec="h264", width=1920, height=1080,
                            fps=24.0, duration_sec=120.0, pix_fmt="yuv420p",
                            color=HDRInfo(is_hdr=False))],
-        audio=[AudioStream(index=1, codec="aac", sample_rate=48000, channels=2,
-                           language=lang)],
+        audio=[AudioStream(
+            index=1,
+            codec="aac",
+            sample_rate=48000,
+            channels=2,
+            language=lang,
+            title="Main mix",
+            is_default=True,
+            dispositions=("default", "original"),
+        )],
     )
     profile = Profile(name="medium", transforms=[])
     enc = EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True)
@@ -59,6 +67,9 @@ def test_metadata_args_minimum(tmp_path: Path) -> None:
     # Language tags propagated for each audio stream.
     assert "-metadata:s:a:0" in args
     assert "language=eng" in args
+    assert "title=Main mix" in args
+    assert "-disposition:a:0" in args
+    assert "default+original" in args
 
 
 def test_metadata_no_language_tag_skipped(tmp_path: Path) -> None:

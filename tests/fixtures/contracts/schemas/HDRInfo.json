@@ -16,9 +16,53 @@
       "title": "Color Range",
       "type": "string"
     },
+    "dynamic_metadata": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Dynamic Metadata",
+      "type": "array"
+    },
     "is_hdr": {
       "title": "Is Hdr",
       "type": "boolean"
+    },
+    "mastering_display": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mastering Display"
+    },
+    "max_cll": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Cll"
+    },
+    "max_fall": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Fall"
     },
     "primaries": {
       "default": "unknown",

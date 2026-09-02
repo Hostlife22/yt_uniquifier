@@ -50,12 +50,43 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
         failures.append(MediaInvariantFailure(
             "streams.audio", expected_audio, len(result.audio),
         ))
+    else:
+        selected_audio = selected_audio_relative_indices(
+            plan.source, plan.profile.audio_tracks,
+        )
+        audio_has_default = any(plan.source.audio[index].is_default for index in selected_audio)
+        for output_idx, source_idx in enumerate(selected_audio):
+            expected_stream = plan.source.audio[source_idx]
+            actual_stream = result.audio[output_idx]
+            _compare_stream_metadata(
+                failures,
+                kind="audio",
+                index=output_idx,
+                expected_stream=expected_stream,
+                actual_stream=actual_stream,
+                output_container=plan.profile.output_container,
+                muxer_adds_default=not audio_has_default and output_idx == 0,
+            )
 
     expected_subtitles = len(plan.source.subtitle)
     if len(result.subtitle) != expected_subtitles:
         failures.append(MediaInvariantFailure(
             "streams.subtitle", expected_subtitles, len(result.subtitle),
         ))
+    else:
+        subtitle_has_default = any(stream.is_default for stream in plan.source.subtitle)
+        for index, (expected_subtitle, actual_subtitle) in enumerate(zip(
+            plan.source.subtitle, result.subtitle, strict=True,
+        )):
+            _compare_stream_metadata(
+                failures,
+                kind="subtitle",
+                index=index,
+                expected_stream=expected_subtitle,
+                actual_stream=actual_subtitle,
+                output_container=plan.profile.output_container,
+                muxer_adds_default=not subtitle_has_default and index == 0,
+            )
 
     expected_chapters = len(plan.source.chapters)
     if len(result.chapters) != expected_chapters:
@@ -81,8 +112,54 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
         output_is_hdr = bool(result.video and result.video[0].color.is_hdr)
         if not output_is_hdr:
             failures.append(MediaInvariantFailure("color.hdr", True, False))
+        elif result.video:
+            expected_color = plan.source.video[0].color
+            actual_color = result.video[0].color
+            for field_name in (
+                "mastering_display", "max_cll", "max_fall", "dynamic_metadata",
+            ):
+                expected = getattr(expected_color, field_name)
+                actual = getattr(actual_color, field_name)
+                if actual != expected:
+                    failures.append(MediaInvariantFailure(
+                        f"color.{field_name}", expected, actual,
+                    ))
 
     return MediaInvariantReport(output=output, failures=tuple(failures))
+
+
+def _compare_stream_metadata(
+    failures: list[MediaInvariantFailure],
+    *,
+    kind: str,
+    index: int,
+    expected_stream: object,
+    actual_stream: object,
+    output_container: str,
+    muxer_adds_default: bool,
+) -> None:
+    for field_name in ("language", "title", "is_default", "dispositions"):
+        expected = getattr(expected_stream, field_name)
+        actual = getattr(actual_stream, field_name)
+        if field_name == "is_default" and output_container in {"mp4", "mov"}:
+            expected = bool(expected or muxer_adds_default)
+        if field_name == "dispositions":
+            expected_flags = set(expected)
+            if output_container in {"mp4", "mov"}:
+                # ISO BMFF has no representation for Matroska's full
+                # disposition vocabulary. FFmpeg currently carries these
+                # four and drops e.g. original/comment/lyrics.
+                expected_flags &= {
+                    "default", "forced", "hearing_impaired", "visual_impaired",
+                }
+                if muxer_adds_default:
+                    expected_flags.add("default")
+            expected = tuple(sorted(expected_flags))
+            actual = tuple(sorted(actual))
+        if actual != expected:
+            failures.append(MediaInvariantFailure(
+                f"streams.{kind}.{index}.{field_name}", expected, actual,
+            ))
 
 
 def require_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:

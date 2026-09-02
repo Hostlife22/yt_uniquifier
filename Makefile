@@ -89,7 +89,7 @@ typecheck:  ## Run mypy --strict on src/.
 	$(MYPY) src/yt_uniquifier
 
 .PHONY: test
-test:  ## Run full pytest suite (~2 min; includes real-ffmpeg integration).
+test:  ## Run full pytest suite (~2–20 min by extras/hardware; includes real FFmpeg).
 	$(QT_OFFSCREEN) $(PYTEST) -q
 
 .PHONY: test-unit
@@ -133,7 +133,7 @@ probe-encoders:  ## List ffmpeg encoders detected on this machine.
 .PHONY: build
 build: venv  ## Build desktop binary via PyInstaller (dist/yt-uniq-gui.app on macOS).
 	$(PIP) install --quiet pyinstaller
-	$(PY) -m PyInstaller pyinstaller/yt-uniq-gui.spec --clean
+	$(PY) -m PyInstaller pyinstaller/yt-uniq-gui.spec --clean --noconfirm
 
 .PHONY: build-wheel
 build-wheel: venv  ## Build pip-installable wheel into dist/.

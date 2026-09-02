@@ -1,6 +1,6 @@
 [project]
 name = "yt-uniquifier"
-version = "1.3.3"
+version = "1.4.0"
 description = "Production-grade re-encoder with controlled micro-transforms for owned/licensed video content."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,15 +16,18 @@ classifiers = [
 ]
 dependencies = [
     "typer~=0.12",
+    # Typer delegates shell/editor helpers to Click. Versions through 8.3.2
+    # permit command injection through click.edit(); keep fresh installs above
+    # the patched boundary even when another optional extra accepts older Click.
+    "click>=8.3.3,<9",
     "pydantic~=2.7",
     "rich~=13.7",
     "pyyaml~=6.0",
     "imagehash~=4.3",
-    # A9 (v0.5.5): bump above CVE-2024-28219 (heap buffer overflow in
-    # _imagingcms) which affected Pillow 10.3.0. We only use Pillow via
-    # imagehash for perceptual hashing, but the pin should not allow the
-    # vulnerable point release on fresh installs.
-    "Pillow>=10.3.1,<11",
+    # Pillow is production runtime through imagehash. Keep the lower bound at
+    # the first release that fixes the 2026 image-decoder advisories; permissive
+    # old bounds otherwise let a fresh install resolve a known-vulnerable wheel.
+    "Pillow>=12.3,<13",
     "structlog~=24.1",
     "jinja2~=3.1",
 ]
@@ -41,22 +44,31 @@ qa  = ["pyacoustid~=1.3"]
 # headless build, and (b) the keyframe-aligned default works fine for most
 # users. Scene mode is selected per-profile via ``segmentation.mode:
 # scene`` — see ``docs/profiles.md`` and ``core/scene_detect.py``. We pin
-# the headless OpenCV explicitly because PySceneDetect's bare wheel does
-# not declare it as a hard dep (the project expects users to choose
-# headed vs headless themselves).
-scene = ["scenedetect~=0.6.6", "opencv-python-headless~=4.10"]
+# PySceneDetect 0.7 makes OpenCV a direct dependency and permits patched Click
+# releases. Do not add opencv-python-headless beside it: the two distributions
+# export the same cv2 package and are unsafe to install together.
+scene = ["scenedetect~=0.7.1"]
 # v0.8.0 R4 — SSCD (Self-Supervised Copy Detection) ML metric. Strictly
 # opt-in because the torch runtime is ~250 MB on CPU and ~1 GB with CUDA
 # wheels. The model itself (~80 MB torchscript) is lazy-downloaded on
 # first run, NOT bundled in the wheel. Users invoke via `--sscd` on
 # `yt-uniq qa` or `compute_sscd=True` on the build_report API.
-ml  = ["torch>=2.1,<3", "torchvision>=0.16,<1"]
+# Intel macOS PyPI currently tops out at torch 2.2.x, whose NumPy bridge was
+# compiled against NumPy 1.x. Other platforms must use a current Torch line;
+# the Intel exception is documented as trusted, hash-pinned SSCD inference only.
+ml = [
+    "numpy>=1.26,<2",
+    "torch>=2.10,<3; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+    "torch==2.2.2; platform_system == 'Darwin' and platform_machine == 'x86_64'",
+    "torchvision>=0.25,<1; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+    "torchvision==0.17.2; platform_system == 'Darwin' and platform_machine == 'x86_64'",
+]
 # v1.2.0 Task 25 — Ed25519 signature verification for marketplace catalog
 # entries.  Optional so unsigned-trust installs (the v0.9 behaviour)
 # don't pull a 5 MB crypto wheel they don't use.  ``cryptography`` is
 # PyCA's reference library and the only realistic choice for raw Ed25519
 # in pure Python today.
-crypto = ["cryptography>=42,<49"]
+crypto = ["cryptography>=50,<51"]
 # v1.3.0 Task 34 — OpenTelemetry tracing for per-segment / per-run
 # spans.  Opt-in because the OTLP SDK + exporter pull ~10 MB of
 # dependencies that most CLI / desktop users don't need.  Active when
@@ -84,10 +96,10 @@ web = [
 # .github/workflows/docs.yml pipeline on tag push.
 docs = [
     "mkdocs-material~=9.5",
-    "pymdown-extensions>=10.9,<12.0",
+    "pymdown-extensions>=11.0.1,<12.0",
 ]
 dev = [
-    "pytest>=8.2,<10.0",
+    "pytest>=9.0.3,<10.0",
     "pytest-cov~=5.0",
     "pytest-qt~=4.4",         # v0.5.0 — PyQt6 widget testing fixtures
     # v0.7.0 R8 — hard per-test cap so a stalled real-ffmpeg fixture
@@ -105,7 +117,7 @@ dev = [
     "mutmut~=2.5",
     # Signature contract tests generate Ed25519 signatures; keep the
     # production feature optional while making the dev test closure complete.
-    "cryptography>=42,<49",
+    "cryptography>=50,<51",
 ]
 
 [project.scripts]

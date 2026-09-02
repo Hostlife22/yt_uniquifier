@@ -50,9 +50,18 @@ def build_metadata_args(
         a = plan.source.audio[relative_idx]
         if a.language:
             args += [f"-metadata:s:a:{i}", f"language={a.language}"]
+        if a.title:
+            args += [f"-metadata:s:a:{i}", f"title={a.title}"]
+        args += [f"-disposition:a:{i}", _disposition_value(a.dispositions, a.is_default)]
     for i, subtitle in enumerate(plan.source.subtitle):
         if subtitle.language:
             args += [f"-metadata:s:s:{i}", f"language={subtitle.language}"]
+        if subtitle.title:
+            args += [f"-metadata:s:s:{i}", f"title={subtitle.title}"]
+        args += [
+            f"-disposition:s:{i}",
+            _disposition_value(subtitle.dispositions, subtitle.is_default),
+        ]
     # ``-map_metadata -1`` intentionally strips container fingerprints, but it
     # also clears chapter titles even when ``-map_chapters`` copies the chapter
     # timeline. Re-attach only the user-visible title fields from the probe.
@@ -60,6 +69,15 @@ def build_metadata_args(
         if chapter.title:
             args += [f"-metadata:c:{i}", f"title={chapter.title}"]
     return args
+
+
+def _disposition_value(dispositions: tuple[str, ...], is_default: bool) -> str:
+    flags = set(dispositions)
+    if is_default:
+        flags.add("default")
+    else:
+        flags.discard("default")
+    return "+".join(sorted(flags)) if flags else "0"
 
 
 def output_log_path(output: Path) -> Path:

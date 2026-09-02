@@ -10,10 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import secrets
+import shutil
 import subprocess
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,9 +25,22 @@ from yt_uniquifier.core.models import EncoderCandidate, EncoderKind, EncoderVend
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 if TYPE_CHECKING:
+    from yt_uniquifier.core.models import Plan
     from yt_uniquifier.core.runner import CancelToken
 
 CACHE_TTL_SEC = 7 * 24 * 3600
+
+
+@dataclass(frozen=True)
+class EncoderCapabilityResult:
+    supported: bool
+    width: int
+    height: int
+    pix_fmt: str
+    error: str | None = None
+
+
+_CAPABILITY_CACHE: dict[str, EncoderCapabilityResult] = {}
 
 
 def _cache_path() -> Path:
@@ -312,7 +328,96 @@ def _ffmpeg_version_hash() -> str:
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise EncoderError(f"failed to query ffmpeg --version: {exc}") from exc
-    return hashlib.sha256(out.encode("utf-8")).hexdigest()[:16]
+    # Encoder availability is a function of both the ffmpeg binary and the
+    # active device/driver. A week-long cache keyed only on `ffmpeg -version`
+    # survived GPU driver updates and CUDA_VISIBLE_DEVICES changes.
+    signature_parts = [
+        out,
+        platform.system(),
+        platform.release(),
+        platform.version(),
+        platform.machine(),
+        os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        os.environ.get("GPU_DEVICE_ORDINAL", ""),
+    ]
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi:
+        try:
+            gpu = subprocess.run(
+                [
+                    nvidia_smi,
+                    "--query-gpu=uuid,driver_version",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            signature_parts.append(gpu.stdout if gpu.returncode == 0 else gpu.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            signature_parts.append("nvidia-smi-unavailable")
+    return hashlib.sha256("\n".join(signature_parts).encode("utf-8")).hexdigest()[:16]
+
+
+def probe_encoder_for_plan(plan: Plan) -> EncoderCapabilityResult:
+    """Verify the selected encoder against the actual job output contract."""
+    from yt_uniquifier.core.pipeline import (
+        _segment_pix_fmt,
+        build_encoder_capability_probe,
+    )
+
+    video = plan.source.video[0]
+    cmd = build_encoder_capability_probe(plan)
+    width, height = video.width // 2 * 2, video.height // 2 * 2
+    source_arg = next((arg for arg in cmd if arg.startswith("testsrc2=s=")), "")
+    try:
+        dims = source_arg.split("=", 2)[2].split(":", 1)[0]
+        width, height = (int(value) for value in dims.split("x", 1))
+    except (IndexError, ValueError):
+        pass
+    pix_fmt = _segment_pix_fmt(plan)
+    key_payload = json.dumps(
+        {"version": _ffmpeg_version_hash(), "cmd": cmd[1:]},
+        sort_keys=True,
+    )
+    cache_key = hashlib.sha256(key_payload.encode("utf-8")).hexdigest()
+    cached = _CAPABILITY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+    except subprocess.TimeoutExpired:
+        result = EncoderCapabilityResult(
+            supported=False,
+            width=width,
+            height=height,
+            pix_fmt=pix_fmt,
+            error="capability probe timed out after 45 seconds",
+        )
+    except OSError as exc:
+        result = EncoderCapabilityResult(
+            supported=False,
+            width=width,
+            height=height,
+            pix_fmt=pix_fmt,
+            error=str(exc),
+        )
+    else:
+        error_lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        result = EncoderCapabilityResult(
+            supported=proc.returncode == 0,
+            width=width,
+            height=height,
+            pix_fmt=pix_fmt,
+            error=(error_lines[-1][:300] if error_lines else None),
+        )
+    # Cache successes only. Hardware-session exhaustion is transient; retaining
+    # a failed probe for the lifetime of a web/worker process would keep rejecting
+    # every later job even after the device becomes available again.
+    if result.supported:
+        _CAPABILITY_CACHE[cache_key] = result
+    return result
 
 
 def _load_cache(version_key: str) -> list[EncoderCandidate] | None:

@@ -77,6 +77,33 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     assert not has_fail(f)
 
 
+def test_job_encoder_capability_failure_is_preflight_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core import encoder as encoder_mod
+
+    src = _source(tmp_path, width=3840, height=2160)
+    plan = _plan(src, [])
+    monkeypatch.setattr(
+        encoder_mod,
+        "probe_encoder_for_plan",
+        lambda _plan: encoder_mod.EncoderCapabilityResult(
+            supported=False,
+            width=3840,
+            height=2160,
+            pix_fmt="yuv420p",
+            error="device rejected resolution",
+        ),
+    )
+
+    findings = preflight(
+        src, plan, plan.encoder, verify_encoder_capability=True,
+    )
+
+    assert "encoder.capability.unsupported" in _codes(findings)
+    assert has_fail(findings)
+
+
 @pytest.mark.parametrize("channels", [1, 6])
 def test_haas_rejects_non_stereo_main_audio(
     tmp_path: Path, channels: int,

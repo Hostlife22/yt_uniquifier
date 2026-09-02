@@ -34,6 +34,14 @@
           "title": "Codec",
           "type": "string"
         },
+        "dispositions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Dispositions",
+          "type": "array"
+        },
         "index": {
           "title": "Index",
           "type": "integer"
@@ -58,6 +66,18 @@
         "sample_rate": {
           "title": "Sample Rate",
           "type": "integer"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
         }
       },
       "required": [
@@ -181,9 +201,53 @@
           "title": "Color Range",
           "type": "string"
         },
+        "dynamic_metadata": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Dynamic Metadata",
+          "type": "array"
+        },
         "is_hdr": {
           "title": "Is Hdr",
           "type": "boolean"
+        },
+        "mastering_display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mastering Display"
+        },
+        "max_cll": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cll"
+        },
+        "max_fall": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Fall"
         },
         "primaries": {
           "default": "unknown",
@@ -468,9 +532,22 @@
           "title": "Codec",
           "type": "string"
         },
+        "dispositions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Dispositions",
+          "type": "array"
+        },
         "index": {
           "title": "Index",
           "type": "integer"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
         },
         "is_image_based": {
           "default": false,
@@ -488,6 +565,18 @@
           ],
           "default": null,
           "title": "Language"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
         }
       },
       "required": [

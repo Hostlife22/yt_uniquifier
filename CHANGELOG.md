@@ -12,6 +12,51 @@ the last tag.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-02
+
+### Added
+
+- Add a default 10-minute FFmpeg silent-stall watchdog and opt-in wall timeout;
+  configure them with `YT_UNIQ_STALL_TIMEOUT_SEC` and
+  `YT_UNIQ_WALL_TIMEOUT_SEC` (`0` disables either policy).
+- Probe the selected encoder at the job's actual resolution, pixel format, color
+  tags, and rate-control mode before segment work begins.
+- Preserve audio/subtitle titles and dispositions, report container-imposed
+  metadata loss, and validate representable stream metadata in the final output.
+- Detect HDR10 mastering display, MaxCLL/MaxFALL, HDR10+, and Dolby Vision side
+  data. Reinject static HDR10 metadata through libx265 and reject unsupported
+  dynamic HDR preservation before encoding.
+- Persist bounded web run status atomically across restarts, with interrupted-run
+  recovery, seven-day retention, and configurable record limits.
+- Use a per-user web work directory by default instead of a predictable shared
+  `/tmp` path.
+
+### Fixed
+
+- Use one encoder argument policy for full-file, segmented, and capability-probe
+  paths instead of divergent VideoToolbox/x26x settings.
+- Include the platform, device selection, and NVIDIA driver identity in the
+  encoder availability cache key, and do not cache transient job-probe failures.
+- Terminate FFmpeg and its watcher if a frontend progress callback fails, so a
+  paused or silent child process cannot be orphaned.
+- Give automatic shared-filesystem workers process-unique heartbeat identities so
+  a live sibling on the same host cannot mask an abandoned lease.
+- Preserve `target_vmaf` behavior in distributed worker mode instead of silently
+  clearing the profile setting.
+- Keep the Intel-macOS ML extra compatible by constraining it to NumPy 1.x and an
+  OpenCV release that accepts that ABI; real Torch/NumPy conversion is covered by
+  the local production matrix.
+- Raise production Pillow and optional cryptography lower bounds to releases that
+  fix the known 2026 advisories, require patched Click, and likewise raise
+  vulnerable dev/docs lower bounds.
+- Require Torch 2.10+ on supported ML platforms; document the Intel macOS 2.2.2
+  exception as trusted, SHA-256-pinned SSCD inference only.
+- Upgrade the optional scene backend to PySceneDetect 0.7.1 so it can coexist with
+  the patched Click runtime and no longer installs conflicting OpenCV wheels.
+- Make repeated `make build` invocations non-interactive and keep optional
+  ML/web/scene stacks out of the desktop bundle even when they are installed in
+  the developer environment.
+
 ## [1.3.3] — 2026-09-02
 
 ### Fixed

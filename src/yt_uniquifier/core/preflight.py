@@ -43,6 +43,7 @@ def preflight(
     *,
     work_dir: Path | None = None,
     accept_watermark_risk: bool = False,
+    verify_encoder_capability: bool = False,
 ) -> list[PreflightFinding]:
     findings: list[PreflightFinding] = []
 
@@ -85,7 +86,63 @@ def preflight(
     findings.extend(_check_subtitle_burnin(plan))
     findings.extend(_check_timeline_rate(plan))
     findings.extend(_check_audio_channel_layout(plan))
+    findings.extend(_check_container_metadata_loss(plan))
+    if verify_encoder_capability and source.video:
+        findings.extend(_check_encoder_capability(plan))
     return findings
+
+
+def _check_container_metadata_loss(plan: Plan) -> list[PreflightFinding]:
+    """Report source dispositions the selected container cannot represent."""
+    if plan.profile.output_container not in {"mp4", "mov"}:
+        return []
+    supported = {"default", "forced", "hearing_impaired", "visual_impaired"}
+    lost: set[str] = set()
+    for index in selected_audio_relative_indices(
+        plan.source, plan.profile.audio_tracks,
+    ):
+        audio_stream = plan.source.audio[index]
+        lost.update(set(audio_stream.dispositions) - supported)
+    for subtitle_stream in plan.source.subtitle:
+        lost.update(set(subtitle_stream.dispositions) - supported)
+    if not lost:
+        return []
+    names = ", ".join(sorted(lost))
+    return [PreflightFinding(
+        code="metadata.disposition.container_loss",
+        severity="warn",
+        message=(
+            f"The {plan.profile.output_container.upper()} container cannot "
+            f"represent source stream disposition(s): {names}."
+        ),
+        suggestion="Use an MKV output profile to preserve the complete disposition set.",
+    )]
+
+
+def _check_encoder_capability(plan: Plan) -> list[PreflightFinding]:
+    """Run the selected encoder with this Plan's resolution/format/RC."""
+    from yt_uniquifier.core.encoder import probe_encoder_for_plan
+
+    result = probe_encoder_for_plan(plan)
+    detail = f"{result.width}x{result.height} {result.pix_fmt}"
+    if result.supported:
+        return [PreflightFinding(
+            code="encoder.capability.ok",
+            severity="ok",
+            message=f"Encoder {plan.encoder.name!r} passed job probe ({detail}).",
+        )]
+    return [PreflightFinding(
+        code="encoder.capability.unsupported",
+        severity="fail",
+        message=(
+            f"Encoder {plan.encoder.name!r} failed the job-specific probe "
+            f"({detail}): {result.error or 'unknown ffmpeg error'}"
+        ),
+        suggestion=(
+            "Select another encoder or reduce resolution/bit depth; the run "
+            "was stopped before any segments were created."
+        ),
+    )]
 
 
 def _check_audio_channel_layout(plan: Plan) -> list[PreflightFinding]:
@@ -676,6 +733,34 @@ def _check_hdr(
             ))
         # Without keep_hdr we still re-encode to 8-bit yuv420p, which collapses HDR.
         return findings
+
+    if v.color.dynamic_metadata:
+        metadata_names = ", ".join(v.color.dynamic_metadata)
+        findings.append(PreflightFinding(
+            code="hdr.dynamic_metadata.unsupported",
+            severity="fail",
+            message=(
+                "Source contains dynamic HDR metadata that cannot be "
+                f"preserved safely by this re-encode pipeline: {metadata_names}."
+            ),
+            suggestion=(
+                "Use an SDR tonemap profile, or process with a verified Dolby "
+                "Vision/HDR10+ metadata extraction and reinjection workflow."
+            ),
+        ))
+    if (
+        (v.color.mastering_display is not None or v.color.max_cll is not None)
+        and encoder.name != "libx265"
+    ):
+        findings.append(PreflightFinding(
+            code="hdr.static_metadata.encoder_unverified",
+            severity="fail",
+            message=(
+                f"Encoder {encoder.name!r} has no verified static HDR10 metadata "
+                "reinjection path; mastering display/CLL could be lost."
+            ),
+            suggestion="Use libx265 for this source, or tonemap explicitly to SDR.",
+        ))
 
     # keep_hdr=True path: need zscale (zimg) + 10-bit-capable encoder.
     # Dry-run probe rather than text-parse for the same reason as

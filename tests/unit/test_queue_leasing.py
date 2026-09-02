@@ -97,6 +97,20 @@ def test_lease_empty_returns_none(tmp_path: Path) -> None:
     assert q.lease() is None
 
 
+def test_implicit_worker_identity_is_unique_per_instance(tmp_path: Path) -> None:
+    init_queue(tmp_path / "q")
+    first = FileQueue(tmp_path / "q")
+    second = FileQueue(tmp_path / "q")
+
+    assert first.host == second.host
+    assert first.worker_id != second.worker_id
+    assert first.host_dir != second.host_dir
+    first.heartbeat()
+    second.heartbeat()
+    assert (first.layout.in_progress / f"{first.worker_id}.alive").exists()
+    assert (second.layout.in_progress / f"{second.worker_id}.alive").exists()
+
+
 def test_lease_moves_to_host_dir(tmp_path: Path) -> None:
     init_queue(tmp_path / "q")
     _seed_pending(tmp_path / "q", ["a.mp4"])

@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -575,35 +576,10 @@ class FilterGraph:
         return ["-map", "0:s?", "-c:s", "copy"]
 
     def _encoder_args(self) -> list[str]:
-        enc = self.plan.encoder
-        name = enc.name
-        if enc.vendor == "nvenc":
-            return [
-                "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", "19",
-                "-b:v", "0", "-maxrate", str(self._max_bitrate()),
-                "-bufsize", str(self._max_bitrate() * 2),
-            ]
-        if enc.vendor == "qsv":
-            return ["-c:v", name, "-global_quality", "19", "-look_ahead", "1"]
-        if enc.vendor == "amf":
-            return ["-c:v", name, "-rc", "cqp", "-qp_i", "19", "-qp_p", "19"]
-        if enc.vendor == "videotoolbox":
-            return ["-c:v", name, "-q:v", "50"]
-        # v1.2.0 Task 22 — AV1 software encoders.  Mirror the
-        # _encoder_args_for free function so the legacy single-shot
-        # path used by full-source encodes (no segmentation, GUI live
-        # preview) produces AV1 with the same defaults as the segmented
-        # path: SVT-AV1 preset 8, libaom-av1 cpu-used 4 + row-mt.
-        if enc.vendor == "svtav1":
-            return ["-c:v", name, "-preset", "8", "-crf", str(_DEFAULT_AV1_CRF), "-b:v", "0"]
-        if enc.vendor == "libaom":
-            return [
-                "-c:v", name, "-cpu-used", "4", "-row-mt", "1",
-                "-tile-columns", "2", "-tile-rows", "1",
-                "-crf", str(_DEFAULT_AV1_CRF), "-b:v", "0",
-            ]
-        # x264 / x265
-        return ["-c:v", name, "-preset", "slow", "-crf", "18"]
+        # One policy for the legacy full-file graph and segmented graph.
+        # Keeping a second hand-written mapping here made the same Plan use
+        # `-q:v 50` on VideoToolbox in one path and capped VBR in the other.
+        return _encoder_args_for(self.plan)
 
     def _max_bitrate(self) -> int:
         v = self.plan.source.video[0] if self.plan.source.video else None
@@ -1125,7 +1101,11 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
         return [
             "-c:v", name, "-b:v", str(mb),
             "-maxrate", str(int(mb * 1.5)), "-bufsize", str(mb * 2),
-            "-allow_sw", "1",
+            # A capability probe must not pass by silently falling back to
+            # Apple's software encoder.  The same command is used for the
+            # real encode, so a selected VideoToolbox encoder is guaranteed
+            # to be backed by hardware for this job's resolution/pixel format.
+            "-allow_sw", "0",
         ]
     if enc.vendor == "svtav1":
         # SVT-AV1 preset 0=slowest/best, 13=fastest. preset 8 is the
@@ -1147,16 +1127,69 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
             "-crf", str(crf), "-b:v", "0",
             "-maxrate", str(mb), "-bufsize", str(mb * 2),
         ]
-    return [
+    result = [
         "-c:v", name, "-preset", "medium", "-crf", str(crf),
         "-maxrate", str(mb), "-bufsize", str(mb * 2),
     ]
+    if enc.vendor == "x265" and plan.source.video:
+        color = plan.source.video[0].color
+        if plan.profile.keep_hdr and color.is_hdr:
+            x265_params: list[str] = []
+            if color.primaries != "unknown":
+                x265_params.append(f"colorprim={color.primaries}")
+            if color.transfer != "unknown":
+                x265_params.append(f"transfer={color.transfer}")
+            if color.space != "unknown":
+                x265_params.append(f"colormatrix={color.space}")
+            if color.color_range != "unknown":
+                x265_params.append(
+                    f"range={'full' if color.color_range == 'pc' else 'limited'}"
+                )
+            if color.mastering_display:
+                x265_params.append(f"master-display={color.mastering_display}")
+            if color.max_cll is not None and color.max_fall is not None:
+                x265_params.append(f"max-cll={color.max_cll},{color.max_fall}")
+            if x265_params:
+                result += ["-x265-params", ":".join(x265_params)]
+    return result
 
 
 def _max_bitrate_for(plan: Plan) -> int:
     v = plan.source.video[0] if plan.source.video else None
     base = v.bit_rate if (v and v.bit_rate) else 8_000_000
     return int(base * 1.25)
+
+
+def build_encoder_capability_probe(plan: Plan) -> list[str]:
+    """Build a short encode using this job's real output contract.
+
+    The discovery probe in :mod:`core.encoder` intentionally stays cheap at
+    640x360/yuv420p. This second-stage probe verifies the selected encoder at
+    the planned resolution, pixel format, color tags, and rate-control mode so
+    4K/10-bit/device-specific failures surface before segment processing.
+    """
+    if not plan.source.video:
+        raise PipelineError("cannot probe encoder capability without a video stream")
+    video = plan.source.video[0]
+    width = max(2, video.width // 2 * 2)
+    height = max(2, video.height // 2 * 2)
+    tail_scale = _video_tail_scale(plan)
+    match = re.fullmatch(r"scale=(\d+):(\d+)", tail_scale)
+    if match is not None:
+        width, height = int(match.group(1)), int(match.group(2))
+    pix_fmt = _segment_pix_fmt(plan)
+    cmd = [
+        ffmpeg_bin(),
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi",
+        "-i", f"testsrc2=s={width}x{height}:r=24:d=0.25",
+        "-vf", f"format={pix_fmt}",
+        "-frames:v", "6",
+    ]
+    cmd += _encoder_args_for(plan)
+    cmd += _color_output_args(plan)
+    cmd += ["-an", "-f", "null", "-"]
+    return cmd
 
 
 def _loudnorm_params_from(

@@ -66,7 +66,11 @@ def hdr_clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "-c:v", "libx265",
         "-preset", "ultrafast",
         "-x265-params",
-        "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited",
+        (
+            "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:"
+            "master-display=G(8500,39850)B(6550,2300)R(35400,14600)"
+            "WP(15635,16450)L(10000000,1):max-cll=1000,400"
+        ),
         "-pix_fmt", "yuv420p10le",
         "-c:a", "aac",
         "-shortest",
@@ -96,6 +100,9 @@ def test_hdr_source_is_detected_as_hdr(hdr_clip: Path) -> None:
     assert meta.video[0].color.is_hdr is True
     assert meta.video[0].color.transfer == "smpte2084"
     assert meta.video[0].color.primaries == "bt2020"
+    assert meta.video[0].color.mastering_display is not None
+    assert meta.video[0].color.max_cll == 1000
+    assert meta.video[0].color.max_fall == 400
 
 
 @needs_ffmpeg
@@ -121,5 +128,11 @@ def test_hdr_roundtrip_preserves_metadata(
     assert out_meta.video[0].color.is_hdr is True
     assert out_meta.video[0].color.transfer == "smpte2084"
     assert out_meta.video[0].color.primaries == "bt2020"
+    assert out_meta.video[0].color.mastering_display == (
+        "G(8500,39850)B(6550,2300)R(35400,14600)"
+        "WP(15635,16450)L(10000000,1)"
+    )
+    assert out_meta.video[0].color.max_cll == 1000
+    assert out_meta.video[0].color.max_fall == 400
     # Output must remain 10-bit.
     assert "10" in out_meta.video[0].pix_fmt

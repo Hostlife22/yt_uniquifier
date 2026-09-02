@@ -193,7 +193,7 @@ A starter `pyinstaller/yt-uniq-gui.spec` is shipped. On macOS:
 
 ```bash
 pip install pyinstaller
-pyinstaller pyinstaller/yt-uniq-gui.spec --clean
+pyinstaller pyinstaller/yt-uniq-gui.spec --clean --noconfirm
 open dist/yt-uniq-gui.app    # unsigned: right-click → Open first time
 ```
 

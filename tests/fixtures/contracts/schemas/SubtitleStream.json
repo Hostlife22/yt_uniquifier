@@ -4,9 +4,22 @@
       "title": "Codec",
       "type": "string"
     },
+    "dispositions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Dispositions",
+      "type": "array"
+    },
     "index": {
       "title": "Index",
       "type": "integer"
+    },
+    "is_default": {
+      "default": false,
+      "title": "Is Default",
+      "type": "boolean"
     },
     "is_image_based": {
       "default": false,
@@ -24,6 +37,18 @@
       ],
       "default": null,
       "title": "Language"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
     }
   },
   "required": [

@@ -32,6 +32,8 @@ CLI flags (env-var equivalents in parentheses):
 | `--output-dir`   | `YT_UNIQ_WEB_OUTPUT_DIR` | `./output`                    |
 | `--profile-dir`  | `YT_UNIQ_WEB_PROFILE_DIR`| per-user XDG config           |
 | `--input-root`   | `YT_UNIQ_WEB_INPUT_ROOT` | current working directory     |
+| —                | `YT_UNIQ_WEB_RUN_RETENTION_SEC` | `604800` (7 days)       |
+| —                | `YT_UNIQ_WEB_MAX_RUN_RECORDS` | `1000`                    |
 
 Basic auth is gated on both `YT_UNIQ_WEB_USER` and
 `YT_UNIQ_WEB_PASS` being set. With neither set, the server is
@@ -129,6 +131,14 @@ when it is unset, the server uses its current working directory as the
 root. Set `--input-root /data/input` explicitly for NAS/container mounts.
 Path-traversal attempts against
 `/api/qa/...` are rejected with **400 / 404**.
+
+Terminal run status is stored atomically in `<work-dir>/web_runs.json` and
+survives process restarts. A run that was `pending` or `running` when the server
+stopped is reported as `failed` with an interrupted/restart diagnostic; FFmpeg
+checkpoint data remains in its per-run work directory for operator inspection.
+Only run IDs, status, redacted error class, timestamps, and output basenames are
+persisted — source/profile paths and full exception messages are not written to
+this web registry.
 
 ## What's *not* on the web yet
 

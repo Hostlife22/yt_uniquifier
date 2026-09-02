@@ -23,11 +23,13 @@ client never has to round-trip them.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import queue
 import secrets
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,18 @@ class WebConfig:
     # Hard process-level backpressure. Each run can itself spawn many FFmpeg
     # workers, so accepting an unbounded number of run threads is unsafe.
     max_concurrent_runs: int = 2
+    # Terminal run status survives a web-process restart but is bounded both
+    # by age and count. Full source/profile paths are never persisted.
+    run_retention_sec: int = 7 * 24 * 3600
+    max_run_records: int = 1000
+
+    def __post_init__(self) -> None:
+        if self.max_concurrent_runs < 1:
+            raise ValueError("max_concurrent_runs must be >= 1")
+        if self.run_retention_sec < 0:
+            raise ValueError("run_retention_sec must be >= 0")
+        if self.max_run_records < 1:
+            raise ValueError("max_run_records must be >= 1")
 
 
 @dataclass
@@ -83,7 +97,124 @@ class _RunRecord:
     status: str = "pending"  # pending → running → completed | failed | cancelled
     error: str | None = None
     output_basename: str | None = None
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
     thread: threading.Thread | None = field(default=None, repr=False)
+
+
+def _run_store_path(config: WebConfig) -> Path:
+    return config.work_dir / "web_runs.json"
+
+
+def _persisted_error(error: str | None) -> str | None:
+    """Keep a useful failure class without persisting media paths."""
+    if error is None or error.startswith("Interrupted:"):
+        return error
+    error_type = error.split(":", 1)[0].strip() or "Error"
+    return f"{error_type}: run failed; inspect the server or audit log for details"
+
+
+def _load_run_records(config: WebConfig) -> dict[str, _RunRecord]:
+    path = _run_store_path(config)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    now = time.time()
+    loaded: dict[str, _RunRecord] = {}
+    records = raw.get("runs", []) if isinstance(raw, dict) else []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        try:
+            run_id = str(item["run_id"])
+            status = str(item["status"])
+            updated_at = float(item.get("updated_at", 0))
+            created_at = float(item.get("created_at", updated_at))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if status not in {"pending", "running", "completed", "failed", "cancelled"}:
+            continue
+        if now - updated_at > max(0, config.run_retention_sec):
+            continue
+        error = item.get("error")
+        if status in {"pending", "running"}:
+            status = "failed"
+            error = "Interrupted: web process restarted before run completed"
+            updated_at = now
+        events: queue.Queue[RunEvent | None] = queue.Queue(maxsize=10_000)
+        events.put_nowait(None)
+        loaded[run_id] = _RunRecord(
+            run_id=run_id,
+            cancel_token=CancelToken(),
+            events=events,
+            status=status,
+            error=str(error) if error is not None else None,
+            output_basename=(
+                str(item["output_basename"])
+                if item.get("output_basename") is not None else None
+            ),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+    newest = sorted(
+        loaded.values(), key=lambda record: record.updated_at, reverse=True,
+    )[:max(1, config.max_run_records)]
+    return {record.run_id: record for record in newest}
+
+
+def _persist_run_records(
+    config: WebConfig,
+    runs: dict[str, _RunRecord],
+    runs_lock: threading.Lock,
+) -> None:
+    config.work_dir.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    with runs_lock:
+        expired = [
+            run_id for run_id, record in runs.items()
+            if record.status not in {"pending", "running"}
+            and now - record.updated_at > max(0, config.run_retention_sec)
+        ]
+        for run_id in expired:
+            runs.pop(run_id, None)
+        if len(runs) > max(1, config.max_run_records):
+            removable = sorted(
+                (
+                    record for record in runs.values()
+                    if record.status not in {"pending", "running"}
+                ),
+                key=lambda record: record.updated_at,
+            )
+            for record in removable[:len(runs) - config.max_run_records]:
+                runs.pop(record.run_id, None)
+        payload = {
+            "schema_version": 1,
+            "runs": [
+                {
+                    "run_id": record.run_id,
+                    "status": record.status,
+                    "error": _persisted_error(record.error),
+                    "output_basename": record.output_basename,
+                    "created_at": record.created_at,
+                    "updated_at": record.updated_at,
+                }
+                for record in sorted(
+                    runs.values(), key=lambda record: record.created_at,
+                )
+            ],
+        }
+    path = _run_store_path(config)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _check_auth_required(config: WebConfig) -> bool:
@@ -116,8 +247,20 @@ def build_app(config: WebConfig) -> Any:
             "FastAPI is not installed. Install: pip install 'yt-uniquifier[web]'"
         ) from exc
 
-    runs: dict[str, _RunRecord] = {}
+    runs: dict[str, _RunRecord] = _load_run_records(config)
     runs_lock = threading.Lock()
+    persist_lock = threading.Lock()
+
+    def _persist_runs() -> None:
+        try:
+            with persist_lock:
+                _persist_run_records(config, runs, runs_lock)
+        except OSError as exc:
+            # Persistence improves restart diagnostics but must not prevent
+            # `/readyz` from reporting the underlying storage failure.
+            _log.warning("web run-state persistence failed: %s", exc)
+
+    _persist_runs()
 
     # v1.1.0 Task 15: register the Prometheus counter families at
     # build_app time so the very first /metrics scrape includes them
@@ -364,6 +507,7 @@ def build_app(config: WebConfig) -> Any:
         json_response=JSONResponse,
         http_exception=HTTPException,
         limiter=limiter,
+        persist_runs=_persist_runs,
     )
     register_profile(app, config=config, auth=_auth)
     register_qa(

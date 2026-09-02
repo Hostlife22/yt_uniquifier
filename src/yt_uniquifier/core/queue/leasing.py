@@ -10,11 +10,11 @@ Layout:
     <root>/
     ├── pending/                    files waiting for a worker
     ├── in_progress/
-    │   ├── <host>/                 files claimed by this host
-    │   └── <host>.alive            mtime-as-heartbeat
+    │   ├── <worker-id>/            files claimed by one worker process
+    │   └── <worker-id>.alive       mtime-as-heartbeat
     ├── done/                       completed (kept as a marker)
     └── failed/
-        └── <host>/
+        └── <worker-id>/
             ├── <input>
             └── <input>.err.txt
 """
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import secrets
 import socket
 import time
 from dataclasses import dataclass
@@ -115,8 +116,16 @@ class FileQueue:
 
     def __init__(self, root: Path, *, host: str | None = None) -> None:
         self.layout = queue_layout(root)
+        explicit_host = host is not None
         self.host = _safe_host_name(host or socket.gethostname())
-        self.host_dir = self.layout.in_progress / self.host
+        self.worker_id = (
+            self.host
+            if explicit_host
+            else _safe_host_name(
+                f"{self.host}-{os.getpid()}-{secrets.token_hex(4)}"
+            )
+        )
+        self.host_dir = self.layout.in_progress / self.worker_id
         self.host_dir.mkdir(parents=True, exist_ok=True)
         # B8 (v0.6.0): cached sorted candidate name list so lease() does
         # not re-list pending/ on every call. On NFSv4 noac a fresh
@@ -228,7 +237,7 @@ class FileQueue:
                     "a", encoding="utf-8",
                 ) as fh:
                     fh.write(
-                        f"{time.time():.0f} {self.host} {candidate.name}\n"
+                        f"{time.time():.0f} {self.worker_id} {candidate.name}\n"
                     )
                 continue
             return dest
@@ -264,8 +273,8 @@ class FileQueue:
         )
 
     def heartbeat(self) -> None:
-        """Touch <host>.alive so the reaper knows we're still working."""
-        alive = self.layout.in_progress / f"{self.host}.alive"
+        """Touch <worker-id>.alive so the reaper tracks this process."""
+        alive = self.layout.in_progress / f"{self.worker_id}.alive"
         alive.touch()
 
     def release_done(self, leased: Path) -> Path:
@@ -276,7 +285,7 @@ class FileQueue:
 
     def release_failed(self, leased: Path, error: str) -> Path:
         """Move a leased file into failed/<host>/ and write the error trace."""
-        host_failed = self.layout.failed / self.host
+        host_failed = self.layout.failed / self.worker_id
         host_failed.mkdir(parents=True, exist_ok=True)
         dest = host_failed / leased.name
         os.rename(leased, dest)

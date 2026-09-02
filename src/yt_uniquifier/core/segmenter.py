@@ -141,7 +141,8 @@ def _keyframe_cache_path(source: Path) -> Path:
     source across mounts.
     """
     st = source.stat()
-    h = hashlib.md5()
+    # Non-security cache discriminator; cache entries are revalidated before use.
+    h = hashlib.md5(usedforsecurity=False)
     try:
         with source.open("rb") as fh:
             h.update(fh.read(4096))

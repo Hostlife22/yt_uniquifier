@@ -39,10 +39,10 @@ Every model below has its full JSON schema locked by
 
 | Model | Source | Notes |
 |---|---|---|
-| `HDRInfo` | `core/models.py` | `frozen=True`. Color characteristics of one video stream. |
+| `HDRInfo` | `core/models.py` | `frozen=True`. Color characteristics plus optional static/dynamic HDR metadata. |
 | `VideoStream` | `core/models.py` | `frozen=True`. One video stream from `ffprobe`. |
-| `AudioStream` | `core/models.py` | `frozen=True`. |
-| `SubtitleStream` | `core/models.py` | `frozen=True`. |
+| `AudioStream` | `core/models.py` | `frozen=True`. v1.4 adds optional `title` and `dispositions`. |
+| `SubtitleStream` | `core/models.py` | `frozen=True`. v1.4 adds optional `title`, `is_default`, and `dispositions`. |
 | `Chapter` | `core/models.py` | `frozen=True`. |
 | `SourceMeta` | `core/models.py` | `frozen=True`. The full probe result. |
 | `EncoderCandidate` | `core/models.py` | `frozen=True`. `max_parallel ∈ [1, 64]`; includes AV1 software vendors `svtav1` and `libaom`. |

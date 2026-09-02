@@ -51,12 +51,13 @@ source
 
 ## Baseline environment
 
-- macOS x86_64, local FFmpeg 8.1.1.
-- Python project environment `.venv`, baseline package 1.3.0; fixed application code
-  introduced in 1.3.1 and superseded by 1.3.3 after release-workflow-only fixes.
+- macOS 26.6.2 x86_64, 12 logical CPUs, 32 GiB RAM.
+- Homebrew FFmpeg-full 9.0.1 with `zscale`, `rubberband`, `libvmaf`, x264/x265,
+  SVT-AV1 and VideoToolbox; Python 3.12 `.venv`, package 1.4.0 candidate.
 - Available locally: libx264, libx265, libsvtav1, libvmaf,
   H264/HEVC VideoToolbox.
-- Missing locally: `zscale`, `rubberband`, torch/SSCD model.
+- Installed optional stacks: GUI/QtCharts, scene/OpenCV, Torch 2.2.2 + torchvision
+  0.17.2 + NumPy 1.26.4, web, crypto, observability and docs.
 - Input: existing `tests/fixtures/.gen/clip_a.mp4`, 1280×720, 25 fps,
   H.264 + stereo AAC 44.1 kHz, container duration 30.183 s.
 - Current pipeline: shipped `soft.yaml`, forced libx264, one segment/worker,
@@ -64,9 +65,8 @@ source
 - Control: direct libx264 `preset=medium`, `crf=18`, yuv420p + AAC 256k,
   `+faststart`.
 
-Commands and complete temporary artifacts were retained under
-`/tmp/ytuniq-prod-bench.7t6cks` for this local session; `/tmp` is not a durable
-project artifact.
+Commands and results are recorded here; temporary baseline media was removed after
+validation and is not a durable project artifact.
 
 ## Baseline results
 
@@ -145,6 +145,36 @@ measurement limitation, а не основание скрывать резуль
 | Divergent windowed audio 125.0 s | Post-fix ≤0.03 s error — PASS |
 | Basic 4 s VFR | 90→90 frames, avg 22.5 fps — PASS |
 | SSCD direction stub, similarity 0.99 | Direct similarity 0.99 — PASS |
+| HDR10 static metadata | x265 preserves ST2086 + MaxCLL/FALL — PASS |
+| HDR→SDR | Real `zscale`/tonemap integration — PASS |
+| Rubber Band | Real FFmpeg variability integration — PASS |
+| SSCD model | Self >0.999; unrelated clip <0.95 — PASS |
+| 4K AV1 profiles | Real SVT-AV1/profile integration — PASS |
+| VideoToolbox hardware | H.264 1080p/4K + HEVC 4K 10-bit, `allow_sw=0` — PASS |
+
+## Synthetic long-form results — v1.4.0 candidate
+
+Эта matrix проверяет timeline/segmentation/concat/resources, но не заменяет natural
+licensed movie corpus. Sources содержат `testsrc2` 320×180, 2 fps и непрерывный
+48 kHz tone; профиль `soft`, libx264, 600 s target, 4 workers, QA выключен. Segment
+artifacts сохранялись для проверки disk/reuse.
+
+| Duration | Segments | Frames expected/read | Video start/duration | Container drift | Wall | Peak RSS | Source / output / work |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 h | 6 | 7,200 / 7,200 | 0 / 3,600.000 s | +1.646 ms | 283.24 s | 107 MB | 61 / 97 / 94 MB |
+| 2 h | 12 | 14,400 / 14,400 | 0 / 7,200.000 s | +7.708 ms | 541.74 s | 136 MB | 128 / 193 / 188 MB |
+| 3 h | 18 | 21,600 / 21,600 | 0 / 10,800.000 s | +13.771 ms | 747.82 s | 158 MB | 192 / 289 / 290 MB |
+
+Peak RSS — process maximum reported by macOS `/usr/bin/time -l`; это лучше старого
+`RUSAGE_SELF`, но не сумма одновременных child RSS. Wall scaling близок к линейному.
+Основной bottleneck — два последовательных full-duration loudnorm/audio passes;
+video workers не могут начать до готовности main audio.
+
+No-op 3 h resume занял `4.24 s`, сохранил тот же output SHA-256
+`33925ab7…0fcec0`, состояние осталось `18 done`. В отдельном 1 h video-only crash
+test процесс был остановлен после двух completed keyframe-aligned segments; resume
+сохранил их SHA-256 и mtime, завершил `6/6`, дал `7200/7200` frames и duration
+`3600.000 s` за `18.35 s`.
 
 ## Production benchmark protocol
 
@@ -191,12 +221,11 @@ release по [официальным upload settings](https://support.google.com
 
 ## NOT VERIFIED
 
-- Real licensed 1 h / 2 h / 3 h+ movies.
-- 4K throughput/resource usage.
-- HDR10/HLG tonemap и mastering metadata preservation (`zscale` отсутствует).
-- NVENC/QSV/AMF/VideoToolbox 10-bit/HDR/4K/concurrency.
-- Rubberband quality/duration.
-- Real SSCD model execution.
+- Real licensed/natural 1 h / 2 h / 3 h+ movies and listening/visual inspection.
+- 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
+- HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
+- NVENC/QSV/AMF; VideoToolbox concurrency/static HDR metadata.
+- Rubber Band subjective quality on speech/music (functional/duration path verified).
 - YouTube ingestion/transcode result.
 
 Эти строки нельзя заменять утверждением «всё работает» до выполнения соответствующей

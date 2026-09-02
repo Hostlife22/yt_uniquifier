@@ -386,6 +386,7 @@ def _run_full_impl(
     findings = preflight(
         plan.source, plan, plan.encoder, work_dir=options.work_dir,
         accept_watermark_risk=options.accept_watermark_risk,
+        verify_encoder_capability=True,
     )
     if options.enforce_preflight and has_fail(findings):
         emit(RunEvent(kind="error", payload={"phase": "preflight",

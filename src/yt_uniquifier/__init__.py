@@ -13,6 +13,6 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("yt-uniquifier")
 except PackageNotFoundError:  # source checkout, never installed
-    __version__ = "1.3.3+source"
+    __version__ = "1.4.0+source"
 
 __all__ = ["__version__"]

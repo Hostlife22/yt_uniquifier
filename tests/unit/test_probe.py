@@ -22,6 +22,7 @@ def _ffprobe_json(
     duration: str = "10.0",
     size: str = "1000000",
     format_name: str = "mov,mp4,m4a,3gp,3g2,mj2",
+    frames: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "streams": [
@@ -30,6 +31,7 @@ def _ffprobe_json(
             *(subtitle or []),
         ],
         "chapters": chapters or [],
+        "frames": frames or [],
         "format": {
             "duration": duration,
             "size": size,
@@ -89,8 +91,8 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
                 "channels": 2,
                 "channel_layout": "stereo",
                 "bit_rate": "256000",
-                "tags": {"language": "eng"},
-                "disposition": {"default": 1},
+                "tags": {"language": "eng", "title": "Main mix"},
+                "disposition": {"default": 1, "original": 1, "forced": 0},
             }
         ],
     )
@@ -113,7 +115,9 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert len(meta.audio) == 1
     a = meta.audio[0]
     assert a.language == "eng"
+    assert a.title == "Main mix"
     assert a.channels == 2
+    assert a.dispositions == ("default", "original")
 
 
 def test_detect_hdr_pq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,12 +140,43 @@ def test_detect_hdr_pq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "bits_per_raw_sample": "10",
             }
         ],
+        frames=[{
+            "media_type": "video",
+            "stream_index": 0,
+            "side_data_list": [
+                {
+                    "side_data_type": "Mastering display metadata",
+                    "red_x": "35400/50000", "red_y": "14600/50000",
+                    "green_x": "8500/50000", "green_y": "39850/50000",
+                    "blue_x": "6550/50000", "blue_y": "2300/50000",
+                    "white_point_x": "15635/50000",
+                    "white_point_y": "16450/50000",
+                    "min_luminance": "1/10000",
+                    "max_luminance": "10000000/10000",
+                },
+                {
+                    "side_data_type": "Content light level metadata",
+                    "max_content": 1000,
+                    "max_average": 400,
+                },
+                {"side_data_type": "HDR Dynamic Metadata SMPTE2094-40"},
+            ],
+        }],
     )
     _mock_ffprobe(monkeypatch, payload)
     meta = probe_mod.probe(src)
     assert meta.video[0].color.is_hdr is True
     assert meta.video[0].color.transfer == "smpte2084"
     assert meta.video[0].color.bit_depth == 10
+    assert meta.video[0].color.mastering_display == (
+        "G(8500,39850)B(6550,2300)R(35400,14600)"
+        "WP(15635,16450)L(10000000,1)"
+    )
+    assert meta.video[0].color.max_cll == 1000
+    assert meta.video[0].color.max_fall == 400
+    assert meta.video[0].color.dynamic_metadata == (
+        "HDR Dynamic Metadata SMPTE2094-40",
+    )
 
 
 def test_detect_hdr_hlg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,7 +214,8 @@ def test_image_based_subtitle_flagged(tmp_path: Path, monkeypatch: pytest.Monkey
         subtitle=[
             {"index": 2, "codec_type": "subtitle", "codec_name": "hdmv_pgs_subtitle"},
             {"index": 3, "codec_type": "subtitle", "codec_name": "subrip",
-             "tags": {"language": "eng"}},
+             "tags": {"language": "eng", "title": "English CC"},
+             "disposition": {"default": 1, "forced": 1}},
         ],
         format_name="matroska,webm",
     )
@@ -188,6 +224,9 @@ def test_image_based_subtitle_flagged(tmp_path: Path, monkeypatch: pytest.Monkey
     assert meta.container == "mkv"
     pgs, srt = meta.subtitle
     assert pgs.is_image_based is True
+    assert srt.title == "English CC"
+    assert srt.is_default is True
+    assert srt.dispositions == ("default", "forced")
     assert srt.is_image_based is False
     assert srt.language == "eng"
 

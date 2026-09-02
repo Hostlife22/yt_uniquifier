@@ -93,7 +93,9 @@ class ChartWidget(QWidget):
     # ---- backends ----
     def _build_qtcharts(self) -> None:
         chart = QChart()
-        chart.legend().setVisible(True)
+        legend = chart.legend()
+        if legend is not None:
+            legend.setVisible(True)
         view = QChartView(chart)
         view.setRenderHint(QPainter.RenderHint.Antialiasing)
         layout = QVBoxLayout(self)
@@ -104,7 +106,7 @@ class ChartWidget(QWidget):
 
     def _refresh(self) -> None:
         if HAS_QTCHARTS and self._chart is not None:
-            chart: QChart = self._chart
+            chart = cast(QChart, self._chart)
             chart.removeAllSeries()
             # Repopulate `_lines` from the freshly-added QLineSeries so
             # later `add_point` calls find the live series instead of

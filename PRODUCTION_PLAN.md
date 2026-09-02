@@ -2,19 +2,21 @@
 
 Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
 profile engine или QA system не создаются. План был согласован; Phase 1 и часть
-Phase 2/3 production guardrails реализованы в candidate `v1.3.3`. Остальные пункты
+Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
 ## Статус на 2026-09-02
 
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
-  web guards; correctness-aware QA verdict.
-- **PARTIAL:** 2.1, 2.2, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
+  web guards; correctness-aware QA verdict; job-specific encoder probe; runner
+  watchdog/bounded logs; persistent bounded web lifecycle; per-process queue IDs.
+- **PARTIAL:** 2.1, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
   platform/HDR/channel matrix ещё не подтверждена.
-- **NOT VERIFIED / planned:** hardware HDR matrix, 4K/1–3 h corpus, resource sampler,
-  runner stall watchdog, persistent web scheduler, distributed fencing и aligned
-  transform-quality metrics.
+- **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
+  H.264/HEVC VideoToolbox smoke, synthetic 1/2/3 h and crash/no-op resume.
+- **NOT VERIFIED / planned:** HLG/natural long-form corpus, NVENC/QSV/AMF,
+  VideoToolbox concurrency, distributed fencing and aligned transform-quality metrics.
 
 ## Принципы реализации
 

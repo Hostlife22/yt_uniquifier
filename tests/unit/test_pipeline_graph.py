@@ -22,7 +22,11 @@ from yt_uniquifier.core.models import (
     TransformConfig,
     VideoStream,
 )
-from yt_uniquifier.core.pipeline import FilterGraph, compute_plan_hash
+from yt_uniquifier.core.pipeline import (
+    FilterGraph,
+    build_encoder_capability_probe,
+    compute_plan_hash,
+)
 from yt_uniquifier.core.transforms import audio_loudnorm
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
 
@@ -84,6 +88,84 @@ def _plan(source: SourceMeta, transforms: list[TransformConfig], **profile_kw: o
         encoder=enc,
         plan_hash=compute_plan_hash(source, profile, enc),
     )
+
+
+def test_full_graph_and_segment_probe_share_encoder_policy(tmp_path: Path) -> None:
+    source = _src(tmp_path)
+    plan = _plan(source, [])
+
+    full_args = FilterGraph(plan, tmp_path / "out.mp4").build().args
+    probe_args = build_encoder_capability_probe(plan)
+
+    expected = pipeline_mod._encoder_args_for(plan)
+    assert all(arg in full_args for arg in expected)
+    assert all(arg in probe_args for arg in expected)
+    assert "testsrc2=s=1920x1080:r=24:d=0.25" in probe_args
+    assert probe_args[probe_args.index("-vf") + 1] == "format=yuv420p"
+
+
+def test_encoder_probe_uses_profile_canvas_and_hdr_pix_fmt(tmp_path: Path) -> None:
+    source = _src(tmp_path, hdr=True)
+    profile = Profile(
+        name="hdr-4k",
+        target_codec="hevc",
+        keep_hdr=True,
+        transforms=[TransformConfig(
+            id="video.fit_aspect",
+            params={
+                "target_aspect": "16:9",
+                "target_width": 3840,
+                "target_height": 2160,
+            },
+        )],
+    )
+    encoder = EncoderCandidate(
+        name="libx265", vendor="x265", codec="hevc", works=True,
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = build_encoder_capability_probe(plan)
+
+    assert "testsrc2=s=3840x2160:r=24:d=0.25" in args
+    assert args[args.index("-vf") + 1] == "format=yuv420p10le"
+    assert args[args.index("-color_trc") + 1] == "smpte2084"
+
+
+def test_libx265_reinjects_static_hdr10_metadata(tmp_path: Path) -> None:
+    source = _src(tmp_path, hdr=True)
+    color = source.video[0].color.model_copy(update={
+        "mastering_display": (
+            "G(8500,39850)B(6550,2300)R(35400,14600)"
+            "WP(15635,16450)L(10000000,1)"
+        ),
+        "max_cll": 1000,
+        "max_fall": 400,
+    })
+    source = source.model_copy(update={
+        "video": [source.video[0].model_copy(update={"color": color})],
+    })
+    profile = Profile(name="hdr", target_codec="hevc", keep_hdr=True)
+    encoder = EncoderCandidate(
+        name="libx265", vendor="x265", codec="hevc", works=True,
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = pipeline_mod._encoder_args_for(plan)
+    params = args[args.index("-x265-params") + 1]
+
+    assert "master-display=G(8500,39850)" in params
+    assert "max-cll=1000,400" in params
+    assert "transfer=smpte2084" in params
 
 
 def test_video_only_chain(tmp_path: Path) -> None:
@@ -255,7 +337,7 @@ def test_encoder_args_per_vendor(tmp_path: Path) -> None:
         ("nvenc", "h264_nvenc", "-preset"),
         ("qsv", "h264_qsv", "-global_quality"),
         ("amf", "h264_amf", "-rc"),
-        ("videotoolbox", "h264_videotoolbox", "-q:v"),
+        ("videotoolbox", "h264_videotoolbox", "-b:v"),
         ("x264", "libx264", "-crf"),
     ]:
         enc = EncoderCandidate(name=name, vendor=vendor, codec="h264", works=True)  # type: ignore[arg-type]

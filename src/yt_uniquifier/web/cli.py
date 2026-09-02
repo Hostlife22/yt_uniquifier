@@ -7,10 +7,12 @@ fastapi/uvicorn into the import graph for users who don't have
 Env vars honoured (override CLI flags when set):
   YT_UNIQ_WEB_HOST        — default 127.0.0.1
   YT_UNIQ_WEB_PORT        — default 8080
-  YT_UNIQ_WEB_WORK_DIR    — default /tmp/yt-uniquifier-web
+  YT_UNIQ_WEB_WORK_DIR    — default ~/.cache/yt_uniquifier/web
   YT_UNIQ_WEB_OUTPUT_DIR  — default ./output
   YT_UNIQ_WEB_PROFILE_DIR — default per-user profile dir
   YT_UNIQ_WEB_INPUT_ROOT  — input boundary (default: current directory)
+  YT_UNIQ_WEB_RUN_RETENTION_SEC — terminal status retention (default: 604800)
+  YT_UNIQ_WEB_MAX_RUN_RECORDS — persisted status cap (default: 1000)
   YT_UNIQ_WEB_USER        — when both set, enable basic auth
   YT_UNIQ_WEB_PASS
 """
@@ -38,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
                         default=int(os.environ.get("YT_UNIQ_WEB_PORT", "8080")))
     parser.add_argument("--work-dir",
                         default=os.environ.get("YT_UNIQ_WEB_WORK_DIR",
-                                               "/tmp/yt-uniquifier-web"))
+                                               str(Path.home() / ".cache" /
+                                                   "yt_uniquifier" / "web")))
     parser.add_argument("--output-dir",
                         default=os.environ.get("YT_UNIQ_WEB_OUTPUT_DIR",
                                                "./output"))
@@ -68,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         input_root=_env_path("YT_UNIQ_WEB_INPUT_ROOT", args.input_root),
         basic_auth_user=os.environ.get("YT_UNIQ_WEB_USER"),
         basic_auth_pass=os.environ.get("YT_UNIQ_WEB_PASS"),
+        run_retention_sec=int(os.environ.get("YT_UNIQ_WEB_RUN_RETENTION_SEC", "604800")),
+        max_run_records=int(os.environ.get("YT_UNIQ_WEB_MAX_RUN_RECORDS", "1000")),
     )
     config.work_dir.mkdir(parents=True, exist_ok=True)
     config.output_dir.mkdir(parents=True, exist_ok=True)

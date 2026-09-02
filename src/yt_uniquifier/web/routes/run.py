@@ -9,6 +9,7 @@ import logging
 import os
 import queue
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -82,6 +83,7 @@ def register(  # noqa: PLR0913
     json_response: Any,
     http_exception: Any,
     limiter: Any = None,
+    persist_runs: Callable[[], None] | None = None,
 ) -> None:
     from fastapi import Depends
 
@@ -170,7 +172,11 @@ def register(  # noqa: PLR0913
                     events_q.put_nowait(ev)
 
         def _runner() -> None:
-            record.status = "running"
+            with runs_lock:
+                record.status = "running"
+                record.updated_at = time.time()
+            if persist_runs is not None:
+                persist_runs()
             try:
                 opts = RunOptions(
                     work_dir=config.work_dir / run_id,
@@ -184,16 +190,22 @@ def register(  # noqa: PLR0913
                     run_id=run_id,
                 )
                 run_full(plan, opts, on_event=_on_event, cancel_token=cancel_token)
-                record.status = (
-                    "cancelled" if cancel_token.is_cancelled() else "completed"
-                )
+                with runs_lock:
+                    record.status = (
+                        "cancelled" if cancel_token.is_cancelled() else "completed"
+                    )
+                    record.updated_at = time.time()
             except BaseException as exc:  # noqa: BLE001 — capture everything
-                record.status = "failed"
-                record.error = f"{type(exc).__name__}: {exc}"
+                with runs_lock:
+                    record.status = "failed"
+                    record.error = f"{type(exc).__name__}: {exc}"
+                    record.updated_at = time.time()
                 _on_event(RunEvent(kind="error", payload={
                     "phase": "runner", "message": record.error,
                 }))
             finally:
+                if persist_runs is not None:
+                    persist_runs()
                 # Never let a disconnected client's full queue strand this
                 # worker thread while it tries to publish the terminal marker.
                 try:
@@ -226,6 +238,8 @@ def register(  # noqa: PLR0913
                     detail="maximum concurrent runs reached; retry later",
                 )
             runs[run_id] = record
+        if persist_runs is not None:
+            persist_runs()
         thread.start()
         # v1.1.0 Task 16: audit only AFTER the run is actually queued
         # so we don't record requests that bounced earlier in the
@@ -252,7 +266,8 @@ def register(  # noqa: PLR0913
 
     @app.get("/api/run/{run_id}/status", dependencies=[Depends(auth)])
     def run_status(run_id: str) -> Any:
-        record = runs.get(run_id)
+        with runs_lock:
+            record = runs.get(run_id)
         if record is None:
             raise http_exception(status_code=404, detail="unknown run_id")
         return json_response({
@@ -264,7 +279,8 @@ def register(  # noqa: PLR0913
 
     @app.post("/api/run/{run_id}/cancel", dependencies=[Depends(auth)])
     def cancel_run(run_id: str, request: Request) -> Any:
-        record = runs.get(run_id)
+        with runs_lock:
+            record = runs.get(run_id)
         if record is None:
             raise http_exception(status_code=404, detail="unknown run_id")
         record.cancel_token.cancel()
@@ -279,7 +295,8 @@ def register(  # noqa: PLR0913
 
     @app.get("/api/run/{run_id}/events", dependencies=[Depends(auth)])
     async def stream_events(run_id: str) -> Any:
-        record = runs.get(run_id)
+        with runs_lock:
+            record = runs.get(run_id)
         if record is None:
             raise http_exception(status_code=404, detail="unknown run_id")
 

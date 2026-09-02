@@ -32,6 +32,14 @@
       "title": "Codec",
       "type": "string"
     },
+    "dispositions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Dispositions",
+      "type": "array"
+    },
     "index": {
       "title": "Index",
       "type": "integer"
@@ -56,6 +64,18 @@
     "sample_rate": {
       "title": "Sample Rate",
       "type": "integer"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
     }
   },
   "required": [

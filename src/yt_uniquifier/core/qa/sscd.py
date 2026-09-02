@@ -5,9 +5,9 @@ released alongside Meta's VSC2022 dataset; it was used to deduplicate
 the LLaMA training corpus and is the state-of-the-art for "is this
 video a derivative of that one?". Marketing aside, the practical win
 over our chromaprint + pHash baseline is robustness to crops, color
-shifts, and frame-rate retiming — exactly the transforms we apply
-ourselves, so a high SSCD similarity is the strongest available
-predictor that a CID system *will* match.
+shifts, and frame-rate retiming. Here it is only an internal regression
+and self-collision diagnostic for authorized derivatives; it does not
+predict or validate a third-party rights-detection system.
 
 The supported backend is the official TorchScript checkpoint exposed
 by Meta's upstream project.  The upstream project does not publish an
@@ -82,7 +82,7 @@ class SSCDResult:
     """One source/output similarity report.
 
     mean_similarity = arithmetic mean of cosines over paired frames.
-    min_similarity = worst-case frame pair (tightest CID risk).
+    min_similarity = least-similar paired frame (useful for spotting an outlier).
     per_frame = full ordered list, useful for the HTML chart + downstream
     analysis (e.g. "which segment looks most like the source?").
     """
@@ -110,7 +110,11 @@ def _default_model_loader() -> Any:
     cache_path = _ensure_model_cached()
     # eval-mode + grad-disabled inference is enough — these weights are
     # frozen and we never call .backward().
-    model = torch.jit.load(str(cache_path), map_location="cpu")
+    # PyTorch 2.2's Intel-macOS stubs leave ``jit.load`` untyped even
+    # though the returned ScriptModule has the runtime API used below.
+    model = torch.jit.load(  # type: ignore[no-untyped-call]
+        str(cache_path), map_location="cpu"
+    )
     model.eval()
     return model
 

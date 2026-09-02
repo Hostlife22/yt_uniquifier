@@ -47,6 +47,9 @@ def probe(path: Path) -> SourceMeta:
         "error",
         "-show_format",
         "-show_streams",
+        "-show_frames",
+        "-read_intervals",
+        "%+#1",
         "-show_chapters",
         "-of",
         "json",
@@ -76,6 +79,7 @@ def probe(path: Path) -> SourceMeta:
 def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
     fmt = raw.get("format", {})
     streams = raw.get("streams", [])
+    frames = raw.get("frames", [])
     chapters_raw = raw.get("chapters", [])
 
     video: list[VideoStream] = []
@@ -85,7 +89,15 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
     for s in streams:
         kind = s.get("codec_type")
         if kind == "video":
-            video.append(_parse_video(s, fmt))
+            first_frame: dict[str, Any] = next(
+                (
+                    frame for frame in frames
+                    if frame.get("media_type") == "video"
+                    and frame.get("stream_index") == s.get("index")
+                ),
+                {},
+            )
+            video.append(_parse_video(s, fmt, first_frame))
         elif kind == "audio":
             audio.append(_parse_audio(s))
         elif kind == "subtitle":
@@ -110,7 +122,9 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
     )
 
 
-def _parse_video(s: dict[str, Any], fmt: dict[str, Any]) -> VideoStream:
+def _parse_video(
+    s: dict[str, Any], fmt: dict[str, Any], first_frame: dict[str, Any]
+) -> VideoStream:
     transfer = _norm(s.get("color_transfer"), "unknown")
     primaries = _norm(s.get("color_primaries"), "unknown")
     space = _norm(s.get("color_space"), "unknown")
@@ -121,6 +135,13 @@ def _parse_video(s: dict[str, Any], fmt: dict[str, Any]) -> VideoStream:
         pix_fmt = s.get("pix_fmt", "") or ""
         bit_depth = 10 if "10" in pix_fmt else 8
 
+    side_data = [
+        *s.get("side_data_list", []),
+        *first_frame.get("side_data_list", []),
+    ]
+    mastering_display, max_cll, max_fall, dynamic_metadata = _parse_hdr_side_data(
+        side_data,
+    )
     color = HDRInfo(
         is_hdr=transfer in _HDR_TRANSFERS,
         transfer=_coerce_transfer(transfer),
@@ -128,6 +149,10 @@ def _parse_video(s: dict[str, Any], fmt: dict[str, Any]) -> VideoStream:
         space=_coerce_space(space),
         color_range=_coerce_range(crange),
         bit_depth=bit_depth,
+        mastering_display=mastering_display,
+        max_cll=max_cll,
+        max_fall=max_fall,
+        dynamic_metadata=dynamic_metadata,
     )
 
     duration = _to_float(
@@ -150,6 +175,7 @@ def _parse_video(s: dict[str, Any], fmt: dict[str, Any]) -> VideoStream:
 
 
 def _parse_audio(s: dict[str, Any]) -> AudioStream:
+    tags = s.get("tags") or {}
     return AudioStream(
         index=_to_int(s.get("index"), 0),
         codec=s.get("codec_name", "") or "",
@@ -157,19 +183,88 @@ def _parse_audio(s: dict[str, Any]) -> AudioStream:
         channels=_to_int(s.get("channels"), 0),
         channel_layout=s.get("channel_layout"),
         bit_rate=_to_int_or_none(s.get("bit_rate")),
-        language=(s.get("tags") or {}).get("language"),
+        language=tags.get("language"),
+        # MOV/MP4 writes `-metadata:s:a title=...` as the `name` tag.
+        title=tags.get("title") or tags.get("name"),
         is_default=bool(s.get("disposition", {}).get("default", 0)),
+        dispositions=_parse_dispositions(s),
     )
 
 
 def _parse_subtitle(s: dict[str, Any]) -> SubtitleStream:
     codec = s.get("codec_name", "") or ""
+    tags = s.get("tags") or {}
     return SubtitleStream(
         index=_to_int(s.get("index"), 0),
         codec=codec,
-        language=(s.get("tags") or {}).get("language"),
+        language=tags.get("language"),
+        title=tags.get("title") or tags.get("name"),
         is_image_based=codec in _IMAGE_SUB_CODECS,
+        is_default=bool(s.get("disposition", {}).get("default", 0)),
+        dispositions=_parse_dispositions(s),
     )
+
+
+def _parse_dispositions(stream: dict[str, Any]) -> tuple[str, ...]:
+    raw = stream.get("disposition") or {}
+    if not isinstance(raw, dict):
+        return ()
+    return tuple(sorted(
+        str(name) for name, enabled in raw.items()
+        if name != "attached_pic" and enabled == 1
+    ))
+
+
+def _parse_hdr_side_data(
+    entries: list[dict[str, Any]],
+) -> tuple[str | None, int | None, int | None, tuple[str, ...]]:
+    mastering: str | None = None
+    max_cll: int | None = None
+    max_fall: int | None = None
+    dynamic: set[str] = set()
+    for entry in entries:
+        side_type = str(entry.get("side_data_type", ""))
+        side_lower = side_type.lower()
+        if side_lower == "mastering display metadata":
+            keys = (
+                "green_x", "green_y", "blue_x", "blue_y", "red_x", "red_y",
+                "white_point_x", "white_point_y", "max_luminance", "min_luminance",
+            )
+            if all(entry.get(key) is not None for key in keys):
+                values = {
+                    key: _fraction_to_scaled_int(
+                        str(entry[key]), 10_000 if "luminance" in key else 50_000,
+                    )
+                    for key in keys
+                }
+                mastering = (
+                    f"G({values['green_x']},{values['green_y']})"
+                    f"B({values['blue_x']},{values['blue_y']})"
+                    f"R({values['red_x']},{values['red_y']})"
+                    f"WP({values['white_point_x']},{values['white_point_y']})"
+                    f"L({values['max_luminance']},{values['min_luminance']})"
+                )
+        elif side_lower == "content light level metadata":
+            max_cll = _to_int_or_none(entry.get("max_content"))
+            max_fall = _to_int_or_none(entry.get("max_average"))
+        elif (
+            "dynamic hdr" in side_lower
+            or "hdr dynamic" in side_lower
+            or "dolby vision" in side_lower
+            or "dovi" in side_lower
+        ):
+            dynamic.add(side_type)
+    return mastering, max_cll, max_fall, tuple(sorted(dynamic))
+
+
+def _fraction_to_scaled_int(value: str, scale: int) -> int:
+    if "/" not in value:
+        return round(float(value) * scale)
+    numerator, denominator = value.split("/", 1)
+    den = float(denominator)
+    if den == 0:
+        raise ProbeError(f"invalid HDR metadata fraction {value!r}")
+    return round(float(numerator) / den * scale)
 
 
 def _parse_chapter(c: dict[str, Any]) -> Chapter:

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -181,6 +182,53 @@ def _is_nvenc_oom(log_lines: list[str]) -> bool:
 
 _NVENC_OOM_MAX_RETRIES = 1
 _NVENC_OOM_BACKOFF_SEC = 2.0
+_DEFAULT_STALL_TIMEOUT_SEC = 600.0
+_STALL_TIMEOUT_ENV = "YT_UNIQ_STALL_TIMEOUT_SEC"
+_WALL_TIMEOUT_ENV = "YT_UNIQ_WALL_TIMEOUT_SEC"
+_MAX_RETAINED_LOG_CHARS = 2 * 1024 * 1024
+_MAX_RETAINED_LINE_CHARS = 256 * 1024
+
+
+class _WatchdogTimeout(PipelineError):
+    """Internal carrier preserving the merged log when a watchdog fires."""
+
+    def __init__(self, reason: str, log_lines: list[str]) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.log_lines = log_lines
+
+
+def _resolve_timeout(
+    explicit: float | None,
+    *,
+    env_name: str,
+    default: float | None,
+) -> float | None:
+    """Resolve a positive timeout; zero disables it.
+
+    Environment configuration keeps the watchdog available to CLI, GUI, web,
+    and queue workers without duplicating public options across every frontend.
+    Explicit values are primarily useful to embedders and deterministic tests.
+    """
+    value: float | None = explicit
+    if value is None:
+        raw = os.environ.get(env_name)
+        if raw is None or not raw.strip():
+            value = default
+        else:
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise PipelineError(
+                    f"{env_name} must be a non-negative number of seconds; got {raw!r}"
+                ) from exc
+    if value is None or value == 0:
+        return None
+    if value < 0:
+        raise PipelineError(
+            f"{env_name} must be a non-negative number of seconds; got {value}"
+        )
+    return value
 
 
 def run(
@@ -193,6 +241,8 @@ def run(
     log_path: Path | None = None,
     progress_via_stdout: bool = True,
     extra_env: dict[str, str] | None = None,
+    stall_timeout_sec: float | None = None,
+    wall_timeout_sec: float | None = None,
 ) -> RunResult:
     """Execute the BuiltCommand and stream progress events.
 
@@ -207,6 +257,16 @@ def run(
     simpler to reason about.
     """
     on_event = on_event or (lambda _e: None)
+    resolved_stall_timeout = _resolve_timeout(
+        stall_timeout_sec,
+        env_name=_STALL_TIMEOUT_ENV,
+        default=_DEFAULT_STALL_TIMEOUT_SEC,
+    )
+    resolved_wall_timeout = _resolve_timeout(
+        wall_timeout_sec,
+        env_name=_WALL_TIMEOUT_ENV,
+        default=None,
+    )
 
     full_cmd = list(cmd.args)
     if not full_cmd:
@@ -237,15 +297,26 @@ def run(
         proc_env = {**_os.environ, **extra_env}
 
     start = time.monotonic()
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
     for attempt in range(_NVENC_OOM_MAX_RETRIES + 1):
-        rc, log_lines = _run_once(
-            full_cmd, on_event=on_event, cancel_token=cancel_token,
-            pause_token=pause_token, proc_env=proc_env,
-        )
-
-        if log_path is not None:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+        try:
+            rc, log_lines = _run_once(
+                full_cmd, on_event=on_event, cancel_token=cancel_token,
+                pause_token=pause_token, proc_env=proc_env,
+                stall_timeout_sec=resolved_stall_timeout,
+                wall_timeout_sec=resolved_wall_timeout,
+                log_path=log_path,
+                append_log=attempt > 0,
+            )
+        except _WatchdogTimeout as exc:
+            on_event(RunEvent(kind="error", payload={
+                "reason": "timeout",
+                "message": exc.reason,
+            }))
+            log_hint = f" (full log: {log_path})" if log_path is not None else ""
+            raise PipelineError(f"{exc.reason}{log_hint}") from exc
 
         if cancel_token and cancel_token.is_cancelled():
             on_event(RunEvent(kind="error", payload={"reason": "cancelled"}))
@@ -285,6 +356,10 @@ def _run_once(
     cancel_token: CancelToken | None,
     pause_token: PauseToken | None = None,
     proc_env: dict[str, str] | None = None,
+    stall_timeout_sec: float | None = None,
+    wall_timeout_sec: float | None = None,
+    log_path: Path | None = None,
+    append_log: bool = False,
 ) -> tuple[int, list[str]]:
     """One Popen + drain pass. Returns (rc, log_lines).
 
@@ -322,6 +397,16 @@ def _run_once(
             if sys.platform == "win32" else 0
         ),
     )
+    if proc.stdout is None:
+        # Popen above always asks for PIPE. Check before starting the watcher or
+        # opening a log handle. A custom Popen wrapper may still have spawned a
+        # child, so terminate it before rejecting the broken pipe contract.
+        if proc.poll() is None:
+            _terminate(proc)
+        raise PipelineError(
+            "ffmpeg Popen returned no stdout pipe — "
+            "subprocess.PIPE was not honoured by the OS",
+        )
 
     # A5 (v0.5.5): watcher thread for cancel during silent ffmpeg.
     # The main stdout-line loop below also checks cancel_token, but it
@@ -334,8 +419,36 @@ def _run_once(
     # once the main loop signals via stop_watcher.
     stop_watcher = threading.Event()
     watcher_thread: threading.Thread | None = None
-    if cancel_token is not None or pause_token is not None:
+    watchdog_lock = threading.Lock()
+    process_started = time.monotonic()
+    last_activity = process_started
+    timeout_reason: str | None = None
+    watcher_error: BaseException | None = None
+    if (
+        cancel_token is not None
+        or pause_token is not None
+        or stall_timeout_sec is not None
+        or wall_timeout_sec is not None
+    ):
+        def _emit_from_watcher(event: RunEvent) -> bool:
+            """Deliver a watcher event without stranding the child on failure."""
+            nonlocal watcher_error
+            try:
+                on_event(event)
+            except BaseException as exc:
+                with watchdog_lock:
+                    watcher_error = exc
+                # A failing pause notification can leave the child stopped.
+                # SIGCONT is harmless for a running process and makes teardown
+                # deterministic for both POSIX and Windows wrappers.
+                _resume_pid_safe(proc.pid)
+                if proc.poll() is None:
+                    _terminate(proc)
+                return False
+            return True
+
         def _watch() -> None:
+            nonlocal last_activity, timeout_reason
             # Track our last-applied pause state so SIGSTOP / SIGCONT
             # fire only on transitions — repeated SIGSTOPs are harmless
             # but wasteful, and an OS-level "already stopped" race can
@@ -361,17 +474,50 @@ def _run_once(
                 )
                 if want_pause and not suspended and _suspend_pid_safe(proc.pid):
                     suspended = True
-                    on_event(RunEvent(kind="log", payload={
+                    if not _emit_from_watcher(RunEvent(kind="log", payload={
                         "phase": "paused", "pid": proc.pid,
-                    }))
+                    })):
+                        return
                 elif (
                     not want_pause and suspended
                     and _resume_pid_safe(proc.pid)
                 ):
                     suspended = False
-                    on_event(RunEvent(kind="log", payload={
+                    # Time intentionally spent paused is not a silent stall.
+                    with watchdog_lock:
+                        last_activity = time.monotonic()
+                    if not _emit_from_watcher(RunEvent(kind="log", payload={
                         "phase": "resumed", "pid": proc.pid,
-                    }))
+                    })):
+                        return
+                now = time.monotonic()
+                with watchdog_lock:
+                    silent_for = now - last_activity
+                reason: str | None = None
+                if wall_timeout_sec is not None and now - process_started >= wall_timeout_sec:
+                    reason = (
+                        f"ffmpeg wall timeout after {wall_timeout_sec:g} seconds"
+                    )
+                elif (
+                    not want_pause
+                    and stall_timeout_sec is not None
+                    and silent_for >= stall_timeout_sec
+                ):
+                    reason = (
+                        f"ffmpeg stalled with no output for {stall_timeout_sec:g} seconds"
+                    )
+                if reason is not None:
+                    with watchdog_lock:
+                        timeout_reason = reason
+                    if not _emit_from_watcher(RunEvent(kind="log", payload={
+                        "phase": "watchdog", "reason": reason, "pid": proc.pid,
+                    })):
+                        return
+                    if suspended:
+                        _resume_pid_safe(proc.pid)
+                    if proc.poll() is None:
+                        _terminate(proc)
+                    return
                 # Short poll: keep latency low for cancel/pause transitions.
                 # cancel_token.wait honours cancel-set; fall back to a plain
                 # sleep when only pause is wired.
@@ -385,21 +531,31 @@ def _run_once(
         )
         watcher_thread.start()
 
-    log_lines: list[str] = []
-    if proc.stdout is None:
-        # A2 (v0.5.5): explicit guard in place of `assert` so a release
-        # build under PYTHONOPTIMIZE doesn't silently iterate `None`
-        # downstream. Popen above always sets stdout=PIPE so this is
-        # a contract check, not user-reachable, but make it visible.
-        raise PipelineError(
-            "ffmpeg Popen returned no stdout pipe — "
-            "subprocess.PIPE was not honoured by the OS",
+    retained_lines: deque[str] = deque()
+    retained_chars = 0
+    log_handle = None
+    if log_path is not None:
+        log_handle = log_path.open(
+            "a" if append_log else "w", encoding="utf-8", buffering=1,
         )
+
+    def _record_log_line(raw_line: str) -> None:
+        nonlocal retained_chars
+        if log_handle is not None:
+            log_handle.write(raw_line + "\n")
+        retained = raw_line[-_MAX_RETAINED_LINE_CHARS:]
+        retained_lines.append(retained)
+        retained_chars += len(retained)
+        while retained_lines and retained_chars > _MAX_RETAINED_LOG_CHARS:
+            retained_chars -= len(retained_lines.popleft())
 
     block: dict[str, str] = {}
     cancelled_mid_loop = False
+    loop_failed = False
     try:
         for line in proc.stdout:
+            with watchdog_lock:
+                last_activity = time.monotonic()
             if cancel_token and cancel_token.is_cancelled():
                 _terminate(proc)
                 cancelled_mid_loop = True
@@ -410,7 +566,7 @@ def _run_once(
                 continue
             # stderr is merged into stdout so it is drained concurrently with
             # progress and retained for the full log / error diagnosis.
-            log_lines.append(line)
+            _record_log_line(line)
             if "=" not in line:
                 continue
             key, _, value = line.partition("=")
@@ -418,6 +574,11 @@ def _run_once(
             if key == "progress":
                 on_event(RunEvent(kind="progress", payload=dict(block)))
                 block.clear()
+    except BaseException:
+        loop_failed = True
+        if proc.poll() is None:
+            _terminate(proc)
+        raise
     finally:
         # Real subprocesses have stderr=None because it is merged into stdout
         # above, eliminating the two-pipe deadlock.  The conditional drain is
@@ -446,7 +607,13 @@ def _run_once(
             # in tests — surface those instead.
             stderr_data = ""
         if stderr_data:
-            log_lines.extend(stderr_data.splitlines())
+            for stderr_line in stderr_data.splitlines():
+                _record_log_line(stderr_line)
+        stop_watcher.set()
+        if watcher_thread is not None:
+            watcher_thread.join(timeout=2.0)
+        if loop_failed and log_handle is not None:
+            log_handle.close()
 
     # `proc.communicate()` already waited and set returncode; a follow-up
     # `proc.wait()` is redundant and, if the bare `except` above swallowed
@@ -460,10 +627,22 @@ def _run_once(
     # daemon=True so it won't block process shutdown if join times out,
     # but we wait a short window to keep test output clean and to make
     # the thread lifecycle deterministic.
-    stop_watcher.set()
-    if watcher_thread is not None:
-        watcher_thread.join(timeout=2.0)
-    return rc, log_lines
+    with watchdog_lock:
+        watchdog_failure = timeout_reason
+        callback_failure = watcher_error
+    if callback_failure is not None:
+        if log_handle is not None:
+            log_handle.close()
+        raise callback_failure
+    if watchdog_failure is not None:
+        marker = f"[yt_uniquifier watchdog] {watchdog_failure}"
+        _record_log_line(marker)
+        if log_handle is not None:
+            log_handle.close()
+        raise _WatchdogTimeout(watchdog_failure, list(retained_lines))
+    if log_handle is not None:
+        log_handle.close()
+    return rc, list(retained_lines)
 
 
 def _terminate(proc: subprocess.Popen[str], wait_sec: float = 5.0) -> None:

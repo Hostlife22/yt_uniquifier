@@ -6,10 +6,9 @@
 SSCD (Self-Supervised Copy Detection) is the embedding model Meta released
 alongside the [VSC2022](https://ai.meta.com/research/publications/the-2022-video-similarity-challenge/)
 dataset and used to deduplicate the LLaMA training corpus. Its strength is
-robustness to crop, colour jitter, frame-rate retiming and re-encode — the
-exact transforms `yt-uniquifier` applies — so a high SSCD similarity between
-source and output is the strongest single signal that a Content ID system
-will *also* match the two.
+robustness to crop, colour jitter, frame-rate retiming and re-encode. Here it is
+used as an internal regression/self-collision diagnostic for owned or licensed
+content. It does not predict or validate a third-party rights-detection system.
 
 In `yt-uniquifier` SSCD is **opt-in**: the model is not bundled, torch is
 not a hard dependency, and the metric runs only when you ask for it.
@@ -20,8 +19,8 @@ not a hard dependency, and the metric runs only when you ask for it.
 pip install 'yt-uniquifier[ml]'
 ```
 
-This pulls `torch >= 2.1` and `torchvision >= 0.16`. On first use the
-~360 MB `sscd_disc_mixup` TorchScript checkpoint is fetched from the
+This pulls a current Torch/torchvision pair. On first use the
+~94 MB `sscd_disc_mixup` TorchScript checkpoint is fetched from the
 official Meta CDN to `~/.cache/yt_uniquifier/models/` and verified by
 SHA-256. A mismatching cached file is deleted and re-downloaded — the
 hash is pinned in `core/qa/sscd.py::_MODEL_SHA256` so a CDN swap fails
@@ -32,6 +31,13 @@ project does not publish an ONNX checkpoint; a custom backend must be
 provided explicitly through `model_loader`. The upstream SSCD project
 is published under the MIT license; review that license before
 redistributing the checkpoint.
+
+Intel macOS is a constrained exception: PyPI offers only Torch 2.2.2 for that
+architecture, and current vulnerability databases report advisories against that
+line. The project therefore qualifies this combination only for the built-in SSCD
+checkpoint whose exact SHA-256 is pinned above. Do not load untrusted Torch models
+on Intel macOS; use Apple Silicon, Linux, Windows, or an injected non-Torch backend
+when a fully patched ML runtime is required.
 
 If `[ml]` is not installed, every public SSCD entry-point raises
 `PipelineError` with the install hint above. The rest of the tool —
@@ -51,7 +57,7 @@ heatmap alongside the existing VMAF + chromaprint blocks. The JSON
 sidecar gains three flat fields:
 
 * `sscd_mean` — average cosine between matched frame pairs
-* `sscd_min` — worst-case pair (useful for spotting a single failed segment)
+* `sscd_min` — least-similar pair (useful for spotting a single outlier)
 * `sscd_per_frame` — array of cosines aligned 1:1 with the source frame grid
 
 ### Threshold bands
@@ -61,13 +67,13 @@ on the DISC21 evaluation set:
 
 | Mean similarity | Band      | Reading                                    |
 |----------------:|:----------|:-------------------------------------------|
-| ≥ 0.85          | `high`    | Probable duplicate by Meta's CID surrogate |
-| 0.65 – 0.85     | `caution` | Worth manual review                        |
-| < 0.65          | `clean`   | The encode reads as unrelated to the source |
+| ≥ 0.85          | `high`    | High internal source/output similarity       |
+| 0.65 – 0.85     | `caution` | Mixed result; inspect quality and alignment  |
+| < 0.65          | `clean`   | Low similarity; inspect possible quality loss |
 
-For a `yt-uniquifier`-style re-upload the goal is `caution` or lower —
-`clean` usually means the profile was too aggressive and the output
-will look bad even on quick visual inspection.
+These legacy band names are diagnostic labels, not pass/fail goals. A lower score
+can mean destructive transforms, temporal misalignment or a measurement failure;
+it must be read alongside VMAF/SSIM, audio and media-contract results.
 
 ## In calibration
 
@@ -76,15 +82,14 @@ yt-uniq calibrate input.mp4 \
   --base profiles/cid_aware.yaml \
   --out tuned.yaml \
   --metric sscd \
-  --target 0.2
+  --target 0.8
 ```
 
 `--metric sscd` swaps the v0.5 chromaprint predictor for an SSCD-driven
-evaluator. The bisection invariant is preserved: SSCD's mean cosine
-(higher = more similar) is inverted into a 0..1 collision-risk score
-(`1 - mean_similarity`, clamped) so `--target 0.2` keeps its meaning
-across metrics — converging at `target=0.2` requires mean SSCD ≤ 0.8,
-i.e. just below the `caution` band cutoff.
+evaluator. SSCD's clamped mean cosine is passed directly to calibration:
+higher means more similar, and convergence requires `mean_similarity <= target`
+while the independent quality floor also passes. SSCD and Chromaprint targets are
+not interchangeable and must be calibrated separately on an authorized corpus.
 
 The chromaprint default is unchanged: omitting `--metric` runs the v0.7
 loop verbatim, including the `fpcalc` runtime requirement.

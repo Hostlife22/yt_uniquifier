@@ -333,22 +333,22 @@ def test_encoder_args_nvenc_uses_cq_with_delta() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (9) distributed worker strips target_vmaf (smoke test via the helper)
+# (9) distributed worker preserves target_vmaf
 # ---------------------------------------------------------------------------
 
 
-def test_distributed_worker_strips_target_vmaf_from_profile() -> None:
-    """Profile.model_copy update path used by ``cli/cmd_worker.py``
-    to neuter target_vmaf in distributed mode must produce a valid
-    profile with the field cleared but everything else preserved."""
+def test_distributed_worker_source_does_not_strip_target_vmaf() -> None:
+    """Worker mode delegates the same profile to run_full as local mode."""
+    import inspect
+
+    from yt_uniquifier.cli import cmd_worker
+
     prof = Profile(
         name="p",
         target_vmaf=95.0,
         target_vmaf_step=4,
         target_vmaf_max_retries=1,
     )
-    stripped = prof.model_copy(update={"target_vmaf": None})
-    assert stripped.target_vmaf is None
-    # The other knobs stay, harmless once target is None.
-    assert stripped.target_vmaf_step == 4
-    assert stripped.target_vmaf_max_retries == 1
+    source = inspect.getsource(cmd_worker.worker_cmd)
+    assert "target_vmaf" not in source
+    assert prof.target_vmaf == 95.0
