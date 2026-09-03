@@ -336,7 +336,7 @@ class FileQueue:
             fd = os.open(
                 temp,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o660,
+                0o640,
             )
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, sort_keys=True)

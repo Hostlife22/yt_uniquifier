@@ -270,7 +270,11 @@ def test_commit_output_recovers_hard_crash_after_fence(
         worker.commit_output(leased, staged, output)
 
     fences = list((tmp_path / "q" / "done").glob(".commit-*.fence"))
+    journals = list((tmp_path / "q" / ".commits").glob("commit-*.json"))
     assert len(fences) == 1
+    assert len(journals) == 1
+    if os.name != "nt":
+        assert journals[0].stat().st_mode & 0o022 == 0
     assert not (tmp_path / "q" / "done" / "a.mp4").exists()
     assert staged.exists()
     assert not output.exists()

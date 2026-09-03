@@ -87,6 +87,9 @@ qualification on the actual mount before production; that matrix is **NOT VERIFI
 All worker service accounts need a shared UID/GID or ACL granting read/write/delete
 access to the queue, output directory, staged files and `.commits/`. Journal payloads
 contain basenames and a random fence token only, not absolute source/output paths.
+Journal files are immutable after publication and owner-writable/group-readable
+(`0640`, further restricted by `umask`); shared-group recovery deletes their directory
+entries rather than modifying their contents.
 
 ## Per-machine encoder variation
 
