@@ -1,5 +1,7 @@
 name: aggressive
-description: Strong fingerprint shifts. Target VMAF ~85.
+description: >-
+  Experimental high-change preset for authorized content that tolerates visible
+  processing. Not a quality-first default and carries no VMAF guarantee.
 transforms:
   - id: video.crop_resize
     enabled: true

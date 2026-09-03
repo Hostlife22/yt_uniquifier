@@ -96,13 +96,13 @@ Every shipped profile's loaded form is locked by
 
 | Profile | Container | Codec | LUFS | Notes |
 |---|---|---|---|---|
-| `soft` | mp4 | h264 | -14 | Minimal changes; highest quality. |
-| `medium` | mp4 | h264 | -14 | Balanced default. |
+| `soft` | mp4 | h264 | -14 | Conservative authorized derivative; natural-corpus band pending. |
+| `medium` | mp4 | h264 | -14 | Moderate processing; natural-corpus band pending. |
 | `medium_hdr` | mp4 | hevc | -14 | HDR-keep path via `zscale` linear wrap. |
-| `aggressive` | mp4 | h264 | -14 | Strong micro-transforms. |
-| `cid_aware` | mp4 | h264 | -14 | Tuned per Smitelli 2010 / Fojcik & Syga 2025. |
-| `cid_aware_hdr_to_sdr` | mp4 | h264 | -14 | HDR → SDR tonemap path. |
-| `cid_aggressive` | mp4 | h264 | -14 | Maximal divergence at QA cost. |
+| `aggressive` | mp4 | h264 | -14 | Experimental high-change stack; operator review required. |
+| `cid_aware` | mp4 | h264 | -14 | Legacy experimental compatibility profile; no external-system prediction. |
+| `cid_aware_hdr_to_sdr` | mp4 | h264 | -14 | Experimental HDR → SDR derivative path. |
+| `cid_aggressive` | mp4 | h264 | -14 | Legacy maximum-change stack; not quality-first. |
 | `youtube_4k` | mp4 | h264 | -14 | YouTube 4K target geometry + bitrate. |
 | `youtube_1080p` | mp4 | h264 | -14 | YouTube 1080p target. |
 | `youtube_av1` | mp4 | av1 | -14 | YouTube 1080p AV1 target. |

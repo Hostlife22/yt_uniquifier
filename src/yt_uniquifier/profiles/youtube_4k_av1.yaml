@@ -1,11 +1,9 @@
 name: youtube_4k_av1
 description: >-
   YouTube 4K AV1 (3840x2160 16:9) re-encode with soft micro-transforms.
-  AV1 is the recommended ingest codec for 4K+ where H.264's 25 Mb/s
-  cap limits perceived quality.  CPU-bound on libsvtav1 (~3x libx264);
-  prefer av1_nvenc / av1_vulkan / av1_qsv when available.  Target
-  loudness -14 LUFS (YouTube spec).  Crops to 16:9 cover so
-  letterboxed/vertical sources land at full canvas.
+  AV1 size, quality and speed depend on content and encoder; benchmark against an
+  encode-only control first. The explicit 3840x2160 canvas may upscale lower-resolution
+  sources but cannot restore detail; hardware paths require capability validation.
 transforms:
   - id: video.fit_aspect
     enabled: true

@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "Strong fingerprint shifts for content that tolerates more change. Adds a\nsubtle chorus to audio and a -1% playback speed. video.mirror is NOT\nenabled here — opt in manually for B-roll / abstract content.\n",
+  "description": "Legacy experimental maximum-change profile retained for saved-job compatibility.\nIt intentionally alters motion, timing, stereo image and audio texture and is not\na production quality default. Use only with owned/licensed content and mandatory\nvisual/listening QA; external rights-system behavior is not predicted.\n",
   "keep_hdr": false,
   "name": "cid_aggressive",
   "output_container": "mp4",

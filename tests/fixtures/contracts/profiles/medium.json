@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "Balanced uniqueness vs quality. Target VMAF ~92.",
+  "description": "Moderate authorized-derivative preset. More visible processing than soft; experimental until its quality bands are validated on licensed natural content.",
   "keep_hdr": false,
   "name": "medium",
   "output_container": "mp4",

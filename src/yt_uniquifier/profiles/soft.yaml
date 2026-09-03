@@ -1,5 +1,8 @@
 name: soft
-description: Minimal changes. Highest quality, lowest uniqueness.
+description: >-
+  Conservative authorized-derivative preset. Uses mild transforms, but quality
+  must still be verified on the operator's corpus; no VMAF or similarity result
+  is guaranteed.
 transforms:
   - id: video.crop_resize
     enabled: true

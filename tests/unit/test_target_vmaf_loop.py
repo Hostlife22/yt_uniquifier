@@ -3,7 +3,7 @@
 We monkey-patch every external touchpoint (``run_ffmpeg``, the fused/
 legacy command builder, ``_score_segment_vmaf``) so the test exercises
 the loop's bookkeeping (CRF decrement, attempt counter, emitted events,
-distributed-mode strip) WITHOUT forking ffmpeg or invoking libvmaf.
+distributed-mode preservation) WITHOUT forking ffmpeg or invoking libvmaf.
 
 Coverage matrix:
   * target unset → no scoring, no events, no retries
@@ -11,7 +11,7 @@ Coverage matrix:
   * meets after N retries → N+1 events, CRF reduced by N*step
   * exhausted retries → terminal target_vmaf_failed event
   * cancel mid-loop → loop exits without further retries
-  * distributed worker strips target_vmaf from the profile
+  * distributed worker preserves target_vmaf in the profile
 
 Also pin the CRF defaults shared between pipeline + segmenter so a
 silent drift between the two constants (one is mirrored in segmenter
@@ -26,17 +26,24 @@ from typing import Any
 import pytest
 
 from yt_uniquifier.core import pipeline, segmenter
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import (
     EncoderCandidate,
     Plan,
     Profile,
     Segment,
     SourceMeta,
+    TransformConfig,
 )
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 
-def _make_plan(target_vmaf: float | None = None, *, max_retries: int = 2) -> Plan:
+def _make_plan(
+    target_vmaf: float | None = None,
+    *,
+    max_retries: int = 2,
+    transforms: list[TransformConfig] | None = None,
+) -> Plan:
     return Plan(
         source=SourceMeta(
             path=Path("/tmp/in.mp4"), container="mp4",
@@ -47,6 +54,7 @@ def _make_plan(target_vmaf: float | None = None, *, max_retries: int = 2) -> Pla
             target_vmaf=target_vmaf,
             target_vmaf_step=2,
             target_vmaf_max_retries=max_retries,
+            transforms=transforms or [],
         ),
         encoder=EncoderCandidate(
             name="libx264", vendor="x264", codec="h264", works=True,
@@ -69,7 +77,13 @@ def _silence_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub run_ffmpeg + the segment builders so process_video_segment
     never touches a subprocess. ``stream_copy_extract`` is also stubbed
     in case the test toggles the legacy two-fork path."""
-    monkeypatch.setattr(segmenter, "run_ffmpeg", lambda *a, **kw: None)
+    attempt = {"n": 0}
+
+    def _write_encoded(*_args: Any, output: Path, **_kwargs: Any) -> None:
+        attempt["n"] += 1
+        output.write_text(f"attempt-{attempt['n']}")
+
+    monkeypatch.setattr(segmenter, "run_ffmpeg", _write_encoded)
     monkeypatch.setattr(
         segmenter, "build_video_segment_command_fused",
         lambda *a, **kw: pipeline.BuiltCommand(
@@ -111,6 +125,29 @@ def test_no_target_skips_scoring_entirely(
 
     assert scored == []
     assert events == []
+
+
+def test_unregistered_target_fails_even_without_orchestrator_preflight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    encoded: list[int] = []
+    monkeypatch.setattr(
+        segmenter,
+        "run_ffmpeg",
+        lambda *args, **kwargs: encoded.append(1),
+    )
+    plan = _make_plan(
+        target_vmaf=90.0,
+        transforms=[TransformConfig(id="video.crop_resize")],
+    )
+
+    with pytest.raises(
+        PipelineError,
+        match="quality.target_vmaf.unregistered_reference",
+    ):
+        segmenter.process_video_segment(_make_segment(), plan, tmp_path)
+
+    assert encoded == []
 
 
 # ---------------------------------------------------------------------------
@@ -185,14 +222,15 @@ def test_exhausted_retries_emits_failure_event_and_keeps_best(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _silence_ffmpeg(monkeypatch)
-    # Always under-target.
+    # Every retry remains under target and gets worse; attempt 0 must survive.
+    scores = iter([85.0, 82.0, 80.0])
     monkeypatch.setattr(
-        segmenter, "_score_segment_vmaf", lambda *a, **kw: 70.0,
+        segmenter, "_score_segment_vmaf", lambda *a, **kw: next(scores),
     )
     events, on_event = _capture_events()
 
     plan = _make_plan(target_vmaf=90.0, max_retries=2)
-    segmenter.process_video_segment(
+    _, output = segmenter.process_video_segment(
         _make_segment(), plan, tmp_path, on_event=on_event,
     )
 
@@ -204,8 +242,11 @@ def test_exhausted_retries_emits_failure_event_and_keeps_best(
     assert len(failed) == 1
     f = failed[0].payload
     assert f["attempts"] == 3
-    # CRF on the failure event = the LAST attempt's CRF (18 - 2*2 = 14).
-    assert f["crf"] == 14
+    assert f["vmaf"] == 85.0
+    assert f["crf"] == 18
+    assert f["best_attempt"] == 0
+    assert output.read_text() == "attempt-1"
+    assert not list(tmp_path.glob("*.target_vmaf_best.mkv"))
 
 
 # ---------------------------------------------------------------------------

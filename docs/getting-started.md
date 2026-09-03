@@ -22,9 +22,9 @@ The shipped profiles cover most use cases:
 |----------------------|---------------------------------------|
 | `soft`               | Lowest-impact baseline                |
 | `medium`             | Balanced default                      |
-| `aggressive`         | Maximum allowed drift                 |
-| `cid_aware`          | Conservative CID-aware                |
-| `cid_aggressive`     | High-divergence CID-aware             |
+| `aggressive`         | Experimental stronger processing      |
+| `cid_aware`          | Legacy experimental compatibility     |
+| `cid_aggressive`     | Legacy maximum-change compatibility   |
 | `youtube_shorts`     | 9:16 reframe for Shorts (≤ 60 s)      |
 | `youtube_1080p`      | 16:9 1080p                            |
 | `youtube_4k`         | 16:9 4K                               |

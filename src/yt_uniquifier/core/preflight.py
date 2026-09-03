@@ -92,9 +92,173 @@ def preflight(
     findings.extend(_check_subtitle_burnin(plan))
     findings.extend(_check_timeline_rate(plan))
     findings.extend(_check_audio_channel_layout(plan))
+    findings.extend(_check_target_vmaf_reference(plan))
+    findings.extend(_check_quality_risks(plan))
     findings.extend(_check_container_metadata_loss(plan))
     if verify_encoder_capability and source.video:
         findings.extend(_check_encoder_capability(plan))
+    return findings
+
+
+_TARGET_VMAF_NEEDS_REGISTERED_REFERENCE = {
+    "video.crop_resize",
+    "video.fit_aspect",
+    "video.rotate",
+    "video.mirror",
+    "video.blend_b",
+    "video.temporal_jitter",
+    "video.speed",
+    "video.subtitles",
+    "video.tonemap_sdr",
+}
+
+
+def target_vmaf_reference_offenders(plan: Plan) -> list[str]:
+    """Return enabled transforms that invalidate the raw-source VMAF reference."""
+    if plan.profile.target_vmaf is None:
+        return []
+    return sorted({
+        transform.id
+        for transform in plan.profile.transforms
+        if transform.enabled
+        and transform.id in _TARGET_VMAF_NEEDS_REGISTERED_REFERENCE
+    })
+
+
+def _check_target_vmaf_reference(plan: Plan) -> list[PreflightFinding]:
+    """Reject feedback scores that compare different spatial/timeline signals.
+
+    The current per-segment feedback loop can improve encoder CRF, but its VMAF
+    reference is a plain source slice. Geometry, mirroring, overlays, retiming,
+    and tonemapping make that pair unregistered, so another encode cannot make
+    the score converge. Accepting the combination wastes every configured retry
+    and presents a transform-distance number as compression quality.
+    """
+    offenders = target_vmaf_reference_offenders(plan)
+    if not offenders:
+        return []
+    names = ", ".join(offenders)
+    return [PreflightFinding(
+        code="quality.target_vmaf.unregistered_reference",
+        severity="fail",
+        message=(
+            "target_vmaf cannot produce a valid encoder-quality feedback score "
+            f"with unregistered transform(s): {names}."
+        ),
+        suggestion=(
+            "Disable target_vmaf for this profile, or remove these transforms. "
+            "Use registered post-run QA until transform-aligned references are "
+            "implemented."
+        ),
+    )]
+
+
+def _check_quality_risks(plan: Plan) -> list[PreflightFinding]:
+    """Explain combinations that predictably compound generational quality loss."""
+    from pydantic import ValidationError
+
+    from yt_uniquifier.core.transforms.video_fit_aspect import (
+        FitAspectParams,
+        _resolve_dims,
+    )
+
+    findings: list[PreflightFinding] = []
+    enabled = [transform for transform in plan.profile.transforms if transform.enabled]
+    ids = {transform.id for transform in enabled}
+
+    fit = next((item for item in enabled if item.id == "video.fit_aspect"), None)
+    if fit is not None and plan.source.video:
+        try:
+            params = FitAspectParams.model_validate(fit.params)
+        except ValidationError:
+            params = None
+        if params is not None:
+            target_width, target_height = _resolve_dims(params)
+            source_video = plan.source.video[0]
+            width_ratio = target_width / max(source_video.width, 1)
+            height_ratio = target_height / max(source_video.height, 1)
+            scale_factor = (
+                min(width_ratio, height_ratio)
+                if params.mode == "pad_black"
+                else max(width_ratio, height_ratio)
+            )
+            if scale_factor > 1.001:
+                explicit = (
+                    params.target_width is not None or params.target_height is not None
+                )
+                findings.append(PreflightFinding(
+                    code=(
+                        "quality.upscale.explicit"
+                        if explicit
+                        else "quality.upscale.implicit"
+                    ),
+                    severity="info" if explicit else "warn",
+                    message=(
+                        f"video.fit_aspect scales {source_video.width}x{source_video.height} "
+                        f"toward {target_width}x{target_height} ({scale_factor:.2f}x); "
+                        "upscaling adds pixels but cannot restore source detail."
+                    ),
+                    suggestion=(
+                        "Prefer the source resolution for quality-first output. "
+                        "Set target_width/target_height explicitly only when the "
+                        "delivery canvas requires upscaling."
+                    ),
+                ))
+
+    if {"video.fit_aspect", "video.crop_resize"} <= ids:
+        findings.append(PreflightFinding(
+            code="quality.multiple_resample",
+            severity="warn",
+            message=(
+                "video.fit_aspect followed by video.crop_resize performs multiple "
+                "scale/interpolation stages and can soften detail."
+            ),
+            suggestion=(
+                "For quality-first output, keep only the geometry operation required "
+                "by the delivery aspect ratio."
+            ),
+        ))
+    if {"video.noise", "video.subpixel_sharpen"} <= ids:
+        findings.append(PreflightFinding(
+            code="quality.noise_sharpen",
+            severity="warn",
+            message=(
+                "video.subpixel_sharpen amplifies added noise and can increase ringing, "
+                "bitrate, and second-generation compression artifacts."
+            ),
+            suggestion="Disable one of noise or sharpen unless a measured corpus needs both.",
+        ))
+    if "video.temporal_jitter" in ids:
+        findings.append(PreflightFinding(
+            code="quality.temporal_jitter",
+            severity="warn",
+            message=(
+                "video.temporal_jitter intentionally replaces or drops frames and may "
+                "produce visible flashes or motion judder."
+            ),
+            suggestion="Keep it disabled for quality-first and long-form profiles.",
+        ))
+
+    audio_effects = sorted(ids & {
+        "audio.haas_stereo",
+        "audio.compand",
+        "audio.spectral_smear",
+        "audio.reverb",
+        "audio.noise_overlay",
+    })
+    if len(audio_effects) >= 2:
+        findings.append(PreflightFinding(
+            code="quality.audio_effect_stack",
+            severity="warn",
+            message=(
+                "Multiple audible audio effects are enabled together: "
+                f"{', '.join(audio_effects)}. Their artifacts and peak changes compound."
+            ),
+            suggestion=(
+                "Use loudness normalization alone for quality-first output, then add "
+                "one measured effect at a time only when required."
+            ),
+        ))
     return findings
 
 

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import subprocess
 import time
 from bisect import bisect_left
@@ -522,6 +523,20 @@ def process_video_segment(
     target = plan.profile.target_vmaf
     step = plan.profile.target_vmaf_step
     max_retries = plan.profile.target_vmaf_max_retries
+    if target is not None:
+        # Defense in depth for callers such as calibration that deliberately
+        # bypass the orchestration-level preflight. The current scorer uses an
+        # unmodified source slice, so spatial/timeline transforms make its
+        # result unsuitable as encoder-quality feedback.
+        from yt_uniquifier.core.preflight import target_vmaf_reference_offenders
+
+        offenders = target_vmaf_reference_offenders(plan)
+        if offenders:
+            names = ", ".join(offenders)
+            raise PipelineError(
+                "quality.target_vmaf.unregistered_reference: "
+                f"cannot score unregistered transform(s): {names}"
+            )
     crf_override: int | None = None
     src: Path | None = None
     attempt = 0
@@ -574,6 +589,9 @@ def process_video_segment(
 
     if target is not None:
         score = _score_segment_vmaf(segment, plan.source.path, out)
+        best_score = score
+        best_crf = crf_override if crf_override is not None else _DEFAULT_CRF_HINT
+        best_attempt = attempt
         if on_event is not None:
             on_event(RunEvent(
                 kind="target_vmaf",
@@ -585,40 +603,57 @@ def process_video_segment(
                     "target": target,
                 },
             ))
-        while (
-            score is not None
-            and score < target
-            and attempt < max_retries
-        ):
-            attempt += 1
-            current_crf = crf_override if crf_override is not None else _DEFAULT_CRF_HINT
-            crf_override = max(0, current_crf - step)
-            if cancel_token is not None and cancel_token.is_cancelled():
-                break
-            _encode_once()
-            score = _score_segment_vmaf(segment, plan.source.path, out)
-            if on_event is not None:
-                on_event(RunEvent(
-                    kind="target_vmaf",
-                    payload={
-                        "segment": segment.idx,
-                        "vmaf": score,
-                        "crf": crf_override,
-                        "attempt": attempt,
-                        "target": target,
-                    },
-                ))
+        best_candidate = out.with_name(f"{out.stem}.target_vmaf_best{out.suffix}")
+        keep_best = score is not None and score < target and max_retries > 0
+        if keep_best:
+            shutil.copy2(out, best_candidate)
+        try:
+            while (
+                score is not None
+                and score < target
+                and attempt < max_retries
+            ):
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    break
+                attempt += 1
+                current_crf = (
+                    crf_override if crf_override is not None else _DEFAULT_CRF_HINT
+                )
+                crf_override = max(0, current_crf - step)
+                _encode_once()
+                score = _score_segment_vmaf(segment, plan.source.path, out)
+                if score is not None and (best_score is None or score > best_score):
+                    best_score = score
+                    best_crf = crf_override
+                    best_attempt = attempt
+                    if keep_best:
+                        shutil.copy2(out, best_candidate)
+                if on_event is not None:
+                    on_event(RunEvent(
+                        kind="target_vmaf",
+                        payload={
+                            "segment": segment.idx,
+                            "vmaf": score,
+                            "crf": crf_override,
+                            "attempt": attempt,
+                            "target": target,
+                        },
+                    ))
+        finally:
+            if keep_best and best_candidate.exists():
+                best_candidate.replace(out)
         if (
-            score is not None
-            and score < target
+            best_score is not None
+            and best_score < target
             and on_event is not None
         ):
             on_event(RunEvent(
                 kind="target_vmaf_failed",
                 payload={
                     "segment": segment.idx,
-                    "vmaf": score,
-                    "crf": crf_override,
+                    "vmaf": best_score,
+                    "crf": best_crf,
+                    "best_attempt": best_attempt,
                     "attempts": attempt + 1,
                     "target": target,
                 },

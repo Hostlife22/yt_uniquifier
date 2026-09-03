@@ -1,8 +1,8 @@
 name: tiktok_vertical
 description: >-
   TikTok / Reels-style vertical (1080x1920 9:16) — crop-center.
-  -16 LUFS (TikTok target).  Slightly stronger noise + pitch shift than
-  YouTube profiles because TikTok's de-dup is more aggressive.
+  Experimental -16 LUFS delivery preset with stronger noise and pitch processing
+  than the YouTube profiles; verify speech/music quality before publishing.
 transforms:
   - id: video.fit_aspect
     enabled: true

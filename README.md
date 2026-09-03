@@ -30,8 +30,10 @@
 - **Keyframe-aware split** + optional **content-aware scene-cut split**
   → per-segment process → concat demuxer, so multi-hour files survive
   Ctrl+C and resume from `state.json` on the next run.
-- **Per-segment VMAF target** with bounded retry (configurable per
-  profile) — automatic quality floor without manual re-runs.
+- **Per-segment VMAF target** with bounded retry for registered
+  encode-quality comparisons. Preflight rejects geometry, retiming,
+  mirroring, overlays, subtitles and tonemapping until their references
+  can be aligned correctly.
 - **Multi-track audio**, soft subtitles, and chapters passed through.
 - **Real HDR support** via zscale linear-light wrap when keeping HDR,
   or via `video.tonemap_sdr` (hable / reinhard / mobius / aces) when
@@ -40,15 +42,16 @@
   libx264 / libx265) with real test-run on a null source; each candidate
   carries its own `max_parallel` cap.
 - **Per-run variability**: every invocation rolls a fresh `run_seed`,
-  so two runs of the same profile against the same source produce
-  different fingerprints — useful for uploading N distinct variants.
-- **Content-ID-aware QA**: chunked per-4s pHash + audio Jaccard
-  predictor + optional **SSCD** semantic-similarity model
+  making randomized editorial transforms reproducible within one run
+  while allowing deliberately different authorized derivatives.
+- **Similarity diagnostics**: chunked per-4s pHash + audio Jaccard
+  heuristic + optional **SSCD** semantic-similarity model
   ([`docs/sscd.md`](./docs/sscd.md)), optional check against a local
   **corpus** of previous uploads. HTML report with per-chunk heatmap.
-- **Automated calibration** (`yt-uniq calibrate`): bisects profile
-  intensity against a target `match_probability`, with optional SSCD
-  metric for semantic-similarity tuning.
+- **Experimental calibration** (`yt-uniq calibrate`): explores profile
+  intensity against internal self-similarity and quality diagnostics.
+  It is not an external rights-system predictor and is not a production
+  quality optimizer until metric registration is completed.
 - **Distributed batch** via shared filesystem: `yt-uniq worker` drains
   a queue across N machines using atomic POSIX rename leasing —
   **no redis, no database**, just NFSv4 with `noac` (or ZFS / ext4).
@@ -125,22 +128,22 @@ build: see [`docs/install.md`](./docs/install.md).
 
 | Profile                       | Intent                                                                  |
 |-------------------------------|-------------------------------------------------------------------------|
-| `soft.yaml`                   | Minimal change, highest quality. Conservative defaults.                 |
-| `medium.yaml`                 | Balanced. VMAF ≥ 92 on natural footage.                                 |
-| `aggressive.yaml`             | Larger crop / noise / pitch shifts.                                     |
+| `soft.yaml`                   | Conservative authorized-derivative baseline; corpus QA still required. |
+| `medium.yaml`                 | Moderate processing; quality band is not yet corpus-validated.          |
+| `aggressive.yaml`             | Experimental visible/audible processing; mandatory review.              |
 | `medium_hdr.yaml`             | Keep HDR (PQ/HLG) through transforms via zscale wrap.                   |
-| `cid_aware.yaml`              | **CID-divergence calibrated** (default for own re-uploads).             |
-| `cid_aggressive.yaml`         | Stronger shifts: `video.speed 0.99`, `audio.spectral_smear`, etc.       |
-| `cid_aware_hdr_to_sdr.yaml`   | HDR source → SDR output with `cid_aware` transforms.                    |
+| `cid_aware.yaml`              | Legacy experimental high-change preset retained for compatibility.     |
+| `cid_aggressive.yaml`         | Legacy maximum-change preset; not a quality-first default.              |
+| `cid_aware_hdr_to_sdr.yaml`   | Experimental HDR→SDR high-change derivative preset.                    |
 
 **Platform-destination** (v0.7.0 — pre-tuned for upload targets):
 
 | Profile                  | Intent                                                                                              |
 |--------------------------|-----------------------------------------------------------------------------------------------------|
-| `youtube_4k.yaml`        | UHD upload — preserves detail, light CID divergence.                                                |
+| `youtube_4k.yaml`        | UHD delivery canvas; upscaling cannot restore missing source detail.                               |
 | `youtube_1080p.yaml`     | Standard 1080p re-upload baseline.                                                                  |
 | `youtube_shorts.yaml`    | 9:16 short-form, ≤60 s clamp, mobile-optimised loudness.                                            |
-| `tiktok_vertical.yaml`   | 9:16 + TikTok-spec audio loudness + slight motion to avoid duplicate-detect.                        |
+| `tiktok_vertical.yaml`   | 9:16 delivery canvas with platform-oriented audio loudness.                                        |
 | `instagram_reels.yaml`   | 9:16 + Reels loudness target.                                                                       |
 | `instagram_square.yaml`  | 1:1 crop + IG-spec loudness.                                                                        |
 | `linkedin_square.yaml`   | 1:1 crop + LinkedIn auto-play loudness.                                                             |
@@ -156,15 +159,15 @@ yt-uniq probe /path/to/master.mp4 | jq '.video[0]'
 
 # 2. Validate against YouTube targets + HDR sanity.
 yt-uniq preflight /path/to/master.mp4 \
-  --profile src/yt_uniquifier/profiles/cid_aware.yaml
+  --profile src/yt_uniquifier/profiles/soft.yaml
 
 # 3. (Optional) Index a previous upload so the QA report can warn about
-#    self-collisions in Content ID.
+#    accidental self-collisions across authorized derivatives.
 yt-uniq corpus add /path/to/old_upload.mp4
 
 # 4. (Optional) Auto-tune intensity for THIS source.
 yt-uniq calibrate /path/to/master.mp4 \
-  --base src/yt_uniquifier/profiles/cid_aware.yaml \
+  --base src/yt_uniquifier/profiles/medium.yaml \
   --out  /path/to/tuned.yaml \
   --target 0.2
 
@@ -188,14 +191,14 @@ yt-uniq qa /path/to/master.mp4 /path/to/uniq_v1.mp4 --vs-corpus
 
 # 9. Batch a directory on one machine.
 yt-uniq batch /path/to/movies/ \
-  --profile src/yt_uniquifier/profiles/cid_aware.yaml \
+  --profile src/yt_uniquifier/profiles/soft.yaml \
   --out     /path/to/uniq/
 
 # 10. Distributed batch across N machines (NFSv4 + noac mount).
 yt-uniq queue init /shared/queue
 yt-uniq queue add  /shared/queue /shared/sources/*.mp4
 yt-uniq worker /shared/queue \
-  --profile /shared/profiles/cid_aware.yaml \
+  --profile /shared/profiles/soft.yaml \
   --out-dir /shared/uniq/ \
   --workers 4
 
@@ -221,7 +224,7 @@ yt-uniq-web --host 0.0.0.0 --port 8000
 | `yt-uniq run <in> --profile p.yaml --out o.mp4 [--workers N] [--new-variant]` | Single-file run with resume + auto QA               |
 | `yt-uniq batch <dir> --profile p.yaml --out <dir>`         | Sequential directory processing                                       |
 | `yt-uniq qa <in> <out> [--vs-corpus] [--metric sscd]`      | Similarity report + optional corpus / SSCD                            |
-| `yt-uniq calibrate <in> --base p.yaml --out tuned.yaml [--metric sscd]` | Bisect intensity to target self-match                    |
+| `yt-uniq calibrate <in> --base p.yaml --out tuned.yaml [--metric sscd]` | Experimental internal similarity/quality search         |
 | `yt-uniq corpus add/list/remove`                           | Manage local fingerprint corpus                                       |
 | `yt-uniq queue init/add/status/reset`                      | Manage a shared-FS distributed queue                                  |
 | `yt-uniq worker <queue_dir> --profile p.yaml --out-dir D`  | Long-running queue drainer                                            |

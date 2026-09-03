@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "Minimal changes. Highest quality, lowest uniqueness.",
+  "description": "Conservative authorized-derivative preset. Uses mild transforms, but quality must still be verified on the operator's corpus; no VMAF or similarity result is guaranteed.",
   "keep_hdr": false,
   "name": "soft",
   "output_container": "mp4",

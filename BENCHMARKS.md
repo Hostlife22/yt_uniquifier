@@ -154,6 +154,24 @@ reference metric это значение нельзя использовать �
 Текущий QA правильно остаётся RED по своему raw VMAF threshold; это известный P2
 measurement limitation, а не основание скрывать результат.
 
+### Target-VMAF feedback regression — 2026-09-03
+
+На real-FFmpeg 4 s fixture профиль `soft` с `target_vmaf=95`, `step=2`,
+`max_retries=2` выполнил три encode и получил:
+
+| Attempt | CRF | Raw VMAF against plain source slice |
+|---:|---:|---:|
+| 0 | 18 | 11.027963 |
+| 1 | 16 | 11.060123 |
+| 2 | 14 | 11.087632 |
+
+Рост на `0.059669` при шести пунктах CRF доказывает, что loop не управлял
+compression-quality loss: score был dominated намеренным crop/rescale относительно
+непреобразованного reference. После исправления та же комбинация завершается
+`quality.target_vmaf.unregistered_reference` до создания первого `seg_*.mkv`.
+Photometric-only `color_eq`/`noise` path не блокируется. Это safety regression, а не
+новый corpus quality baseline.
+
 ## Отдельные smoke results
 
 | Test | Result |
@@ -210,6 +228,9 @@ test процесс был остановлен после двух completed ke
 4. Создать encode-only control той же codec family/rate-control/pixel format.
 5. Quality metrics считать по temporal/spatial aligned pair и одновременно хранить
    raw end-to-end values.
+   Пока aligned reference отсутствует, не включать `target_vmaf` вместе с geometry,
+   retiming, mirror, overlays, subtitles или tonemapping: preflight намеренно
+   отклоняет такую конфигурацию.
 6. Audio LUFS/true peak/sample count измерять после final mux decode.
 7. Process-tree CPU/RSS/I/O sampling каждые 0.5–1 s; GPU encoder/utilization/VRAM
    через optional vendor adapter.

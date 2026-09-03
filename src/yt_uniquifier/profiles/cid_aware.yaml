@@ -1,61 +1,41 @@
 name: cid_aware
 description: |
-  Calibrated for Content ID divergence on owned / licensed content. Each
-  run randomizes within safe bounds (variability for batch uploads of N
-  variants). Visually clean — no mirror, no speed change.
-
-  v0.3.1: pitch bumped 1.012 → 1.04 (~70 cents, past CID audio threshold)
-  via the formant-preserving rubberband filter (voice stays natural).
-  Adds loudnorm target jitter (±1.5 LUFS) and compand dynamic-range jitter
-  to break audio-envelope fingerprinting.
-
-  v0.3.2: pitch bumped 1.04 → 1.06 (Smitelli 2010 documented ±5% as the CID
-  match boundary — 1.04 was inside the match zone). Adds audio.haas_stereo
-  for mono-compatible cross-channel phase shift.
-
-  v0.4.0: weak defaults bumped (crop 0.04→0.06, color brightness 0.015→0.025,
-  saturation 1.04→1.06, noise 5→8, audio.eq jitter_db 0.2→1.5). placebo
-  audio.resample disabled. New video.subpixel_sharpen for neural-FP work.
+  Legacy experimental high-change profile retained for compatibility with saved
+  jobs. Use only on owned or licensed content after visual/listening review.
+  Similarity metrics are internal regression diagnostics, not a prediction of or
+  guarantee about any external rights-management system.
 transforms:
   - id: video.crop_resize
     enabled: true
-    # v0.4.0: 0.04→0.06, +50 % pHash shift, still <1 % of frame visually.
+    # Six-percent total-axis crop can remove important edge content.
     params: {max_strength: 0.06}
   - id: video.color_eq
     enabled: true
-    # v0.4.0: brightness 0.015→0.025, saturation 1.04→1.06 — pHash robust to
-    # ±5 %; previous values sat at the bottom of useful range.
+    # Stronger than the quality-first profiles; inspect highlights and skin tones.
     params: {brightness: 0.025, contrast: 1.022, gamma: 0.99, saturation: 1.06}
   - id: video.noise
     enabled: true
-    # v0.4.0: strength 5→8 — below 6 sits beneath published pHash eval floor.
+    # Raises bitrate and may amplify second-generation compression artifacts.
     params: {strength: 8}
   - id: video.subpixel_sharpen
     enabled: true
-    # v0.4.0: sub-visible luma sharpen to perturb neural FP embeddings.
-    # Singh et al. arXiv:2511.05399 (2025): neural FP robust to classical
-    # transforms but sensitive to HF texture changes.
+    # Noise plus sharpen can create ringing; preflight reports this combination.
     params: {luma_amount: 0.05, radius: 5}
   - id: video.temporal_jitter
     enabled: true
-    # Fojcik 2025: random frame perturbation drops μAP 60%+ on neural copy
-    # detectors. Conservative defaults (~0.8 jittered frames/sec at 24 fps).
+    # Intentionally alters frames and can create visible flashes or motion judder.
     params: {blackout_prob: 0.033, drop_prob: 0.020, blackout_blur: true}
   - id: audio.pitch_tempo
     enabled: true
-    # rubberband preserves formants. 1.06 is just past Smitelli's ±5%
-    # match-threshold; randomize_within keeps the lower bound at 1.055.
+    # Large pitch shift: review dialogue/music subjectively before delivery.
     params: {pitch: 1.06, randomize_within: 0.005, method: rubberband}
   - id: audio.eq
     enabled: true
-    # v0.4.0: jitter_db 0.2→1.5 — chromaprint robust to <2 dB EQ; previous
-    # value sat at quarter of useful range.
+    # Randomized EQ changes tonal balance; not suitable as a quality default.
     params: {randomize_bands: true, jitter_db: 1.5}
   - id: audio.haas_stereo
     enabled: true
-    # 15 ms is inside the Haas fusion threshold — perceived as one source
-    # in mono; widens stereo image slightly. Breaks cross-channel phase
-    # relationship that audio fingerprinting relies on.
+    # Alters stereo phase and requires stereo input; verify mono compatibility.
     params: {delay_ms: 15.0, randomize_within_ms: 4.0}
   - id: audio.resample
     # v0.4.0: 48000→47999→48000 is 0.002 % — below chromaprint quantization.
@@ -67,7 +47,7 @@ transforms:
     params: {threshold_db: -20.0, ratio: 2.5, randomize_within: true}
   - id: audio.loudnorm
     enabled: true
-    # ±1.5 LUFS jitter per run; loudness footprint stops being a stable signal.
+    # Per-run target variation can deviate from platform loudness guidance.
     params: {target_jitter_lufs: 1.5}
 audio_tracks: first
 keep_hdr: false

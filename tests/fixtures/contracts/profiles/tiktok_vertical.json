@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "TikTok / Reels-style vertical (1080x1920 9:16) — crop-center. -16 LUFS (TikTok target).  Slightly stronger noise + pitch shift than YouTube profiles because TikTok's de-dup is more aggressive.",
+  "description": "TikTok / Reels-style vertical (1080x1920 9:16) — crop-center. Experimental -16 LUFS delivery preset with stronger noise and pitch processing than the YouTube profiles; verify speech/music quality before publishing.",
   "keep_hdr": false,
   "name": "tiktok_vertical",
   "output_container": "mp4",

@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "YouTube 1080p AV1 (1920x1080 16:9) re-encode with balanced micro-transforms. AV1 yields ~30% smaller files than H.264 at equivalent VMAF and is YouTube's preferred codec for ingest as of 2024+.  CPU-bound on libsvtav1 (~3x libx264 wall-clock); set --workers to cpu_count() // 2 or use av1_nvenc / av1_vulkan if available.  Target loudness -14 LUFS (YouTube spec).",
+  "description": "YouTube 1080p AV1 (1920x1080 16:9) re-encode with balanced micro-transforms. AV1 size, quality and speed depend on content and encoder; benchmark against an encode-only control before choosing it. CPU encoders can be substantially slower than libx264; hardware paths require job-specific capability validation.",
   "keep_hdr": false,
   "name": "youtube_av1",
   "output_container": "mp4",

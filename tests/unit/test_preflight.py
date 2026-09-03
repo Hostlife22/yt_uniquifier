@@ -295,6 +295,105 @@ def test_matching_audio_video_playback_rates_pass(tmp_path: Path) -> None:
     assert "timeline.rate_mismatch" not in _codes(findings)
 
 
+@pytest.mark.parametrize(
+    "transform_id",
+    [
+        "video.crop_resize",
+        "video.fit_aspect",
+        "video.rotate",
+        "video.mirror",
+        "video.blend_b",
+        "video.temporal_jitter",
+        "video.speed",
+        "video.subtitles",
+        "video.tonemap_sdr",
+    ],
+)
+def test_target_vmaf_rejects_unregistered_reference_transforms(
+    tmp_path: Path, transform_id: str,
+) -> None:
+    src = _source(tmp_path)
+    params: dict[str, object] = {}
+    if transform_id == "video.fit_aspect":
+        params["target_aspect"] = "16:9"
+    elif transform_id == "video.blend_b":
+        blend = tmp_path / "blend.mp4"
+        blend.touch()
+        params["b_video_path"] = str(blend)
+    elif transform_id == "video.subtitles":
+        subtitles = tmp_path / "captions.srt"
+        subtitles.write_text("1\n00:00:00,000 --> 00:00:01,000\nTest\n")
+        params["subtitle_path"] = str(subtitles)
+    plan = _plan(
+        src,
+        [TransformConfig(id=transform_id, params=params)],
+        target_vmaf=90.0,
+    )
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "quality.target_vmaf.unregistered_reference" in _codes(findings)
+    assert has_fail(findings)
+
+
+def test_target_vmaf_allows_registered_photometric_transforms(tmp_path: Path) -> None:
+    src = _source(tmp_path)
+    plan = _plan(
+        src,
+        [
+            TransformConfig(id="video.color_eq"),
+            TransformConfig(id="video.noise"),
+        ],
+        target_vmaf=80.0,
+    )
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "quality.target_vmaf.unregistered_reference" not in _codes(findings)
+    assert not has_fail(findings)
+
+
+def test_quality_risk_warnings_cover_harmful_combinations(tmp_path: Path) -> None:
+    src = _source(tmp_path, width=640, height=360)
+    plan = _plan(src, [
+        TransformConfig(id="video.fit_aspect", params={"target_aspect": "16:9"}),
+        TransformConfig(id="video.crop_resize"),
+        TransformConfig(id="video.noise"),
+        TransformConfig(id="video.subpixel_sharpen"),
+        TransformConfig(id="video.temporal_jitter"),
+        TransformConfig(id="audio.spectral_smear"),
+        TransformConfig(id="audio.reverb"),
+        TransformConfig(id="audio.noise_overlay"),
+    ])
+
+    findings = preflight(src, plan, plan.encoder)
+    codes = _codes(findings)
+
+    assert "quality.upscale.implicit" in codes
+    assert "quality.multiple_resample" in codes
+    assert "quality.noise_sharpen" in codes
+    assert "quality.temporal_jitter" in codes
+    assert "quality.audio_effect_stack" in codes
+    assert not has_fail(findings)
+
+
+def test_explicit_upscale_is_reported_but_not_rejected(tmp_path: Path) -> None:
+    src = _source(tmp_path, width=1280, height=720)
+    plan = _plan(src, [TransformConfig(
+        id="video.fit_aspect",
+        params={
+            "target_aspect": "16:9",
+            "target_width": 3840,
+            "target_height": 2160,
+        },
+    )])
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "quality.upscale.explicit" in _codes(findings)
+    assert not has_fail(findings)
+
+
 def test_audio_sr_44k_warns(tmp_path: Path) -> None:
     """44.1k is in the allowed set, so no warning."""
     src = _source(tmp_path, audio_sr=44100)

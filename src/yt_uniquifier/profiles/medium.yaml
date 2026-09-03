@@ -1,5 +1,7 @@
 name: medium
-description: Balanced uniqueness vs quality. Target VMAF ~92.
+description: >-
+  Moderate authorized-derivative preset. More visible processing than soft;
+  experimental until its quality bands are validated on licensed natural content.
 transforms:
   - id: video.crop_resize
     enabled: true

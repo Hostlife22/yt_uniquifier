@@ -48,8 +48,8 @@ couldn't compute.
 | Field | Source | Range | Meaning |
 |---|---|---|---|
 | `audio_fp_similarity` | chromaprint Jaccard over uint32 sub-fingerprints | 0..1 | **strict set-equality** check; see warning below |
-| **`audio_fp_hamming_per_frame`** | chromaprint XOR + popcount, paired frames, mean | 0..32 bits | bit-level distance; **the canonical CID-divergence audio KPI** |
-| **`audio_fp_match_confidence`** | `1 - hamming_per_frame / 32` | 0..1 | normalized; lower = better for divergence |
+| **`audio_fp_hamming_per_frame`** | chromaprint XOR + popcount, paired frames, mean | 0..32 bits | internal bit-level distance diagnostic |
+| **`audio_fp_match_confidence`** | `1 - hamming_per_frame / 32` | 0..1 | legacy normalized similarity heuristic; not calibrated confidence |
 
 > **About `audio_fp_similarity`.** This is Jaccard
 > (`|A ∩ B| / |A ∪ B|`) over the 32-bit chromaprint sub-fingerprint
@@ -64,17 +64,15 @@ couldn't compute.
 > `_similarity` field is retained for schema compatibility with
 > downstream tools that already key on it.
 
-The two Hamming fields are the **explicit CID-divergence audio KPI**
-introduced in v0.3.3 (Spec 16). Heuristic interpretation per chromaprint
-literature:
+The Hamming fields were introduced in v0.3.3. Their legacy names are retained for
+schema compatibility, but they are not a rights-system KPI or probability. Interpret
+them only relative to a pinned source/corpus and tool version:
 
 | `hamming_per_frame` (bits) | Interpretation |
 |---|---|
-| ≤ 5  | high-confidence match — CID will hit |
-| 6–14 | match |
-| 15–25 | uncertain |
-| ≥ 26 | no match |
-| ≥ 30 | high-confidence non-match |
+| lower value | paired Chromaprint codes are closer for this experiment |
+| middle value | result needs listening and timeline/alignment checks |
+| higher value | paired codes differ more; this says nothing about audibility or an external system |
 
 ### SSCD semantic similarity (v0.8.0 R4, opt-in)
 
@@ -97,32 +95,40 @@ score 0.92 on SSCD while pHash similarity drops below 0.50.
 
 ### Target-VMAF retry events (v0.8.0 R5)
 
-Profiles that set `target_vmaf` trigger an in-flight retry when a
-segment lands below the target. The QA report records every retry:
+Profiles that set `target_vmaf` trigger an in-flight retry when a segment lands below
+the target. These are live `RunEvent` records consumed by CLI/GUI callers; they are
+not currently embedded in `QAReport` JSON:
 
 | Field | Meaning |
 |---|---|
-| `target_vmaf_events[].segment_idx` | which segment retried |
-| `target_vmaf_events[].attempt`     | 1-based retry attempt |
-| `target_vmaf_events[].measured`    | VMAF actually measured |
-| `target_vmaf_events[].target`      | the `target_vmaf` from the profile |
-| `target_vmaf_events[].action`      | `retry` (re-encoded with crf--) or `accept` (hit cap, kept best-so-far) |
+| `target_vmaf.payload.segment` | which segment was scored |
+| `target_vmaf.payload.attempt` | zero-based encode attempt (`0` is the initial encode) |
+| `target_vmaf.payload.vmaf` | VMAF actually measured, or null if scoring failed |
+| `target_vmaf.payload.crf` | software-equivalent quality hint for the attempt |
+| `target_vmaf.payload.target` | configured target |
+| `target_vmaf_failed.payload.best_attempt` | zero-based attempt retained on disk |
 
-`target_vmaf_max_retries` caps the loop; when the cap is hit the
-report includes a `notes[]` entry naming the segment.
+`target_vmaf_max_retries` caps the loop. After exhaustion, the segmenter keeps the
+highest-scoring encoded candidate and emits `target_vmaf_failed`.
 
-### Content-ID prediction (v0.2+)
+The feedback scorer currently uses a plain source slice. Preflight rejects
+`target_vmaf` with geometry, retiming, mirroring, overlays, subtitles or tonemapping
+because that pair is not registered and CRF retries cannot make the score converge.
+Use the loop only on a registered encode-quality path.
+
+### Legacy self-similarity heuristic (v0.2+)
 
 | Field | Source | Meaning |
 |---|---|---|
-| `cid_predict_self` | weighted (visual + audio) Jaccard over 4-second chunks | 0..1; predicted self-match probability |
+| `cid_predict_self` | weighted (visual + audio) Jaccard over 4-second chunks | 0..1; internal self-similarity heuristic (legacy field name) |
 | `weakest_chunk_sec` | argmax over `chunk_similarities[].combined` | (start_sec, end_sec) of the chunk most similar to source |
 | `chunk_similarities[]` | per 4-sec chunk: `{start_sec, end_sec, visual, audio, combined}` | drives the HTML heatmap |
 | `corpus_matches[]` | comparison against `yt-uniq corpus` entries | `{id, path, visual, audio, combined}` for files above threshold |
 
-`cid_predict_self` is a **predictor**, not a guarantee. Real Content ID is
-a black box; we model it as the convex combination of the chunk-level
-visual and audio similarities, weighted to match published behaviour.
+`cid_predict_self` is neither a probability nor a predictor of YouTube Content ID.
+It is a project-specific convex combination useful for regression comparisons and
+self-collision diagnostics on owned or licensed derivatives. Do not use it as a
+production pass/fail gate without corpus-specific validation.
 
 ### Notes + verdict
 
@@ -139,24 +145,18 @@ on a rule of thumb:
 - **red**: phash > 0.97 (barely unique) or phash < 0.50 (unrecognisable)
        or VMAF < 75
 
-## KPI targets
+This is a legacy UI heuristic, not a production acceptance verdict: it mixes
+similarity and quality and uses raw, potentially unregistered metrics. The mandatory
+media contract remains authoritative; Phase 5 will separate the banner into
+correctness, registered quality and diagnostic similarity states.
 
-These are the **targets** post-v0.3.3 for owned-content CID divergence
-(profile `cid_aware`). Actual values vary by source — synthetic test
-patterns score very differently from natural footage.
+## Acceptance targets
 
-| KPI | Target | Notes |
-|---|---|---|
-| `phash_similarity` (mean) | `< 0.75` | lower is more visually distinct |
-| `phash_similarity` (worst 4-sec chunk) | `< 0.80` | matters more than the mean — CID locks on the closest chunk |
-| `vmaf_mean` | `≥ 85` | trade-off floor; below this is noticeably degraded |
-| `ssim_mean` | `≥ 0.90` | optional sanity check |
-| `audio_fp_hamming_per_frame` | `≥ 15 bits` | "uncertain match" zone or better |
-| `audio_fp_match_confidence` | `≤ 0.55` | mirror of the above |
-| `cid_predict_self` | `< 0.20` | predicted self-match probability |
-
-`cid_aggressive` typically pushes pHash down to ~0.60 and Hamming up to
-~22 bits, at the cost of VMAF ≈ 78–82 and audible noise overlay.
+The project does not publish universal thresholds for pHash, Chromaprint, SSCD or
+the legacy `cid_predict_self` field. They vary with sampling, alignment and content,
+and they do not measure perceptual quality. Production acceptance starts with media
+correctness, then uses registered VMAF/SSIM/PSNR and audio LUFS/true peak against a
+licensed natural-content corpus. Similarity fields remain separate diagnostics.
 
 ## Reading the heatmap
 
@@ -165,19 +165,17 @@ The HTML report renders one cell per 4-sec chunk, coloured by
 
 ```
 [█][█][░][▒][█][▒][░][░][█][▒]  ← time →
- green = unique     red = similar to source
+ green = lower heuristic similarity     red = higher heuristic similarity
 ```
 
-The **weakest chunk** (red-most) is the one most at risk of matching.
-Common patterns:
+The legacy **weakest chunk** field points to the highest-similarity sample. Common
+diagnostic patterns:
 
-- A single red chunk near the start → likely a logo / title card where
-  random transforms barely move things. Calibrate or trim the leading
-  sequence.
-- A red **band** in the middle → static talking-head section; bump up
-  `video.crop_resize.max_strength` and `video.temporal_jitter.blackout_prob`.
-- All cells in the green zone → done; profile is well-calibrated for this
-  source.
+- A single high-similarity chunk near the start often corresponds to a logo/title
+  card and should be checked for correct temporal pairing.
+- A continuous band can indicate static content or a sampling/alignment issue.
+- Low similarity does not mean good quality; inspect registered quality metrics and
+  the rendered media independently.
 
 ## Standalone QA (no encode)
 
@@ -209,10 +207,10 @@ from pathlib import Path
 
 qa = json.loads(Path("out.mp4.qa.json").read_text())
 
-# Audio CID divergence KPI:
+# Internal audio fingerprint diagnostic:
 hp = qa.get("audio_fp_hamming_per_frame")
-if hp is not None and hp < 15:
-    print(f"Audio FP too close: {hp:.1f} bits/frame (want ≥ 15)")
+if hp is not None:
+    print(f"Audio FP distance: {hp:.1f} bits/frame")
 
 # Worst chunk:
 worst = max(c["combined"] for c in qa["chunk_similarities"])

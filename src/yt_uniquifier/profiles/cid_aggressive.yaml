@@ -1,8 +1,9 @@
 name: cid_aggressive
 description: |
-  Strong fingerprint shifts for content that tolerates more change. Adds a
-  subtle chorus to audio and a -1% playback speed. video.mirror is NOT
-  enabled here — opt in manually for B-roll / abstract content.
+  Legacy experimental maximum-change profile retained for saved-job compatibility.
+  It intentionally alters motion, timing, stereo image and audio texture and is not
+  a production quality default. Use only with owned/licensed content and mandatory
+  visual/listening QA; external rights-system behavior is not predicted.
 transforms:
   - id: video.crop_resize
     enabled: true
@@ -10,8 +11,7 @@ transforms:
     params: {max_strength: 0.09}
   - id: video.color_eq
     enabled: true
-    # v0.4.0: aggressive bumps — VMAF may dip to ~80 but pHash worst chunk
-    # should clear 0.75.
+    # Strong photometric change; no corpus-backed VMAF band is claimed.
     params: {brightness: 0.035, contrast: 1.04, gamma: 0.99, saturation: 1.07}
   - id: video.noise
     enabled: true
@@ -19,24 +19,22 @@ transforms:
     params: {strength: 10}
   - id: video.subpixel_sharpen
     enabled: true
-    # v0.4.0: stronger than cid_aware (0.05) — still below visual threshold
-    # per ITU-R BT.500 contrast sensitivity on natural content.
+    # Strong sharpen combined with noise can produce ringing and bitrate growth.
     params: {luma_amount: 0.10, radius: 5}
   - id: video.temporal_jitter
     enabled: true
-    # Stronger jitter on aggressive — closer to Fojcik's reference 1/10 rate.
+    # Intentionally drops/replaces frames and may visibly damage motion.
     params: {blackout_prob: 0.050, drop_prob: 0.040, blackout_blur: true}
   - id: video.speed
     enabled: true
     params: {rate: 0.99}
   - id: audio.pitch_tempo
     enabled: true
-    # rubberband for natural voice. 1.08 = comfortable margin past Smitelli
-    # ±5% match-zone (1.04–1.05). randomize_within keeps lower bound ≥ 1.07.
+    # Large pitch change; Rubber Band reduces but does not eliminate artifacts.
     params: {pitch: 1.08, tempo: 0.99, randomize_within: 0.01, method: rubberband}
   - id: audio.eq
     enabled: true
-    # v0.4.0: jitter_db 0.2→2.0 — at the edge of chromaprint's robustness floor.
+    # Randomized EQ can materially change dialogue and music balance.
     params:
       bands: [[110.0, -0.9], [3800.0, 0.6]]
       randomize_bands: true
@@ -62,8 +60,7 @@ transforms:
     params: {intensity: 0.10, style: small_room}
   - id: audio.noise_overlay
     enabled: true
-    # -12 dB ≈ 25 % amplitude mix — past Smitelli's "audible" threshold,
-    # well below the 45 % destructive boundary. Pink noise = smoother spectrum.
+    # -12 dB noise is clearly audible and unsuitable for quality-first delivery.
     params: {noise_db: -12.0, color: pink, randomize_within_db: 2.0}
   - id: audio.loudnorm
     enabled: true

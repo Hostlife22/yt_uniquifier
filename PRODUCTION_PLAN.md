@@ -11,8 +11,10 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
   web guards; correctness-aware QA verdict; job-specific encoder probe; runner
   watchdog/bounded logs; persistent bounded web lifecycle; per-process queue IDs.
-- **PARTIAL:** 2.1, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
-  platform/HDR/channel matrix ещё не подтверждена.
+- **PARTIAL:** 2.1, 2.3, 3.1–3.3 — безопасные локальные fixes выполнены, profile
+  claims исправлены, destructive stacks помечены experimental, а invalid
+  `target_vmaf` feedback и основные compound-quality risks выявляются preflight;
+  licensed natural corpus и полный compatibility graph ещё не готовы.
 - **PARTIAL 2.4:** software CFR 23.976–60 и multi-segment VFR сохраняют decoded
   frames/cadence; non-zero input start PTS normalized; synthetic sparse long-GOP
   seams and A/V impulses verified; hardware cadence и natural long-GOP corpus pending.
@@ -234,6 +236,9 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** profile snapshots/bounds/incompatible combinations plus corpus quality gates.
 - **Risk:** similarity diagnostics change; not a production correctness concern.
 - **Expected result:** predictable VMAF/size/speed bands backed by reports.
+- **Status:** partial — неподтверждённые VMAF/size claims удалены, `aggressive` и
+  legacy high-change profiles явно помечены experimental. Parameter tuning и
+  acceptance bands ожидают licensed natural corpus.
 
 ### 3.2 Audio quality and multichannel policy
 
@@ -260,6 +265,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** pairwise known conflicts and property tests.
 - **Risk:** third-party plugin compatibility; unknown capability means conservative warn.
 - **Expected result:** bad graph rejected before expensive encode.
+- **Status:** partial — preflight сообщает implicit/explicit upscale, duplicate
+  resampling, noise+sharpen, temporal jitter и compound audio effects. Invalid
+  target-VMAF feedback для geometry/timeline/overlay/tonemap отклоняется также
+  внутри segmenter, даже если orchestration preflight отключён.
 
 ## Phase 4 — Performance
 

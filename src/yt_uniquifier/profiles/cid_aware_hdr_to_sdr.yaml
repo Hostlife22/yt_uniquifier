@@ -1,8 +1,9 @@
 name: cid_aware_hdr_to_sdr
 description: |
-  HDR (PQ / HLG) source → SDR (BT.709) output with CID-divergence transforms
-  applied AFTER tonemapping. Output is plain yuv420p; any libx264-class
-  encoder works.
+  Experimental HDR (PQ / HLG) → SDR (BT.709) derivative profile for owned or
+  licensed content. High-change transforms run after tonemapping; inspect the
+  result against a licensed natural HDR corpus. No external matching behavior
+  or VMAF band is guaranteed.
 
   IMPORTANT: video.tonemap_sdr must be the first enabled transform — the
   preflight emits a warning if not. All subsequent transforms then operate

@@ -19,8 +19,8 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-03):
 
 - Ruff и strict mypy: passed (`156` source files).
-- Canonical `make check`: `1428 passed, 2 skipped` на полностью установленном
-  optional environment (`20:18`, финальный повтор после timeline fixes).
+- Canonical `make check`: `1442 passed, 2 skipped` на полностью установленном
+  optional environment (`20:49`, финальный Phase 3 quality повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -44,6 +44,11 @@ Post-fix verification на этом хосте (обновлено 2026-09-03):
   ошибочных 9 секунд. Старый absolute-PTS keyframe cache инвалидируется schema v2.
 - Scene planning теперь ограничивает static/sparse gaps target duration и не
   создаёт sub-minimum edge segments; changed segment topology invalidates resume.
+- Phase 3 quality regression: 4 s `soft` + `target_vmaf=95` давал raw VMAF
+  `11.027963 → 11.060123 → 11.087632` при CRF `18 → 16 → 14`: retries меняли
+  compression, но не могли исправить несовмещённую геометрию. Preflight и direct
+  segment runtime теперь отклоняют такой feedback до первого encode; photometric-only
+  paths остаются доступны.
 
 Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
 corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube
@@ -318,7 +323,8 @@ notes.
 - `sscd_min` назван «tightest risk», хотя риск высокой похожести задаёт максимум;
   verdict SSCD вообще игнорирует.
 - pHash/VMAF/SSIM без geometric/temporal registration смешивают эффект намеренного
-  crop/rotate с encode quality. В benchmark raw VMAF упал до 3.12.
+  crop/rotate с encode quality. В benchmark raw VMAF упал до 3.12. Для
+  `target_vmaf` это теперь fail-fast; post-run aligned QA остаётся незавершённым.
 - Chromaprint ограничен первыми 600 s, затем его fingerprint искусственно делится по
   всей длительности фильма. Jaccard через sets теряет временной порядок.
 - SSCD default 32 pair вызывает отдельный FFmpeg process на каждый frame каждой

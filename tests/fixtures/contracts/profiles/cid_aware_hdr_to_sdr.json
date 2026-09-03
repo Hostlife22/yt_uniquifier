@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "HDR (PQ / HLG) source → SDR (BT.709) output with CID-divergence transforms\napplied AFTER tonemapping. Output is plain yuv420p; any libx264-class\nencoder works.\n\nIMPORTANT: video.tonemap_sdr must be the first enabled transform — the\npreflight emits a warning if not. All subsequent transforms then operate\nin plain pixel-space (no zscale roundtrips needed).\n",
+  "description": "Experimental HDR (PQ / HLG) → SDR (BT.709) derivative profile for owned or\nlicensed content. High-change transforms run after tonemapping; inspect the\nresult against a licensed natural HDR corpus. No external matching behavior\nor VMAF band is guaranteed.\n\nIMPORTANT: video.tonemap_sdr must be the first enabled transform — the\npreflight emits a warning if not. All subsequent transforms then operate\nin plain pixel-space (no zscale roundtrips needed).\n",
   "keep_hdr": false,
   "name": "cid_aware_hdr_to_sdr",
   "output_container": "mp4",

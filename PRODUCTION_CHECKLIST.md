@@ -82,9 +82,14 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Total crop semantics match documented maximum.
 - [ ] No-upscale default enforced unless user explicitly requests upscale.
 - [ ] Transform compatibility graph rejects invalid HDR/audio/time/container combos.
+- [x] Invalid `target_vmaf` feedback rejects unregistered geometry/time/overlay/
+      tonemap paths before encoding, including direct segmenter calls.
+- [x] Preflight surfaces implicit/explicit upscale, multiple resampling,
+      noise+sharpen, temporal jitter and compound audio-effect quality risks.
 - [ ] Each transform has purpose, quality/size/time data and expected ordering.
 - [ ] Quality-first profile has corpus-backed VMAF/SSIM/PSNR/LUFS/size/time bands.
-- [ ] Aggressive/destructive profiles are opt-in and visibly marked experimental.
+- [x] Aggressive/destructive profiles are opt-in by explicit profile selection and
+      visibly marked experimental; corpus-backed safe operating bounds remain pending.
 - [ ] Random seeds reproduce exact plan/commands/output semantics on resume.
 
 ## 7. Encoders
@@ -189,7 +194,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1415 passed, 2 expected skips.
+- [x] Fully provisioned `make check`: 1442 passed, 2 expected skips (Phase 3 quality
+      guardrails, profile contracts and real-FFmpeg regression included).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

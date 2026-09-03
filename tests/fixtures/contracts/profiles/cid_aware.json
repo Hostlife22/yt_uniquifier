@@ -1,6 +1,6 @@
 {
   "audio_tracks": "first",
-  "description": "Calibrated for Content ID divergence on owned / licensed content. Each\nrun randomizes within safe bounds (variability for batch uploads of N\nvariants). Visually clean — no mirror, no speed change.\n\nv0.3.1: pitch bumped 1.012 → 1.04 (~70 cents, past CID audio threshold)\nvia the formant-preserving rubberband filter (voice stays natural).\nAdds loudnorm target jitter (±1.5 LUFS) and compand dynamic-range jitter\nto break audio-envelope fingerprinting.\n\nv0.3.2: pitch bumped 1.04 → 1.06 (Smitelli 2010 documented ±5% as the CID\nmatch boundary — 1.04 was inside the match zone). Adds audio.haas_stereo\nfor mono-compatible cross-channel phase shift.\n\nv0.4.0: weak defaults bumped (crop 0.04→0.06, color brightness 0.015→0.025,\nsaturation 1.04→1.06, noise 5→8, audio.eq jitter_db 0.2→1.5). placebo\naudio.resample disabled. New video.subpixel_sharpen for neural-FP work.\n",
+  "description": "Legacy experimental high-change profile retained for compatibility with saved\njobs. Use only on owned or licensed content after visual/listening review.\nSimilarity metrics are internal regression diagnostics, not a prediction of or\nguarantee about any external rights-management system.\n",
   "keep_hdr": false,
   "name": "cid_aware",
   "output_container": "mp4",

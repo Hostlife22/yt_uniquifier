@@ -14,6 +14,15 @@ the last tag.
 
 ### Fixed
 
+- Reject `target_vmaf` feedback when geometry, retiming, mirroring, overlays,
+  subtitles, or tonemapping make the plain source reference unregistered; enforce
+  the guard in both preflight and direct segment processing before the first encode.
+- Preserve the highest-scoring encoded candidate across bounded `target_vmaf`
+  retries instead of accidentally leaving a worse final attempt on disk.
+- Surface quality risks from implicit/explicit upscaling, multiple resampling,
+  noise-plus-sharpen, temporal jitter, and compound audible-effect stacks.
+- Replace unverified profile VMAF/size/platform-matching claims with measured-status
+  language, and mark legacy high-change profiles as experimental compatibility paths.
 - Normalize keyframe timestamps by the selected video stream's start time so
   MP4/MOV edit lists and transport-stream offsets cannot produce out-of-range
   segment plans; invalidate old absolute-PTS keyframe caches with schema v2.

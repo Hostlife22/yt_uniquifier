@@ -62,29 +62,28 @@ lower CRF (decrement = `target_vmaf_step`, cap = `target_vmaf_max_retries`)
 until VMAF clears the target or retries are exhausted. The default CRF
 hint is 18 (x264/x265) — hardware encoders preserve the delta and map to
 their native quality knob (nvenc `cq`, qsv `global_quality`, amf `qp`).
+The highest-scoring encoded candidate is retained when retries are exhausted.
 
-**Distributed-mode warning**: the feedback loop is single-host only. A
-profile shipped to a `yt-uniq worker` queue logs a yellow warning and
-strips `target_vmaf` before running, to avoid invalidating per-segment
-lease accounting.
+Distributed workers preserve `target_vmaf` and execute the same bounded per-segment
+loop. The unregistered-reference guard still applies before encoding.
 
 See [seed_strategy.md](./seed_strategy.md) for what each strategy means
 and when to pick which.
 
 ## Shipped profiles
 
-### Quality / divergence family
+### Quality / high-change family
 
-| Name | Aim | VMAF target* |
-|------|-----|--------------|
-| `soft.yaml`                 | minimal change, highest quality                                        | ~96 |
-| `medium.yaml`               | balanced (v0.1 default recommendation)                                  | ~92 |
-| `aggressive.yaml`           | strong fingerprint shifts                                              | ~85 |
-| `legacy_ab.yaml`            | frame-blend with a B-video (port of legacy AB)                          | varies |
-| `medium_hdr.yaml`           | medium transforms with HDR (PQ/HLG) preserved via zscale linear wrap    | ~90 |
-| `cid_aware.yaml`            | **v0.3.3 default for CID divergence on own content** — past Smitelli ±5 % pitch zone, temporal jitter, divergent per-segment seeds, Haas widener | ~85 |
-| `cid_aggressive.yaml`       | cid_aware + stronger shifts + parametric noise overlay + reverb        | ~80 |
-| `cid_aware_hdr_to_sdr.yaml` | HDR source → SDR output, cid_aware audio/video transforms              | ~80 |
+| Name | Aim | Validation status |
+|------|-----|-------------------|
+| `soft.yaml`                 | conservative authorized derivative                               | synthetic correctness passed; natural quality band pending |
+| `medium.yaml`               | moderate processing                                               | natural quality band pending |
+| `aggressive.yaml`           | experimental visible/audible processing                           | mandatory operator review |
+| `legacy_ab.yaml`            | frame blend with a licensed B-video                               | experimental |
+| `medium_hdr.yaml`           | preserve PQ/HLG through a linear-light transform wrapper          | synthetic HDR passed; natural HDR pending |
+| `cid_aware.yaml`            | legacy experimental high-change saved-job compatibility           | no external-system prediction |
+| `cid_aggressive.yaml`       | legacy maximum-change compatibility                               | not quality-first; mandatory review |
+| `cid_aware_hdr_to_sdr.yaml` | experimental HDR→SDR derivative                                   | synthetic tonemap passed; natural HDR pending |
 
 ### Platform-destination family (v0.7.0)
 
@@ -107,21 +106,22 @@ square frames — no manual ffmpeg recipe needed.
 
 ### AV1 family (v1.2.0 Task 22)
 
-AV1 yields ~30 % smaller files than H.264 at equivalent VMAF and is
-YouTube's preferred ingest codec for 2024+. Profiles target `av1` —
+AV1 is available as an optional delivery codec. Actual size, quality and encode
+time depend on the encoder and source and must be benchmarked; no fixed percentage
+or platform preference is assumed. Profiles target `av1` —
 `pick_encoder()` chooses, in order: `av1_vulkan` (cross-vendor, FFmpeg
 8.0+), `av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_videotoolbox` (hardware),
-`libsvtav1` (CPU, ~3× libx264 wall-clock), `libaom-av1` (CPU,
-reference, ~10× libx264). The CRF scale is 0..63 with default 30
-(≈ libx264 CRF 18 quality); `target_vmaf` retries map onto the same
-scale automatically.
+`libsvtav1` (CPU), `libaom-av1` (CPU reference). The CRF scale is 0..63
+with default 30; quality and speed are not numerically equivalent to an
+x264 CRF and require a content-specific control benchmark.
 
 | Name | Target | Mode | Resolution | LUFS | Notes |
 |------|--------|------|------------|------|-------|
-| `youtube_av1.yaml`       | 16:9 | `crop`     | 1920×1080 | -14 | YouTube AV1 1080p — prefer hardware AV1 when available |
-| `youtube_4k_av1.yaml`    | 16:9 | `crop`     | 3840×2160 | -14 | YouTube AV1 4K — uncaps perceived quality vs H.264's 25 Mb/s ceiling |
+| `youtube_av1.yaml`       | 16:9 | `crop`     | 1920×1080 | -14 | AV1 1080p; benchmark selected encoder against control |
+| `youtube_4k_av1.yaml`    | 16:9 | `crop`     | 3840×2160 | -14 | AV1 4K; explicit canvas may upscale smaller sources |
 
-\* indicative on natural footage; synthetic test patterns score much lower.
+The project does not publish profile VMAF bands until a licensed natural-content
+corpus has been run with temporally and spatially registered references.
 
 ⚠️ HDR + `pad_blur`: `gblur` is not HDR-aware. If the source is HDR
 (PQ/HLG) you must either tonemap to SDR first (chain after
@@ -155,13 +155,13 @@ encode time.
 
 ## Writing your own profile
 
-1. Copy `cid_aware.yaml` (for CID-divergence use cases) or `medium.yaml`
-   (for general quality-first re-encoding) to `my_profile.yaml`.
+1. Copy `soft.yaml` or `medium.yaml` to `my_profile.yaml`. Start from the
+   smallest transform set that meets the authorized derivative's editorial need.
 2. Toggle `enabled` and tune `params`.
 3. Run with `yt-uniq run --profile my_profile.yaml …`.
-4. Inspect `<output>.qa.html` — adjust intensities until you hit the band
-   `pHash similarity ∈ (0.55, 0.85]` (for CID divergence) or `(0.85, 0.97]`
-   (for quality-first) and `VMAF ≥ 85` (on natural footage).
+4. Inspect `<output>.qa.html`. Correctness must pass before interpreting quality
+   or internal similarity diagnostics. Do not apply a VMAF threshold until the
+   source/output pair has valid temporal and spatial registration.
 5. For automatic intensity tuning, use `yt-uniq calibrate` — see
    [calibrate.md](./calibrate.md).
 
@@ -176,7 +176,7 @@ encode time.
 
 ## Performance notes
 
-- **`audio.pitch_tempo` with `method: rubberband`** (used by `cid_aware`
+- **`audio.pitch_tempo` with `method: rubberband`** (used by legacy `cid_aware`
   and `cid_aggressive`) is ~5–10× slower than the default
   `asetrate+atempo` path. Rubberband preserves formants — important for
   voice content — but on long clips the audio chain can run 10–20×
@@ -217,14 +217,14 @@ audio pass dominates wall time. Choice is intentional:
 - **Keep `rubberband`** when formant preservation matters more than
   throughput — voice content, podcasts, talking-head video, anything
   where the "chipmunk effect" of `asetrate` would be unacceptable.
-  Smitelli 2010 places the CID match boundary at ±5% pitch, so the
-  pitch shift in `cid_*` profiles is intentionally past that threshold.
+- **Do not select a pitch amount from an external matching threshold.** Use only
+  an editorially justified amount and verify speech/music quality by listening.
 - **Switch to `asetrate`** when throughput matters more — B-roll,
   music-only content, batch jobs of large files. Edit the profile YAML
   in place or save a derived copy:
 
 ```yaml
-# my_fast_cid.yaml — cid_aware with the asetrate fallback
+# my_fast_derivative.yaml — legacy profile with the asetrate fallback
 transforms:
   - id: audio.pitch_tempo
     enabled: true
@@ -240,33 +240,19 @@ WARN is informational — encode still proceeds. Implemented in
 _(Measured 2026-05-31 on `evermeet.cx` ffmpeg 8.1.1 + librubberband
 on an 8-core Mac. Re-measure annually or after an ffmpeg major bump.)_
 
-## Why these defaults? — Smitelli citation
+## Legacy high-change profiles
 
-The `cid_aware` and `cid_aggressive` profiles target YouTube Content ID
-audio matching thresholds documented in Scott Smitelli's 2010 controlled
-experiment ("Fun with YouTube's Audio Content ID System",
-<https://www.scottsmitelli.com/articles/youtube-audio-content-id>).
+`cid_aware` and `cid_aggressive` keep their identifiers so existing saved jobs and
+automation continue to load. They are experimental effect stacks, not production
+quality defaults. Their pitch, temporal, phase, dynamics and noise operations can
+be visible or audible and require review on owned or licensed content.
 
-Verified historical thresholds:
+pHash, audio similarity and SSCD results are used only for regression diagnostics
+and self-collision analysis. They do not predict or guarantee the behavior of
+YouTube Content ID or another external rights-management system.
 
-| Transform | CID matches | CID does not match |
-|---|---|---|
-| pitch shift | within ±5 % (1.04–1.05 was inside match zone) | ≥ ±6 % |
-| white-noise overlay | mix < 45 % | mix ≥ 45 % |
-| stereo phase | identity | full inversion |
-
-**v0.3.2 defaults that follow from these thresholds:**
-
-- `cid_aware.audio.pitch_tempo.pitch = 1.06` — just past the documented
-  +5 % match boundary; `randomize_within: 0.005` keeps the lower bound at
-  1.055 (still on the no-match side).
-- `cid_aggressive.audio.pitch_tempo.pitch = 1.08` — comfortable margin.
-- `audio.haas_stereo` with `delay_ms ≈ 15 ms` (cid_aware) or
-  `delay_ms ≈ 25 ms` (cid_aggressive) — mono-compatible variant of stereo
-  phase inversion; shifts cross-channel phase without the audible artefact
-  of true inversion.
-
-These are not guarantees, only verified historical thresholds. YouTube's
-CID has been updated since 2010; community reports suggest the thresholds
-sit in roughly the same ranges, but the only authoritative test is an
-upload against your own corpus.
+When `target_vmaf` is combined with geometry, retiming, mirroring, overlays,
+subtitles or tonemapping, preflight now fails with
+`quality.target_vmaf.unregistered_reference`. The current feedback loop can tune
+encoder CRF only; it cannot interpret an unregistered source/output comparison as
+compression quality. Run registered post-processing QA instead.
