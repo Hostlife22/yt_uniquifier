@@ -813,6 +813,32 @@ def test_upload_limit_rejects_oversized_content_length(
     assert "1024" in body["detail"]
 
 
+def test_run_rate_limit_rejects_request_after_budget(
+    web_dirs: tuple[Path, Path, Path],
+    tmp_path: Path,
+) -> None:
+    work, output, profiles = web_dirs
+    config = WebConfig(
+        work_dir=work,
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+        rate_limit_run="2/minute",
+    )
+    client = TestClient(build_app(config))
+    payload = {
+        "input_path": str(tmp_path / "missing.mp4"),
+        "profile_path": str(profiles / "missing.yaml"),
+    }
+
+    assert client.post("/api/run", json=payload).status_code == 404
+    assert client.post("/api/run", json=payload).status_code == 404
+    limited = client.post("/api/run", json=payload)
+
+    assert limited.status_code == 429
+    assert "rate limit exceeded" in limited.json()["detail"]
+
+
 def test_audit_log_records_run_start_and_cancel(
     tmp_path: Path, web_dirs: tuple[Path, Path, Path],
     monkeypatch: pytest.MonkeyPatch,

@@ -100,6 +100,21 @@ published output/state/audio artifact is not overwritten by a failed attempt.
 
 ## Validation and acceptance
 
+Run the registered seam diagnostic against the retained checkpoint boundaries:
+
+```bash
+.venv/bin/python tools/seam_test.py "$OUTPUT" \
+  --source "$SOURCE" \
+  --work-dir "$WORK" \
+  --frames 8 --search-frames 2 --threshold 0.005
+```
+
+The tool compares decoded source/output windows, resets local PTS and searches only
+the configured bounded frame offset. A missing metric is a failure, not a silent
+skip. Geometry/retiming transforms can still require the plan-aware transformed
+reference proposed in RFC #12; retain raw output and do not relax the threshold to
+hide an unregistered pair.
+
 For every output retain `state.json`, FFmpeg logs, source/output SHA-256, QA JSON and a
 benchmark result. Acceptance is correctness-first:
 

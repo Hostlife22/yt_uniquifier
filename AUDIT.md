@@ -16,11 +16,11 @@ probe, bounded streaming FFmpeg logs и stall watchdog, static HDR10 metadata
 contract, stream title/disposition validation, bounded persistent web run store и
 уникальная identity каждого queue-worker процесса.
 
-Post-fix verification на этом хосте (обновлено 2026-09-03):
+Post-fix verification на этом хосте (обновлено 2026-09-04):
 
 - Ruff и strict mypy: passed (`158` source files).
-- Canonical `make check`: `1539 passed, 2 skipped` на полностью установленном
-  optional environment (`21:22`, temporal/SSCD production повтор).
+- Canonical `make check`: `1578 passed, 2 skipped` на полностью установленном
+  optional environment (`10:22`, Phase 6 hardening повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -49,6 +49,18 @@ Post-fix verification на этом хосте (обновлено 2026-09-03):
   compression, но не могли исправить несовмещённую геометрию. Preflight и direct
   segment runtime теперь отклоняют такой feedback до первого encode; photometric-only
   paths остаются доступны.
+- Phase 6 hardening: seam tool теперь сравнивает matching source/output windows с
+  bounded frame registration; clean fixture проходит, искусственный boundary defect
+  отклоняется. Real audio matrix подтверждает сохранение 1/2/6 channels для семи
+  effects и обработку 44.1/48/96 kHz с explicit 48 kHz output.
+- Web body limit закрывает missing/malformed/negative/duplicate/conflicting/oversize
+  Content-Length до route handling; direct SlowAPI, path/symlink, concurrency и
+  plugin sandbox tests проходят. Gitleaks не нашёл секретов в 324 commits и ~174 MB
+  build artifacts; `actionlint` проходит для всех workflows.
+- Generic `libaom-av1` discovery больше не даёт false timeout: probe-only speed args
+  сократили локальный smoke с 15.63 s до 1.5–1.9 s без изменения production argv.
+- No-upscale и registered QA contract changes вынесены в RFC #11/#12; их код не
+  вносится до обязательного comment window и maintainer decision.
 
 Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
 corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube
@@ -468,7 +480,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
 | macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
 | 16 profile loads | Passed |
-| Encoder detection | H264/HEVC VideoToolbox, x264/x265, SVT-AV1 available locally |
+| Encoder detection | H264/HEVC VideoToolbox, x264/x265, SVT-AV1 and libaom available locally |
 | Chapters smoke | Post-fix passed: 2 → 2 chapters |
 | No-audio-transform smoke | Post-fix passed: selected source audio preserved |
 | MKV/SRT→MP4 smoke | Post-fix passed: SubRip → mov_text |
@@ -480,7 +492,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | 44.1 kHz `soft` smoke | Post-fix passed: 29.991 s, 48 kHz, -14.0 LUFS |
 | Timestamp smoke | Post-fix passed: video starts 0.000 s, 752/752 frames |
 | Basic VFR smoke | Passed: 90 frames and average FPS preserved |
-| HDR10 keep/HDR→SDR | Passed with FFmpeg-full `zscale`; HLG/natural corpus NOT VERIFIED |
+| HDR10 keep/HDR→SDR/HLG | Passed with FFmpeg-full `zscale`; natural corpus NOT VERIFIED |
 | Rubberband path | Passed: real FFmpeg integration |
 | SSCD real model | Passed: self-similarity and unrelated-content discrimination |
 | 4K | AV1 profile plus H.264/HEVC VideoToolbox smoke passed |

@@ -244,7 +244,8 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** predictable VMAF/size/speed bands backed by reports.
 - **Status:** partial — неподтверждённые VMAF/size claims удалены, `aggressive` и
   legacy high-change profiles явно помечены experimental. Parameter tuning и
-  acceptance bands ожидают licensed natural corpus.
+  acceptance bands ожидают licensed natural corpus. No-upscale contract описан в
+  RFC #11 (`specs/26-no-upscale-policy-rfc.md`) и ожидает обязательного согласования.
 
 ### 3.2 Audio quality and multichannel policy
 
@@ -258,6 +259,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** mono/stereo/5.1, downmix correlation, speech/music, clipping/true peak.
 - **Risk:** platform/container codec compatibility.
 - **Expected result:** audible quality and channel intent preserved.
+- **Status:** topology matrix complete locally — Haas fail-closed для mono/5.1;
+  EQ/compand/smear/reverb/noise/pitch/resample сохраняют 1/2/6 channels, а
+  44.1/48/96 kHz inputs дают explicit 48 kHz output. Natural listening, phase,
+  true-peak и clipping corpus остаются `NOT VERIFIED`.
 
 ### 3.3 Filter compatibility graph
 
@@ -370,7 +375,8 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   sources. SSCD midpoint random-access is batched into one cancellable runner process
   per file. Low VMAF is no longer hidden by SSIM and pHash can no longer substitute
   for unavailable quality evidence. Spatial/temporal registration, shared video
-  feature cache and SSCD coverage confidence remain open.
+  feature cache and SSCD coverage confidence описаны в RFC #12
+  (`specs/27-registered-qa-metrics-rfc.md`) и ожидают обязательного согласования.
 
 ### 5.3 Calibration v2 within current engine
 
@@ -450,6 +456,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   multi-instance status aggregation and NFS/network-partition qualification remain
   open.
 
+  Web body-size enforcement now fails closed for missing, malformed, negative,
+  duplicate, transfer-encoding-conflicting and over-limit Content-Length;
+  path/symlink, SlowAPI rate and cross-process admission regressions pass. Production
+  docs require TLS reverse proxy and no longer show raw Basic Auth on an untrusted bind.
+
 ### 6.3 Supply chain/release
 
 - **Files:** workflows, Docker, pyinstaller, dependency locks, security docs.
@@ -462,6 +473,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** install wheel/app/container, invoke ffmpeg/ffprobe, process canonical clip.
 - **Risk:** reducing matrix must not reduce platform coverage.
 - **Expected result:** faster feedback with stronger release evidence.
+- **Status:** release workflow already creates CycloneDX plus per-asset keyless cosign
+  bundles; Docker buildx emits SBOM/provenance and signs the digest. `actionlint`
+  passes after shell-safe artifact discovery fixes. Gitleaks found no secrets in 324
+  commits or ~174 MB local artifacts. Actual v1.4 tag artifacts remain `NOT VERIFIED`
+  until the release workflow runs.
 
 ## Phase 7 — Documentation
 

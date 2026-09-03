@@ -375,10 +375,14 @@ def _probe_one(name: str, vendor: EncoderVendor, codec: EncoderKind) -> EncoderC
         "yuv420p",
         "-c:v",
         name,
-        "-f",
-        "null",
-        "-",
     ]
+    # The reference libaom defaults are intentionally compression-heavy: on the
+    # Intel Mac qualification host this eight-frame discovery clip took 15.63 s,
+    # just beyond the 15 s availability timeout. Probe-only speed knobs make the
+    # same capability check finish in ~1.5 s without changing production argv.
+    if vendor == "libaom":
+        cmd.extend(["-cpu-used", "8", "-row-mt", "1"])
+    cmd.extend(["-f", "null", "-"])
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     except subprocess.TimeoutExpired:

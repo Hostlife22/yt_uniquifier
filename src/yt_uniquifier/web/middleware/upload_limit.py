@@ -50,23 +50,45 @@ class ContentLengthLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Pull Content-Length header. Starlette stores headers as
-        # a list of (bytes, bytes) tuples (lowercase name). Absent or
-        # malformed Content-Length is delegated to Starlette — the
-        # cap only fires on values clearly above the ceiling.
-        headers = dict(scope.get("headers") or [])
-        cl_raw = headers.get(b"content-length")
-        if cl_raw is None:
-            await self.app(scope, receive, send)
+        # Pull Content-Length header. Starlette stores headers as a list of
+        # (bytes, bytes) tuples (lowercase name). A body-bearing request without
+        # a valid non-negative length is rejected: delegating chunked/malformed
+        # bodies would let callers bypass the configured hard ceiling.
+        raw_headers = list(scope.get("headers") or [])
+        length_values = [
+            value for name, value in raw_headers if name.lower() == b"content-length"
+        ]
+        if len(length_values) > 1:
+            await self._reject(
+                send, status=400, detail="Multiple Content-Length headers are not allowed.",
+            )
             return
-        try:
-            cl = int(cl_raw)
-        except ValueError:
-            await self.app(scope, receive, send)
+        if not length_values:
+            await self._reject(
+                send,
+                status=411,
+                detail="Content-Length is required for body-bearing requests.",
+            )
             return
+        if any(name.lower() == b"transfer-encoding" for name, _value in raw_headers):
+            await self._reject(
+                send,
+                status=400,
+                detail="Transfer-Encoding and Content-Length cannot be combined.",
+            )
+            return
+        cl_raw = length_values[0]
+        if cl_raw.startswith(b"-"):
+            await self._reject(send, status=400, detail="Content-Length cannot be negative.")
+            return
+        if not cl_raw.isdigit():
+            await self._reject(send, status=400, detail="Content-Length is invalid.")
+            return
+        cl = int(cl_raw)
         if cl > self.max_bytes:
             await self._reject(
                 send,
+                status=413,
                 detail=(
                     f"Request body is {cl} bytes; the ceiling is "
                     f"{self.max_bytes} bytes."
@@ -79,13 +101,14 @@ class ContentLengthLimitMiddleware:
         self,
         send: Callable[[dict[str, Any]], Awaitable[None]],
         *,
+        status: int,
         detail: str,
     ) -> None:
         import json
         body = json.dumps({"detail": detail}).encode("utf-8")
         await send({
             "type": "http.response.start",
-            "status": 413,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode("ascii")),

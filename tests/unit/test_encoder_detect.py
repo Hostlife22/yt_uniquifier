@@ -169,6 +169,25 @@ def test_failed_probe_records_error(
     assert all(c.error for c in failed)
 
 
+def test_libaom_discovery_uses_probe_only_speed_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def fake_run(
+        cmd: list[str], **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        captured.extend(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(enc_mod.subprocess, "run", fake_run)
+    candidate = enc_mod._probe_one("libaom-av1", "libaom", "av1")
+
+    assert candidate.works is True
+    assert captured[captured.index("-cpu-used") + 1] == "8"
+    assert captured[captured.index("-row-mt") + 1] == "1"
+
+
 def test_pick_encoder_prefers_explicit() -> None:
     cands = [
         EncoderCandidate(name="h264_nvenc", vendor="nvenc", codec="h264", works=True),

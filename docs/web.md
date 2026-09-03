@@ -38,9 +38,12 @@ CLI flags (env-var equivalents in parentheses):
 
 Basic auth is gated on both `YT_UNIQ_WEB_USER` and
 `YT_UNIQ_WEB_PASS` being set. With neither set, the server is
-LAN-trust mode and treats every request as authenticated — fine
-for `127.0.0.1` binds, dangerous on `0.0.0.0`. Set both before
-exposing the port.
+LAN-trust mode and treats every request as authenticated — acceptable
+only for a loopback bind or an isolated container network. HTTP Basic
+credentials are merely encoded, not encrypted: never publish this service
+directly on an untrusted network. Terminate TLS and enforce access policy at
+a reverse proxy; bind the host-side port to `127.0.0.1` when the proxy runs
+on the same host.
 
 ## Docker
 
@@ -78,16 +81,20 @@ docker run --rm -p 127.0.0.1:8080:8080 \
     yt-uniquifier:1.4.0
 ```
 
-### Run (with basic auth)
+### Run behind a same-host TLS reverse proxy
 
 ```bash
-docker run --rm -p 0.0.0.0:8080:8080 \
+docker run --rm -p 127.0.0.1:8080:8080 \
     -e YT_UNIQ_WEB_USER=alice \
     -e YT_UNIQ_WEB_PASS=hunter2 \
     -v $PWD/input:/data/input:ro \
     -v $PWD/output:/data/output \
     yt-uniquifier:1.4.0
 ```
+
+Configure nginx, Caddy, or Traefik to expose an `https://` endpoint and proxy
+to `http://127.0.0.1:8080`. Do not change the publish address to `0.0.0.0`
+unless an external firewall provides an equivalent trusted boundary.
 
 ### docker-compose
 
@@ -132,6 +139,11 @@ when it is unset, the server uses its current working directory as the
 root. Set `--input-root /data/input` explicitly for NAS/container mounts.
 Path-traversal attempts against
 `/api/qa/...` are rejected with **400 / 404**.
+Body-bearing requests require exactly one valid non-negative `Content-Length`;
+missing, malformed, negative, duplicate, or over-limit lengths are rejected before
+route handling. Combining `Transfer-Encoding` with `Content-Length` is also rejected.
+Chunked request bodies are intentionally unsupported so they cannot bypass the
+configured hard ceiling.
 
 Terminal run status is stored atomically in `<work-dir>/web_runs.json` and
 survives process restarts. A run that was `pending` or `running` when the server

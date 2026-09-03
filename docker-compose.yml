@@ -3,9 +3,9 @@
 # Copy this file to your NAS, edit the volume paths, then:
 #   docker compose up -d
 #
-# Auth is OFF by default for LAN-trust scenarios. Set
-# YT_UNIQ_WEB_USER + YT_UNIQ_WEB_PASS env vars (or an .env file
-# alongside this compose) to flip basic auth on.
+# Auth is OFF by default because the host port is loopback-only. Keep this
+# boundary and expose it through a TLS reverse proxy. Basic Auth alone does not
+# encrypt credentials; never publish the container directly on an untrusted LAN.
 
 services:
   yt-uniquifier:

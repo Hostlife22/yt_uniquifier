@@ -119,7 +119,7 @@ jobs:
       - name: Verify bundle artefact exists (Linux / Windows)
         if: runner.os != 'macOS'
         run: |
-          ls dist/yt-uniq-gui/ | head -5
+          find dist/yt-uniq-gui -mindepth 1 -maxdepth 1 -print -quit
 
       - name: Ad-hoc codesign .app bundle (macOS)
         # v1.1.0 Task 8: ad-hoc signature stabilises the bundle across
@@ -186,7 +186,7 @@ jobs:
         run: |
           mkdir -p dist
           tar -xzf _dl/yt-uniq-gui-Linux.tar.gz -C dist
-          ls dist/yt-uniq-gui/ | head -5
+          find dist/yt-uniq-gui -mindepth 1 -maxdepth 1 -print -quit
 
       - name: Fetch static ffmpeg (johnvansickle release)
         # AppImage must be portable across glibc versions, so the
@@ -227,7 +227,8 @@ jobs:
           export YT_UNIQUIFIER_VERSION="${YT_UNIQUIFIER_VERSION#v}"
           appimage-builder --recipe installers/linux/AppImageBuilder.yml \
             --skip-test
-          ls -la *.AppImage *.AppImage.zsync
+          find . -maxdepth 1 -type f \
+            \( -name '*.AppImage' -o -name '*.AppImage.zsync' \) -print
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v7
@@ -329,7 +330,8 @@ jobs:
         # public github.com/Hostlife22 identity regexp.
         run: |
           cd _release
-          for asset in *; do
+          for asset_path in ./*; do
+            asset="${asset_path#./}"
             # Skip already-generated bundles to keep re-runs idempotent.
             case "$asset" in
               *.cosign.bundle) continue ;;
@@ -339,7 +341,7 @@ jobs:
               --bundle "$asset.cosign.bundle" \
               "$asset"
           done
-          ls -la *.cosign.bundle
+          find . -maxdepth 1 -type f -name '*.cosign.bundle' -print
 
       - name: Publish DRAFT release
         # Draft so a human reviews before users see it. softprops is the

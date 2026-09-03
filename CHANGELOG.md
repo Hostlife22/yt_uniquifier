@@ -14,6 +14,15 @@ the last tag.
 
 ### Fixed
 
+- Make encoder discovery probe `libaom-av1` with fast probe-only settings so a
+  working reference encoder is not hidden by the generic 15-second timeout.
+- Compare concat seam windows against the matching source interval with bounded
+  temporal registration instead of comparing the output to a shifted copy of itself.
+- Reject missing, malformed, negative, duplicated, conflicting, and oversized
+  `Content-Length` values before body-bearing web requests reach route handlers.
+- Verify mono/stereo/5.1 audio-transform topology and 44.1/48/96 kHz inputs with a
+  real-FFmpeg regression matrix.
+
 - Make `video.temporal_jitter` use presentation-time buckets instead of a nominal
   24-FPS frame counter, with a bounded deterministic permutation that remains valid
   at the maximum configured blackout/drop probabilities.

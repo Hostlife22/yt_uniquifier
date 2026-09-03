@@ -65,13 +65,15 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 5. Audio
 
-- [ ] Mono, stereo, 5.1 and multiple tracks.
-- [ ] 44.1, 48 and 96 kHz inputs.
+- [x] Mono, stereo and 5.1 topology passes the real transform matrix; multiple
+      selected tracks pass the full container pipeline.
+- [x] 44.1, 48 and 96 kHz pitch inputs pass and produce explicit 48 kHz output.
 - [ ] AAC/Opus and advertised passthrough codecs per target container.
 - [x] Loudnorm measures actual pre-loudnorm chain, not original source.
 - [x] Final integrated loudness within ±0.5 LU on regression fixture; corpus pending.
 - [ ] Linear/dynamic normalization mode recorded; fallback not silent.
-- [ ] Haas rejects non-stereo; reverb/compand/noise/pitch layout matrix pending.
+- [x] Haas rejects non-stereo; reverb/compand/noise/pitch plus EQ/smear/resample
+      preserve mono, stereo and 5.1 channel counts in the real FFmpeg matrix.
 - [ ] Boundary impulse/listening tests find no click, gap, repeat or accumulated shift.
 
 ## 6. Profiles and transforms
@@ -169,7 +171,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 11. Web and distributed operation
 
-- [ ] Production bind requires documented auth/TLS/reverse-proxy policy.
+- [x] Production exposure policy requires TLS/reverse proxy; Basic Auth over raw
+      untrusted HTTP is explicitly prohibited and examples retain loopback publish.
 - [ ] Global bounded resource scheduler and CPU/GPU/disk quotas enabled; the web
       run-count cap, encoder slots and estimated disk-byte reservations are shared
       across local processes. Exact per-device routing, hard filesystem quotas,
@@ -191,18 +194,23 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1539 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `82.25%` (`1433 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1578 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `82.23%` (`1446 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
-- [ ] Plugin manifest/sandbox/allowlist tests pass; pre-import disable documented.
-- [ ] Web path traversal/symlink/upload size/rate/concurrency tests pass.
-- [ ] Container runs non-root with read-only/minimal permissions where practical.
-- [ ] Wheel/GUI/container SBOM and signatures generated and verified.
-- [ ] Secrets absent from repository, logs and built artifacts.
+- [x] Plugin manifest/sandbox/allowlist tests pass; pre-import disable documented.
+- [x] Web path traversal/symlink/body-size/rate/concurrency tests pass; missing,
+      malformed, negative, duplicate, transfer-encoding-conflicting and over-limit
+      Content-Length fail closed.
+- [x] Container runs as non-root UID 1000; input mount is documented read-only.
+- [ ] Release workflow generates CycloneDX plus cosign bundles, and Docker buildx
+      emits SBOM/provenance and keyless signature; verify the actual tagged v1.4
+      artifacts after the release workflow runs.
+- [x] Gitleaks found no secrets across 324 commits or the local ~174 MB build
+      artifacts; persisted web errors remain redacted by regression tests.
 
 ## 13. Build and release commands
 
@@ -210,7 +218,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1539 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1578 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -224,9 +232,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1539 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1578 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 82.25% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 82.23% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
