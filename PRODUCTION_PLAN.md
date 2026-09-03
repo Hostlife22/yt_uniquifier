@@ -10,7 +10,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
   web guards; correctness-aware QA verdict; job-specific encoder probe; runner
-  watchdog/bounded logs; persistent bounded web lifecycle; per-process queue IDs.
+  watchdog/bounded logs; persistent bounded web lifecycle; filesystem-wide web
+  run-count admission; per-process queue IDs.
 - **PARTIAL:** 2.1, 2.3, 3.1–3.3 — безопасные локальные fixes выполнены, profile
   claims исправлены, destructive stacks помечены experimental, а invalid
   `target_vmaf` feedback и основные compound-quality risks выявляются preflight;
@@ -295,7 +296,8 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 ### 4.2 Resource-aware scheduling
 
 - **Files:** segmenter, web app/routes, GUI workers, distributed worker.
-- **Current behavior:** per-run workers only; web unbounded globally.
+- **Current behavior:** web run count is bounded across processes sharing one output
+  directory; encoder semaphores remain process-local and disk has no byte budget.
 - **Problem:** oversubscription and disk exhaustion.
 - **Proposed behavior:** shared resource budget per process/device and backpressure.
 - **Implementation:** bounded job executor, CPU/GPU semaphores, disk reservation,
@@ -303,9 +305,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** concurrent jobs/failure/cancel/queue-full chaos tests.
 - **Risk:** reduced throughput if defaults too conservative.
 - **Expected result:** bounded RAM/disk/session use.
-- **Status:** partial — web admission is bounded and concurrent in-process runs now
-  share CPU/vendor semaphores with cancellable waits. Cross-process/device locks,
-  disk reservation, and distributed backpressure remain open.
+- **Status:** partial — web admission uses atomic exact-owner slots with one immutable
+  capacity contract per output directory, and concurrent in-process runs share
+  CPU/vendor semaphores with cancellable waits. Cross-process per-device locks, disk
+  reservation, distributed backpressure and NFS qualification remain open.
 
 ### 4.3 Streaming logs and timeouts
 
@@ -414,29 +417,31 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Current behavior:** web terminal state is persisted in a bounded atomic JSON store;
   each final output has an owner-only atomic reservation shared by processes using the
   same filesystem. Queue workers use process-unique leases and fenced staged output.
-- **Problem:** process-global admission/device/disk quotas, NFS qualification,
-  recoverable distributed publication and cross-frontend correctness parity are
-  complete locally; global quotas and NFS qualification remain open.
-- **Proposed behavior:** preserve the current stores and reservation boundary; add a
-  global scheduler only when deployment requirements prove one is needed, qualify
-  shared-filesystem semantics, and use the same QA gates in every frontend.
-- **Implementation:** existing TTL/count pruning plus `O_CREAT|O_EXCL` owner records;
-  next add per-device/disk quotas, recoverable commit journal and explicit shared-FS
+- **Problem:** process-global run-count admission is complete on a shared local
+  filesystem, while per-device/disk quotas, NFS qualification, multi-instance status
+  aggregation and network-partition behavior remain open.
+- **Proposed behavior:** preserve the current stores, admission and reservation
+  boundaries; add device/disk scheduling only when deployment requirements prove it
+  is needed, qualify shared-filesystem semantics, and use the same correctness gates
+  in every frontend.
+- **Implementation:** existing TTL/count pruning plus `O_CREAT|O_EXCL` run slots and
+  output-owner records; next add per-device/disk quotas and explicit shared-FS
   deployment checks. Do not introduce a duplicate job store without migration need.
 - **Tests:** restart, duplicate name, two workers same host, stale/recovered lease,
   NFS qualification.
 - **Risk:** migration of queue layout; version it and retain reader compatibility.
 - **Expected result:** deterministic multi-user/multi-worker behavior.
 - **Status:** in progress — restart/pruning, two independent app instances, a real
-  subprocess conflict, owner-only release, dead same-host recovery and fail-closed
-  foreign-host ownership pass locally. Distributed publication now has a durable
+  subprocess run-cap/output conflicts, owner-only release, dead same-host recovery
+  and fail-closed foreign/malformed ownership pass locally. Distributed publication
+  now has a durable
   token-fenced journal with real `os._exit` recovery, old-marker isolation and
   unfenced-artifact rejection.
   The shared orchestrator now requires the plan-aware media contract and complete
   primary-video/all-audio decode before any frontend can complete or a queue worker
   can enter its publication fence. Rich similarity/quality reports remain optional
-  diagnostics by design. Global quota scheduling and NFS/network-partition
-  qualification remain open.
+  diagnostics by design. Per-device/disk quota scheduling, multi-instance status
+  aggregation and NFS/network-partition qualification remain open.
 
 ### 6.3 Supply chain/release
 

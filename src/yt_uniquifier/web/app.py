@@ -70,8 +70,9 @@ class WebConfig:
     # v1.1.0 Task 16: append-only JSONL audit log of state-changing
     # requests. ``None`` = disabled (default keeps unit tests hermetic).
     audit_log_path: Path | None = None
-    # Hard process-level backpressure. Each run can itself spawn many FFmpeg
-    # workers, so accepting an unbounded number of run threads is unsafe.
+    # Hard filesystem-wide backpressure for web instances sharing output_dir.
+    # Each run can itself spawn many FFmpeg workers, so accepting an unbounded
+    # number of run threads across multiple uvicorn processes is unsafe.
     max_concurrent_runs: int = 2
     # Terminal run status survives a web-process restart but is bounded both
     # by age and count. Full source/profile paths are never persisted.

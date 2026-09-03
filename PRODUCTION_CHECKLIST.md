@@ -168,9 +168,10 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 11. Web and distributed operation
 
 - [ ] Production bind requires documented auth/TLS/reverse-proxy policy.
-- [ ] Global bounded job scheduler and CPU/GPU/disk quotas enabled; web admission and
-      in-process CPU/vendor semaphores are complete, cross-process/device locks and
-      disk reservation remain open.
+- [ ] Global bounded resource scheduler and CPU/GPU/disk quotas enabled; the web
+      run-count cap is shared across processes using one output directory and
+      in-process CPU/vendor semaphores are complete, while cross-process per-device
+      locks and disk-byte reservation remain open.
 - [x] Duplicate active output reservation returns conflict across web processes sharing
       a local filesystem; exact-owner release and dead same-host recovery are tested.
 - [x] Run state persists across restart and completed records have TTL/count pruning.
@@ -188,8 +189,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1509 passed`, `2 skipped`);
-      CI coverage gate remains required for the new commit.
+- [x] Ruff, strict mypy and full local test gate pass (`1519 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `81.95%` (`1418 passed`, one
+      expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML

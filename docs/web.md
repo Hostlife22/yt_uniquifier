@@ -32,6 +32,7 @@ CLI flags (env-var equivalents in parentheses):
 | `--output-dir`   | `YT_UNIQ_WEB_OUTPUT_DIR` | `./output`                    |
 | `--profile-dir`  | `YT_UNIQ_WEB_PROFILE_DIR`| per-user XDG config           |
 | `--input-root`   | `YT_UNIQ_WEB_INPUT_ROOT` | current working directory     |
+| —                | `YT_UNIQ_WEB_MAX_CONCURRENT_RUNS` | `2`                    |
 | —                | `YT_UNIQ_WEB_RUN_RETENTION_SEC` | `604800` (7 days)       |
 | —                | `YT_UNIQ_WEB_MAX_RUN_RECORDS` | `1000`                    |
 
@@ -150,10 +151,19 @@ recovered. Foreign-host stale records fail closed because remote process livenes
 cannot be proven. Shared/NFS deployments must qualify atomic-create and recovery
 semantics for their filesystem; that matrix is currently **NOT VERIFIED**.
 
-`max_concurrent_runs` is enforced per server process. A deployment with multiple
-processes does not yet have process-global CPU/GPU/disk admission quotas; use one
-application process or enforce those quotas externally until a global scheduler is
-qualified.
+`max_concurrent_runs` is enforced across server processes that share the same
+`output_dir`. Atomic owner slots and their immutable capacity record live under
+`<output-dir>/.yt_uniquifier-admission/`; a full pool returns **429**, while an
+unavailable or inconsistently configured pool returns **503**. Every instance that
+shares the directory must use the same value. To change it, stop every such server,
+verify no encode process is still active, remove only that admission directory, and
+then restart the servers with the new common value. Dead same-host owners are
+recovered; malformed and foreign-host owners fail closed.
+
+This is a shared run-count boundary, not a complete resource scheduler. Per-device
+CPU/GPU limits across processes and temporary-disk byte reservations remain open;
+enforce those externally for multi-instance production deployments. Shared/NFS
+atomic-create, stale-owner and network-partition semantics remain **NOT VERIFIED**.
 
 ## What's *not* on the web yet
 

@@ -250,6 +250,20 @@ container duration `6.111 s`, размер `1,561,124 bytes`. Небольшой
 Это smoke инфраструктуры, не quality benchmark: natural licensed footage, VMAF
 распределение и выбор similarity thresholds по-прежнему `NOT VERIFIED`.
 
+## Web cross-process admission smoke — 2026-09-03
+
+Проверено локально на APFS/macOS: parent process занял единственный admission slot,
+после чего отдельный Python subprocess с другим `run_id` и output name получил
+`RunAdmissionFull` (ожидаемый exit code 42). Два независимых FastAPI app state с
+общим `output_dir` также дали **429** второму run при capacity 1, а после terminal
+release повторный запрос был принят. Fault injection подтверждает удаление
+частичного slot при ошибке `fsync`; malformed и foreign-host owners остаются занятыми
+fail-closed.
+
+Тест доказывает локальную атомарность и lifecycle admission boundary, но не измеряет
+throughput и не квалифицирует NFS, network partition, PID reuse или per-device/disk
+resource budgets.
+
 ## Production benchmark protocol
 
 1. Зафиксировать source checksum, ffmpeg/driver/package versions, profile canonical

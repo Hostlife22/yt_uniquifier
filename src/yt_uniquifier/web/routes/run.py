@@ -23,6 +23,9 @@ from yt_uniquifier.core.output_reservation import (
     OutputReservation,
     OutputReservationConflict,
     OutputReservationError,
+    RunAdmission,
+    RunAdmissionError,
+    RunAdmissionFull,
 )
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.runner import CancelToken, RunEvent
@@ -229,6 +232,7 @@ def register(  # noqa: PLR0913
                     _log.exception("could not persist terminal web run state")
                 finally:
                     output_reservation.release()
+                    run_admission.release()
                 # Never let a disconnected client's full queue strand this
                 # worker thread while it tries to publish the terminal marker.
                 try:
@@ -243,6 +247,7 @@ def register(  # noqa: PLR0913
         )
         record.thread = thread
         output_reservation: OutputReservation
+        run_admission: RunAdmission
         with runs_lock:
             active = [
                 existing for existing in runs.values()
@@ -262,13 +267,31 @@ def register(  # noqa: PLR0913
                     detail="maximum concurrent runs reached; retry later",
                 )
             try:
+                run_admission = RunAdmission.acquire(
+                    output_root,
+                    run_id,
+                    int(config.max_concurrent_runs),
+                )
+            except RunAdmissionFull as exc:
+                raise http_exception(
+                    status_code=429,
+                    detail="shared maximum concurrent runs reached; retry later",
+                ) from exc
+            except RunAdmissionError as exc:
+                raise http_exception(
+                    status_code=503,
+                    detail="shared run admission storage is unavailable",
+                ) from exc
+            try:
                 output_reservation = OutputReservation.acquire(output_path, run_id)
             except OutputReservationConflict as exc:
+                run_admission.release()
                 raise http_exception(
                     status_code=409,
                     detail="output_name is already reserved by another web process",
                 ) from exc
             except OutputReservationError as exc:
+                run_admission.release()
                 raise http_exception(
                     status_code=503,
                     detail="output reservation storage is unavailable",
@@ -280,6 +303,7 @@ def register(  # noqa: PLR0913
             thread.start()
         except BaseException:
             output_reservation.release()
+            run_admission.release()
             with runs_lock:
                 runs.pop(run_id, None)
             if persist_runs is not None:

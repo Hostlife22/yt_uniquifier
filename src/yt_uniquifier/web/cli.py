@@ -11,6 +11,7 @@ Env vars honoured (override CLI flags when set):
   YT_UNIQ_WEB_OUTPUT_DIR  — default ./output
   YT_UNIQ_WEB_PROFILE_DIR — default per-user profile dir
   YT_UNIQ_WEB_INPUT_ROOT  — input boundary (default: current directory)
+  YT_UNIQ_WEB_MAX_CONCURRENT_RUNS — shared output-dir run cap (default: 2)
   YT_UNIQ_WEB_RUN_RETENTION_SEC — terminal status retention (default: 604800)
   YT_UNIQ_WEB_MAX_RUN_RECORDS — persisted status cap (default: 1000)
   YT_UNIQ_WEB_USER        — when both set, enable basic auth
@@ -71,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
         input_root=_env_path("YT_UNIQ_WEB_INPUT_ROOT", args.input_root),
         basic_auth_user=os.environ.get("YT_UNIQ_WEB_USER"),
         basic_auth_pass=os.environ.get("YT_UNIQ_WEB_PASS"),
+        max_concurrent_runs=int(
+            os.environ.get("YT_UNIQ_WEB_MAX_CONCURRENT_RUNS", "2")
+        ),
         run_retention_sec=int(os.environ.get("YT_UNIQ_WEB_RUN_RETENTION_SEC", "604800")),
         max_run_records=int(os.environ.get("YT_UNIQ_WEB_MAX_RUN_RECORDS", "1000")),
     )

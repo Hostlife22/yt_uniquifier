@@ -407,6 +407,84 @@ def test_two_app_instances_cannot_reserve_the_same_output(
     assert retry_response.status_code == 200
 
 
+def test_two_app_instances_share_global_run_admission(
+    web_dirs: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Different output names must still share max_concurrent_runs."""
+    work, output, profiles = web_dirs
+    source_path = tmp_path / "shared-input.mp4"
+    source_path.touch()
+    profile_path = profiles / "shared.yaml"
+    profile_path.write_text("name: shared\ntransforms: []\n", encoding="utf-8")
+
+    from yt_uniquifier.core.models import Profile
+    from yt_uniquifier.web.routes import run as run_routes
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run_full(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        started.set()
+        release.wait(timeout=5)
+
+    monkeypatch.setattr(run_routes, "load_profile", lambda _path: Profile(name="shared"))
+    monkeypatch.setattr(run_routes, "build_plan", lambda *_args: object())
+    monkeypatch.setattr(run_routes, "run_full", blocking_run_full)
+
+    first = TestClient(build_app(WebConfig(
+        work_dir=work / "instance-a",
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+        max_concurrent_runs=1,
+    )))
+    second = TestClient(build_app(WebConfig(
+        work_dir=work / "instance-b",
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+        max_concurrent_runs=1,
+    )))
+    base_payload = {
+        "input_path": str(source_path),
+        "profile_path": str(profile_path),
+    }
+
+    try:
+        first_response = first.post(
+            "/api/run",
+            json={**base_payload, "output_name": "first.mp4"},
+        )
+        assert first_response.status_code == 200
+        first_run_id = first_response.json()["run_id"]
+        assert started.wait(timeout=2)
+
+        second_response = second.post(
+            "/api/run",
+            json={**base_payload, "output_name": "second.mp4"},
+        )
+        assert second_response.status_code == 429
+        assert "shared maximum" in second_response.json()["detail"]
+    finally:
+        release.set()
+
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = first.get(f"/api/run/{first_run_id}/status").json()["status"]
+        if status == "completed":
+            break
+        time.sleep(0.01)
+    assert status == "completed"
+
+    retry_response = second.post(
+        "/api/run",
+        json={**base_payload, "output_name": "second.mp4"},
+    )
+    assert retry_response.status_code == 200
+
+
 def test_run_uses_profile_container_and_rejects_conflicting_suffix(
     web_dirs: tuple[Path, Path, Path],
     monkeypatch: pytest.MonkeyPatch,

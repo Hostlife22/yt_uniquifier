@@ -14,6 +14,10 @@ the last tag.
 
 ### Fixed
 
+- Enforce the web run-count limit across server processes sharing an output
+  directory with atomic owner slots, conservative stale-owner recovery and an
+  immutable capacity contract; expose the cap through
+  `YT_UNIQ_WEB_MAX_CONCURRENT_RUNS`.
 - Make complete primary-video/all-audio decode validation a mandatory `run_full`
   publication gate for CLI, GUI, web and distributed workers, including `--no-qa`;
   corrupt tails now fail before checkpoint completion or segment cleanup.

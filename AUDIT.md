@@ -165,7 +165,7 @@ Web / distributed worker: rich diagnostic QA is not automatic
 | Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | Математически неустойчива, SSCD objective ошибочен |
 | CLI | `cli/` | user orchestration | args → core APIs | Полное покрытие функций; `--encoder Force` фактически preference |
 | GUI | `gui/` | desktop orchestration/workers | UI → core APIs | Core не дублируется; реальные heavy e2e opt-in |
-| Web | `web/` | API/SSE/static UI | requests → background threads | Нет global scheduling/persistence/QA/pruning |
+| Web | `web/`, `core/output_reservation.py` | API/SSE/static UI, persisted status and shared admission | requests → background threads | Shared run/output bounds implemented on local FS; device/disk quotas, NFS qualification and rich QA policy remain open |
 | Distributed | `core/queue`, `cli/cmd_worker.py` | shared-FS lease/worker | pending → done/failed | Atomic rename хорош; heartbeat только per-host и resume не переносим |
 
 ## Что уже реализовано и не следует дублировать
@@ -384,10 +384,11 @@ lowest normalized violation с явным non-converged result. Ограниче
   публикуется атомарно.
 - **Исправлено:** scene segmentation ограничивает gaps через `target_size_sec` и
   отбрасывает tiny edge cuts.
-- **Исправлено на общей локальной FS:** web имеет admission limit/retention/persisted
-  state, атомарную межпроцессную final-output reservation с owner-only release и
-  неблокирующий terminal marker; overlapping jobs делят CPU/vendor semaphore.
-  Global admission/device/disk quotas и NFS qualification остаются открыты.
+- **Исправлено на общей локальной FS:** web имеет общий для процессов run-count
+  admission limit, retention/persisted state, атомарную межпроцессную final-output
+  reservation с owner-only release и неблокирующий terminal marker; overlapping
+  jobs внутри процесса делят CPU/vendor semaphore. Per-device cross-process и disk
+  quotas, multi-instance state aggregation и NFS qualification остаются открыты.
 - **Исправлено для общего correctness gate:** distributed workers используют process-unique
   host+PID+nonce leases, content/plan-stable work paths и fenced staged publication.
   Durable journal с уникальным token-fence автоматически завершает публикацию после
@@ -433,8 +434,9 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
   notification webhook is an operator-configured destination and remains a
   deployment trust-boundary concern.
 - Web может быть поднят на `0.0.0.0` без auth; rate limiting не заменяет auth/TLS.
-- Multi-process web deployment не имеет global admission/device/disk quotas;
-  process-local cap и общие in-process encoder semaphores не закрывают этот риск.
+- Multi-process web deployment имеет общий run-count admission для одного
+  `output_dir`, но не имеет cross-process per-device/disk quotas; общие только внутри
+  процесса encoder semaphores не закрывают остаточный resource-exhaustion risk.
 - Plugin import происходит до CLI `--no-plugins`; только environment switch даёт
   pre-import disable, что честно указано в help.
 - Shared queue доверяет общему filesystem и basename identity; multi-tenant deployment
