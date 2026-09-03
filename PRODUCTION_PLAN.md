@@ -64,6 +64,9 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
 - **Tests:** schema contract and fake sampler; nightly 30 s fixture, scheduled long run.
 - **Risk:** cross-platform resource APIs.
 - **Expected result:** решения о speed/quality принимаются по данным, не описаниям.
+- **Status:** partial — JSON v1 остаётся обратно совместимым, а `rss_peak_kb` теперь
+  агрегирует live parent/FFmpeg tree каждые 100 ms и содержит `rss_method`. CPU/GPU
+  telemetry, cold/warm automation и quality/audio integration остаются открыты.
 
 ## Phase 1 — Critical fixes
 
@@ -284,6 +287,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** mocked vendors + self-hosted HW matrix; 10-bit/4K/concurrency.
 - **Risk:** probe startup cost, controlled by keyed cache.
 - **Expected result:** predictable encoder choice and early incompatibility error.
+- **Status:** partial — `quality|balanced|speed` selection implemented with quality
+  default; explicit override is strict; job-resolution/pixfmt/rate-control probe and
+  NVIDIA-aware cache key are active; unverified `av1_vulkan` is disabled. Per-GPU
+  routing and the external NVENC/QSV/AMF matrix remain open.
 
 ### 4.2 Resource-aware scheduling
 
@@ -296,6 +303,9 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** concurrent jobs/failure/cancel/queue-full chaos tests.
 - **Risk:** reduced throughput if defaults too conservative.
 - **Expected result:** bounded RAM/disk/session use.
+- **Status:** partial — web admission is bounded and concurrent in-process runs now
+  share CPU/vendor semaphores with cancellable waits. Cross-process/device locks,
+  disk reservation, and distributed backpressure remain open.
 
 ### 4.3 Streaming logs and timeouts
 
@@ -309,6 +319,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** silent child, verbose child, grandchild pipe, slow valid job, cancellation.
 - **Risk:** platform signal differences.
 - **Expected result:** diagnosable long-form operation with bounded memory.
+- **Status:** partial — the shared runner has bounded in-memory tail, full log tee,
+  progress-based stall watchdog, process-group termination and optional wall timeout;
+  concat and sanitizer now use it without a fixed one-hour kill. Remaining standalone
+  QA subprocesses need the same migration.
 
 ## Phase 5 — QA
 

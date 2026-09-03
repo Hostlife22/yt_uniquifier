@@ -103,7 +103,8 @@ release blockers, поэтому checklist намеренно не отмече�
       H.264 + HEVC VideoToolbox verified on this Intel Mac, other vendors unavailable.
 - [ ] Per-device concurrency measured; jobs routed to a device, not only counted.
 - [ ] GOP/keyframe/B-frame/profile/level policy documented per target.
-- [ ] Hardware-first is not implicit in quality-first mode.
+- [x] Hardware-first is not implicit in quality-first mode; `quality` is default and
+      `balanced|speed` require an explicit environment policy.
 
 ## 8. Resume, crash and long-form
 
@@ -128,6 +129,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] FFmpeg logs stream incrementally to disk with bounded in-memory tail.
 - [x] Silent stall watchdog and configurable wall policy tested with real subprocesses.
+- [x] Segment encode, concat and sanitizer use the same bounded-log/watchdog runner;
+      no fixed one-hour concat/sanitizer termination remains.
 - [ ] Cancellation terminates complete process tree on Linux/macOS/Windows.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [ ] Run/plan/job/segment correlation IDs appear in structured logs/events.
@@ -154,7 +157,9 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 11. Web and distributed operation
 
 - [ ] Production bind requires documented auth/TLS/reverse-proxy policy.
-- [ ] Global bounded job scheduler and CPU/GPU/disk quotas enabled.
+- [ ] Global bounded job scheduler and CPU/GPU/disk quotas enabled; web admission and
+      in-process CPU/vendor semaphores are complete, cross-process/device locks and
+      disk reservation remain open.
 - [x] Duplicate active output reservation returns conflict within one web process.
 - [x] Run state persists across restart and completed records have TTL/count pruning.
 - [x] SSE full queue cannot block processing finalizer.
@@ -194,8 +199,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1442 passed, 2 expected skips (Phase 3 quality
-      guardrails, profile contracts and real-FFmpeg regression included).
+- [x] Fully provisioned `make check`: 1447 passed, 2 expected skips; two subsequent
+      encoder cache/override edge regressions passed in the final targeted 38-test gate.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

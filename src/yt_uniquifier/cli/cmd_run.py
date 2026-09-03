@@ -66,10 +66,10 @@ def run_cmd(
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
     sanitize_bitstream: bool = typer.Option(
         False, "--sanitize-bitstream",
-        help="After main pipeline, re-encode output via libx264 to strip "
-             "NVENC / QSV / AMF / VideoToolbox bitstream signatures. Adds "
-             "~30-60 min wall time + ~3 VMAF points drop on long sources. "
-             "No-op for libx264 source. Refused on HDR/HEVC paths.",
+        help="Optional H.264 interoperability pass via libx264. Adds "
+             "~30-60 min wall time and generation loss on long sources; "
+             "not recommended for quality-first output. No-op for libx264 "
+             "and refused for HDR, HEVC, or AV1 contracts.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run",

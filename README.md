@@ -40,7 +40,10 @@
   targeting SDR.
 - **Multi-vendor encoder detect** (NVENC / QSV / AMF / VideoToolbox /
   libx264 / libx265) with real test-run on a null source; each candidate
-  carries its own `max_parallel` cap.
+  carries its own `max_parallel` cap. Automatic selection defaults to the
+  reproducible `quality` policy; set `YT_UNIQ_ENCODER_POLICY=balanced|speed`
+  for long-form AV1 or verified hardware throughput. Explicit `--encoder`
+  overrides are strict and never silently fall back.
 - **Per-run variability**: every invocation rolls a fresh `run_seed`,
   making randomized editorial transforms reproducible within one run
   while allowing deliberately different authorized derivatives.

@@ -140,6 +140,24 @@ def test_cache_invalidated_on_different_ffmpeg_version(
     assert cached is None
 
 
+def test_cache_invalidated_when_candidate_schema_changes(isolated_cache: Path) -> None:
+    isolated_cache.write_text(json.dumps({
+        "schema_version": 1,
+        "version_key": "same-version",
+        "written_at": 9_999_999_999,
+        "candidates": [{
+            "name": "av1_vulkan",
+            "vendor": "vulkan",
+            "codec": "av1",
+            "works": True,
+            "max_parallel": 2,
+            "error": None,
+        }],
+    }))
+
+    assert enc_mod._load_cache("same-version") is None
+
+
 def test_failed_probe_records_error(
     monkeypatch: pytest.MonkeyPatch,
     isolated_cache: Path,
@@ -161,6 +179,24 @@ def test_pick_encoder_prefers_explicit() -> None:
     )
 
 
+def test_explicit_encoder_override_ignores_auto_policy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(enc_mod.ENCODER_POLICY_ENV, "invalid-auto-policy")
+    cands = [
+        EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True),
+    ]
+
+    selected = enc_mod.pick_encoder(
+        cands,
+        prefer=["libx264"],
+        codec="h264",
+        require_preferred=True,
+    )
+
+    assert selected.name == "libx264"
+
+
 def test_pick_encoder_fallback_to_libx264() -> None:
     cands = [
         EncoderCandidate(name="h264_nvenc", vendor="nvenc", codec="h264", works=False, error="x"),
@@ -177,15 +213,62 @@ def test_pick_encoder_no_working_raises() -> None:
         enc_mod.pick_encoder(cands, codec="h264")
 
 
-def test_pick_encoder_picks_priority_when_multiple(
+def test_pick_encoder_defaults_to_quality_policy(
     isolated_cache: Path,
 ) -> None:
     cands = [
         EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True),
         EncoderCandidate(name="h264_nvenc", vendor="nvenc", codec="h264", works=True),
     ]
-    # Without prefer: canonical order has nvenc first.
-    assert enc_mod.pick_encoder(cands, codec="h264").name == "h264_nvenc"
+    assert enc_mod.pick_encoder(cands, codec="h264").name == "libx264"
+
+
+def test_pick_encoder_speed_policy_prefers_hardware() -> None:
+    cands = [
+        EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True),
+        EncoderCandidate(name="h264_nvenc", vendor="nvenc", codec="h264", works=True),
+    ]
+
+    assert enc_mod.pick_encoder(cands, codec="h264", policy="speed").name == "h264_nvenc"
+
+
+def test_pick_encoder_av1_policies_are_distinct() -> None:
+    cands = [
+        EncoderCandidate(name="av1_nvenc", vendor="nvenc", codec="av1", works=True),
+        EncoderCandidate(name="libsvtav1", vendor="svtav1", codec="av1", works=True),
+        EncoderCandidate(name="libaom-av1", vendor="libaom", codec="av1", works=True),
+    ]
+
+    assert enc_mod.pick_encoder(cands, codec="av1", policy="quality").name == "libaom-av1"
+    assert enc_mod.pick_encoder(cands, codec="av1", policy="balanced").name == "libsvtav1"
+    assert enc_mod.pick_encoder(cands, codec="av1", policy="speed").name == "av1_nvenc"
+
+
+def test_pick_encoder_rejects_unavailable_required_override() -> None:
+    cands = [
+        EncoderCandidate(
+            name="h264_nvenc", vendor="nvenc", codec="h264", works=False,
+            error="device unavailable",
+        ),
+        EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True),
+    ]
+
+    with pytest.raises(EncoderError, match="h264_nvenc.*device unavailable"):
+        enc_mod.pick_encoder(
+            cands,
+            prefer=["h264_nvenc"],
+            codec="h264",
+            require_preferred=True,
+        )
+
+
+def test_pick_encoder_rejects_invalid_policy() -> None:
+    cands = [
+        EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True),
+    ]
+
+    with pytest.raises(EncoderError, match="encoder policy"):
+        enc_mod.pick_encoder(cands, codec="h264", policy="fastest")
 
 
 def test_cache_file_atomic_write(
@@ -196,7 +279,7 @@ def test_cache_file_atomic_write(
     monkeypatch.setattr(enc_mod.subprocess, "run", _stub_run({"libx264": 0}))
     enc_mod.detect_encoders(force=True)
     payload = json.loads(isolated_cache.read_text())
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == enc_mod.ENCODER_CACHE_SCHEMA_VERSION
     assert payload["candidates"][0]["name"] == "h264_nvenc"  # canonical order preserved
 
 

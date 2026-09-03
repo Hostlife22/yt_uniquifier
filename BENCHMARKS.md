@@ -18,6 +18,9 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | ASS subtitle → MKV/MOV | ASS copied to MKV; converted to `mov_text` in MOV; language/title retained | Text subtitle policy confirmed; real PGS fixture remains pending |
 | APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
 | Segmented VFR, libx264, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software VFR preserve contract разрешён; hardware paths остаются unverified |
+| Auto encoder policy, H.264 | `quality` → libx264; `speed` → H.264 VideoToolbox | Default follows production quality priority; hardware requires explicit policy/override |
+| `soft`, 30.183 s, policy smoke | libx264: 17.86 s, 752 frames; VideoToolbox: 9.36 s, 752 frames; both A/V start 0 | Selection policy changes throughput without losing decoded frames on this Mac |
+| Benchmark RSS sampler, 10.01 s fixture | 497,832 KiB peak, `psutil_process_tree_sum_100ms` | New result includes simultaneous Python/FFmpeg RSS; single run, not a regression baseline |
 
 Natural-content viewing/listening, NFS cross-host, NVENC/QSV/AMF и YouTube
 ingestion/transcode остаются `NOT VERIFIED`.
@@ -37,7 +40,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Wall time | Throughput/ETA/capacity | Разделять cold/warm cache и no-op resume |
 | CPU time/utilization | Worker scheduling и oversubscription | Нужен process-tree measurement |
 | GPU utilization/VRAM | HW worker count и OOM avoidance | Vendor-specific tooling, optional |
-| Peak RSS | Memory limit/container sizing | `RUSAGE_SELF` текущего tool ошибочно исключает FFmpeg child |
+| Peak RSS | Memory limit/container sizing | Tool records aggregate live process-tree RSS every 100 ms when `psutil` is available; fallback is explicitly labelled |
 
 ## Обязательный corpus
 
@@ -206,8 +209,10 @@ artifacts сохранялись для проверки disk/reuse.
 | 2 h | 12 | 14,400 / 14,400 | 0 / 7,200.000 s | +7.708 ms | 541.74 s | 136 MB | 128 / 193 / 188 MB |
 | 3 h | 18 | 21,600 / 21,600 | 0 / 10,800.000 s | +13.771 ms | 747.82 s | 158 MB | 192 / 289 / 290 MB |
 
-Peak RSS — process maximum reported by macOS `/usr/bin/time -l`; это лучше старого
-`RUSAGE_SELF`, но не сумма одновременных child RSS. Wall scaling близок к линейному.
+Peak RSS в этой исторической таблице — process maximum из macOS `/usr/bin/time -l`,
+не сумма одновременных child RSS. Текущий `tools/benchmark.py` теперь пишет
+`rss_method=psutil_process_tree_sum_100ms` и суммирует живые parent/child RSS;
+старые числа нельзя напрямую сравнивать с новой серией. Wall scaling близок к линейному.
 Основной bottleneck — два последовательных full-duration loudnorm/audio passes;
 video workers не могут начать до готовности main audio.
 

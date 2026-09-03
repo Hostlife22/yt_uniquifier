@@ -22,15 +22,18 @@ Example:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
+import os
 import platform
-import resource
 import subprocess
 import sys
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from yt_uniquifier import __version__ as yt_uniq_version
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
@@ -38,6 +41,83 @@ from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.runner import RunEvent
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+class _ProcessTreeMemorySampler:
+    """Sample aggregate parent + live FFmpeg child RSS.
+
+    ``resource.RUSAGE_SELF`` measured only this Python process and macOS reports
+    it in bytes rather than Linux's KiB. Prefer psutil's cross-platform process
+    tree sum; retain an explicitly-labelled approximation when psutil is absent.
+    """
+
+    def __init__(self, interval_sec: float = 0.1) -> None:
+        self.interval_sec = interval_sec
+        self.peak_kb = 0
+        self.method = "resource_self_plus_children_max"
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._psutil: Any | None = None
+        self._process: Any | None = None
+        try:
+            import psutil
+
+            self._psutil = psutil
+            self._process = psutil.Process(os.getpid())
+            self.method = "psutil_process_tree_sum_100ms"
+        except (ImportError, OSError):
+            pass
+
+    def start(self) -> None:
+        if self._process is None:
+            return
+        self._sample()
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="benchmark-memory-sampler",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> tuple[int, str]:
+        if self._process is not None:
+            self._sample()
+            self._stop.set()
+            if self._thread is not None:
+                self._thread.join(timeout=max(1.0, self.interval_sec * 3))
+            return self.peak_kb, self.method
+        return self._resource_fallback_kb(), self.method
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.interval_sec):
+            self._sample()
+
+    def _sample(self) -> None:
+        assert self._process is not None
+        assert self._psutil is not None
+        rss_bytes = 0
+        processes = [self._process]
+        with contextlib.suppress(self._psutil.Error, OSError):
+            processes.extend(self._process.children(recursive=True))
+        for process in processes:
+            try:
+                rss_bytes += int(process.memory_info().rss)
+            except (self._psutil.Error, OSError):
+                continue
+        self.peak_kb = max(self.peak_kb, rss_bytes // 1024)
+
+    @staticmethod
+    def _resource_fallback_kb() -> int:
+        try:
+            import resource
+
+            self_peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            child_peak = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+        except (ImportError, OSError):
+            return 0
+        total = self_peak + child_peak
+        # Darwin documents bytes; Linux and the BSDs used in CI report KiB.
+        return total // 1024 if platform.system() == "Darwin" else total
 
 
 def _git_sha() -> str:
@@ -97,21 +177,25 @@ def main() -> int:
         if isinstance(seg, int):
             segments_seen.add(seg)
 
+    memory_sampler = _ProcessTreeMemorySampler()
+    memory_sampler.start()
     start = time.monotonic()
-    run_full(
-        plan,
-        RunOptions(
-            work_dir=args.work_dir / plan.plan_hash,
-            output=args.out,
-            encoder_override=args.encoder,
-            keep_segments=False,
-            enforce_preflight=False,
-            workers=args.workers,
-        ),
-        on_event=on_event,
-    )
+    try:
+        run_full(
+            plan,
+            RunOptions(
+                work_dir=args.work_dir / plan.plan_hash,
+                output=args.out,
+                encoder_override=args.encoder,
+                keep_segments=False,
+                enforce_preflight=False,
+                workers=args.workers,
+            ),
+            on_event=on_event,
+        )
+    finally:
+        rss_kb, rss_method = memory_sampler.stop()
     wall = time.monotonic() - start
-    rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
     row: dict[str, str | int | float] = {
         "input": str(args.input),
@@ -122,6 +206,7 @@ def main() -> int:
         "workers": args.workers,
         "wall_sec": round(wall, 2),
         "rss_peak_kb": rss_kb,
+        "rss_method": rss_method,
         "segments_seen": len(segments_seen),
         **{f"phase_{k}_sec": round(v, 2) for k, v in phase_totals.items()},
     }
@@ -153,6 +238,7 @@ def main() -> int:
             "workers": args.workers,
             "wall_sec": round(wall, 2),
             "rss_peak_kb": rss_kb,
+            "rss_method": rss_method,
             "segments_seen": len(segments_seen),
             "per_phase_sec": {k: round(v, 2) for k, v in phase_totals.items()},
         }

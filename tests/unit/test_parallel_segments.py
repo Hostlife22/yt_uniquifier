@@ -162,3 +162,53 @@ def test_parallel_failure_cancels_siblings_without_external_token(
             segments, plan, tmp_path, workers=2,
         )
     assert sibling_cancelled.is_set()
+
+
+def test_process_resource_budget_is_shared_across_concurrent_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two runs must share one CPU encoder cap, not each consume the full cap."""
+    monkeypatch.setattr(seg_mod, "_RESOURCE_BUDGETS", {})
+    active = 0
+    peak = 0
+    active_lock = threading.Lock()
+    release_wave = threading.Event()
+
+    def _slow_process(seg, plan, work_dir, **kw):
+        nonlocal active, peak
+        del seg, plan, work_dir, kw
+        with active_lock:
+            active += 1
+            peak = max(peak, active)
+            if active >= 4:
+                release_wave.set()
+        release_wave.wait(timeout=0.1)
+        with active_lock:
+            active -= 1
+        return Path("source.mkv"), Path("output.mkv")
+
+    monkeypatch.setattr(seg_mod, "process_video_segment", _slow_process)
+    plan = _plan("libx264", "x264", max_parallel=2)
+    start = threading.Barrier(2)
+
+    def _run(offset: int) -> None:
+        start.wait(timeout=2)
+        segments = [
+            Segment(idx=offset + i, start_sec=i, end_sec=i + 1)
+            for i in range(2)
+        ]
+        seg_mod.process_video_segments_parallel(
+            segments, plan, tmp_path, workers=2,
+        )
+
+    threads = [
+        threading.Thread(target=_run, args=(0,)),
+        threading.Thread(target=_run, args=(10,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert peak == 2

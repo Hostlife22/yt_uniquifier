@@ -109,10 +109,12 @@ square frames — no manual ffmpeg recipe needed.
 AV1 is available as an optional delivery codec. Actual size, quality and encode
 time depend on the encoder and source and must be benchmarked; no fixed percentage
 or platform preference is assumed. Profiles target `av1` —
-`pick_encoder()` chooses, in order: `av1_vulkan` (cross-vendor, FFmpeg
-8.0+), `av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_videotoolbox` (hardware),
-`libsvtav1` (CPU), `libaom-av1` (CPU reference). The CRF scale is 0..63
-with default 30; quality and speed are not numerically equivalent to an
+`pick_encoder()` defaults to the `quality` policy: `libaom-av1`, then
+`libsvtav1`, then a verified hardware encoder. `balanced` prefers SVT-AV1 and
+`speed` prefers verified NVENC/QSV/VideoToolbox/AMF; configure them with
+`YT_UNIQ_ENCODER_POLICY`. `av1_vulkan` is not advertised because the existing
+CPU-frame filter graph has no validated Vulkan `hwupload` path. The CRF scale is
+0..63 with default 30; quality and speed are not numerically equivalent to an
 x264 CRF and require a content-specific control benchmark.
 
 | Name | Target | Mode | Resolution | LUFS | Notes |

@@ -15,6 +15,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 from bisect import bisect_left
 from collections.abc import Callable
@@ -46,6 +47,11 @@ KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
 KEYFRAME_CACHE_SCHEMA_VERSION = 2
 _CACHE_REPLACE_ATTEMPTS = 12
 _CACHE_REPLACE_MAX_DELAY_SEC = 0.1
+
+# Shared within one Python process, so overlapping web/GUI/batch runs consume
+# one encoder/device budget instead of each independently using max_parallel.
+_RESOURCE_BUDGETS: dict[str, tuple[int, threading.BoundedSemaphore]] = {}
+_RESOURCE_BUDGETS_LOCK = threading.Lock()
 
 
 def _keyframe_cache_dir() -> Path:
@@ -724,6 +730,71 @@ def parallel_safe(plan: Plan) -> int:
     return max(1, plan.encoder.max_parallel)
 
 
+def _resource_budget_key(plan: Plan) -> str:
+    """Group encoders that contend for the same physical resource."""
+    vendor = plan.encoder.vendor
+    if vendor in {"x264", "x265", "libaom", "svtav1"}:
+        return "cpu"
+    if vendor == "nvenc":
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+        return f"nvenc:{visible}"
+    if vendor == "amf":
+        ordinal = os.environ.get("GPU_DEVICE_ORDINAL", "all")
+        return f"amf:{ordinal}"
+    return f"hardware:{vendor}"
+
+
+def _resource_budget(plan: Plan) -> tuple[int, threading.BoundedSemaphore]:
+    key = _resource_budget_key(plan)
+    with _RESOURCE_BUDGETS_LOCK:
+        existing = _RESOURCE_BUDGETS.get(key)
+        if existing is not None:
+            return existing
+        limit = parallel_safe(plan)
+        created = (limit, threading.BoundedSemaphore(limit))
+        _RESOURCE_BUDGETS[key] = created
+        return created
+
+
+def _process_video_segment_with_budget(
+    segment: Segment,
+    plan: Plan,
+    work_dir: Path,
+    *,
+    on_event: Callable[[RunEvent], None] | None,
+    cancel_token: CancelToken | None,
+    pause_token: PauseToken | None,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[Path | None, Path]:
+    """Acquire the process-wide encoder slot before spawning FFmpeg."""
+    limit, semaphore = _resource_budget(plan)
+    queued_emitted = False
+    while not semaphore.acquire(timeout=0.25):
+        if cancel_token is not None and cancel_token.is_cancelled():
+            raise PipelineError("cancelled by user while waiting for encoder capacity")
+        if not queued_emitted and on_event is not None:
+            on_event(RunEvent(kind="log", payload={
+                "phase": "workers",
+                "message": (
+                    f"waiting for shared {plan.encoder.vendor} capacity "
+                    f"(process limit {limit})"
+                ),
+            }))
+            queued_emitted = True
+    try:
+        return process_video_segment(
+            segment,
+            plan,
+            work_dir,
+            on_event=on_event,
+            cancel_token=cancel_token,
+            pause_token=pause_token,
+            extra_env=extra_env,
+        )
+    finally:
+        semaphore.release()
+
+
 def process_video_segments_parallel(
     pending: list[Segment],
     plan: Plan,
@@ -760,7 +831,7 @@ def process_video_segments_parallel(
         for seg in pending:
             if cancel_token and cancel_token.is_cancelled():
                 raise PipelineError("cancelled by user")
-            src, out = process_video_segment(
+            src, out = _process_video_segment_with_budget(
                 seg, plan, work_dir,
                 on_event=on_event, cancel_token=cancel_token,
                 pause_token=pause_token,
@@ -788,7 +859,7 @@ def process_video_segments_parallel(
     with concurrent.futures.ThreadPoolExecutor(max_workers=effective) as pool:
         futures = {
             pool.submit(
-                process_video_segment, seg, plan, work_dir,
+                _process_video_segment_with_budget, seg, plan, work_dir,
                 on_event=on_event, cancel_token=worker_cancel,
                 pause_token=pause_token,
                 extra_env=extra_env or None,
@@ -881,6 +952,8 @@ def concat_segments(
     subtitle_codecs: list[str] | None = None,
     auxiliary_streams: list[AuxiliaryStream] | None = None,
     target_duration_sec: float | None = None,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> None:
     """Concatenate stream-copy segments and mux in the separately-processed audio.
 
@@ -1061,22 +1134,31 @@ def concat_segments(
     )
     cmd += [str(tmp_output)]
 
+    concat_log = work_dir / "concat.log"
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3600)
-    except subprocess.CalledProcessError as exc:
+        run_ffmpeg(
+            BuiltCommand(args=cmd),
+            output=tmp_output,
+            on_event=on_event,
+            cancel_token=cancel_token,
+            log_path=concat_log,
+        )
+    except Exception as exc:
         tmp_output.unlink(missing_ok=True)
-        # Show both head + tail of stderr. ffmpeg often emits the real
-        # cause in the first few lines (bad path, codec mismatch) and a
-        # tail-only window of 500 chars would silently hide it behind
-        # cosmetic warnings.
-        full = exc.stderr.strip() if exc.stderr else ""
+        # The shared runner bounds in-memory logs and tees the complete stream
+        # to concat.log. Preserve a useful head+tail diagnostic without
+        # retaining unbounded FFmpeg output in Python memory.
+        try:
+            full = concat_log.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            full = ""
         head = full[:300]
         tail = full[-500:] if len(full) > 800 else ""
-        snippet = head + ("\n…\n" + tail if tail else "")
+        snippet = head + ("\n…\n" + tail if tail else "") if full else str(exc)
         raise PipelineError(f"concat failed: {snippet}") from exc
-    except (subprocess.TimeoutExpired, OSError) as exc:
+    except BaseException:
         tmp_output.unlink(missing_ok=True)
-        raise PipelineError(f"concat failed: {exc}") from exc
+        raise
 
     if not tmp_output.exists() or tmp_output.stat().st_size == 0:
         tmp_output.unlink(missing_ok=True)

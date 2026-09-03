@@ -298,6 +298,11 @@ yt-uniq probe --encoders           # детектит твои ffmpeg encoders
 python -c "from yt_uniquifier.gui.app_pyqt import main; print('GUI ready')"
 ```
 
+Auto-selection использует quality-first software encoder. Для проверенного
+hardware throughput задайте `YT_UNIQ_ENCODER_POLICY=speed`; для практичного AV1
+long-form CPU encode — `YT_UNIQ_ENCODER_POLICY=balanced`. Явный `--encoder`
+строгий: недоступный encoder завершает preflight/run ошибкой, а не подменяется.
+
 ---
 
 ## 4. Первый запуск — CLI

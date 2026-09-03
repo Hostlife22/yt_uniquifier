@@ -1,8 +1,9 @@
-"""Detect which ffmpeg encoders actually work on this machine.
+"""Detect working FFmpeg encoders and apply an explicit selection policy.
 
 Strategy: enumerate a fixed candidate list (NVENC, QSV, VideoToolbox, AMF, x264/x265)
 and run a short null-output encode for each. Cache the result keyed by ffmpeg --version,
-so repeated `yt-uniq` invocations don't re-probe.
+device/driver signature, so repeated `yt-uniq` invocations don't re-probe. Automatic
+selection is quality-first; balanced/speed are explicit operator choices.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from yt_uniquifier.core.errors import EncoderError
 from yt_uniquifier.core.models import EncoderCandidate, EncoderKind, EncoderVendor
@@ -29,6 +30,10 @@ if TYPE_CHECKING:
     from yt_uniquifier.core.runner import CancelToken
 
 CACHE_TTL_SEC = 7 * 24 * 3600
+ENCODER_CACHE_SCHEMA_VERSION = 2
+ENCODER_POLICY_ENV = "YT_UNIQ_ENCODER_POLICY"
+EncoderPolicy = Literal["quality", "balanced", "speed"]
+_ENCODER_POLICIES = frozenset({"quality", "balanced", "speed"})
 
 
 @dataclass(frozen=True)
@@ -82,7 +87,8 @@ _VENDOR_DEFAULT_PARALLEL: dict[str, int] = {
 # NVIDIA chip names that signal a pro/datacenter card with no NVENC session cap.
 _NVIDIA_PRO_TOKENS = ("quadro", "rtx a", "tesla", "a100", "h100", "l40", "rtx 6000")
 
-# Ordered by preference: hardware first, software fallback last.
+# Canonical discovery order only. Selection policy is defined separately below;
+# probe ordering must not accidentally decide production output quality.
 _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
     ("h264_nvenc", "nvenc", "h264"),
     ("hevc_nvenc", "nvenc", "hevc"),
@@ -92,15 +98,13 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
     ("hevc_videotoolbox", "videotoolbox", "hevc"),
     ("h264_amf", "amf", "h264"),
     ("hevc_amf", "amf", "hevc"),
-    # F8 (v0.6.0): Vulkan AV1 (FFmpeg 8.0 "Huffman"). Cross-vendor —
-    # works on AMD, Intel, and recent NVIDIA without vendor-specific
-    # NVENC/QSV/AMF paths. The probe is the same lavfi null-source
-    # test as the others; pick_encoder still respects user `prefer`.
-    ("av1_vulkan", "vulkan", "av1"),
-    # v1.2.0 Task 22 — AV1 hardware paths.  Probed after vulkan so the
-    # cross-vendor encoder wins by default when present, with NVENC/QSV/
-    # AMF/VideoToolbox AV1 as vendor-specific fallbacks for older FFmpeg
-    # builds.  All four reuse the same vendor tag as their h264/hevc
+    # av1_vulkan is intentionally not advertised yet. FFmpeg requires Vulkan
+    # hardware frames (init_hw_device + hwupload), while this pipeline currently
+    # produces CPU filter frames. A cheap CPU-frame probe therefore cannot prove
+    # that the real graph is runnable. Keep the vendor contract for old plans,
+    # but do not auto-select it until an end-to-end upload path is implemented.
+    # v1.2.0 Task 22 — AV1 hardware paths. All four reuse the same vendor
+    # tag as their h264/hevc
     # siblings — the CRF/quality knobs are identical (cq, global_quality,
     # qp_i/qp_p, b:v).
     ("av1_nvenc", "nvenc", "av1"),
@@ -116,6 +120,58 @@ _CANDIDATES: tuple[tuple[str, EncoderVendor, EncoderKind], ...] = (
     ("libsvtav1", "svtav1", "av1"),
     ("libaom-av1", "libaom", "av1"),
 )
+
+
+_POLICY_ORDER: dict[EncoderPolicy, dict[EncoderKind, tuple[str, ...]]] = {
+    # Production default: prefer deterministic, mature software encoders. For
+    # AV1, libaom is the compression-quality choice; operators processing long
+    # material can choose balanced (SVT-AV1) or speed (hardware) explicitly.
+    "quality": {
+        "h264": ("libx264", "h264_nvenc", "h264_qsv", "h264_videotoolbox", "h264_amf"),
+        "hevc": ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_videotoolbox", "hevc_amf"),
+        "av1": (
+            "libaom-av1", "libsvtav1", "av1_nvenc", "av1_qsv",
+            "av1_videotoolbox", "av1_amf",
+        ),
+    },
+    # Balanced keeps the predictable x26x choices and avoids reference-slow
+    # libaom for AV1. This is the practical long-form CPU policy.
+    "balanced": {
+        "h264": ("libx264", "h264_nvenc", "h264_qsv", "h264_videotoolbox", "h264_amf"),
+        "hevc": ("libx265", "hevc_nvenc", "hevc_qsv", "hevc_videotoolbox", "hevc_amf"),
+        "av1": (
+            "libsvtav1", "av1_nvenc", "av1_qsv", "av1_videotoolbox",
+            "av1_amf", "libaom-av1",
+        ),
+    },
+    # Speed favours verified hardware paths, retaining a software fallback.
+    "speed": {
+        "h264": ("h264_nvenc", "h264_qsv", "h264_videotoolbox", "h264_amf", "libx264"),
+        "hevc": ("hevc_nvenc", "hevc_qsv", "hevc_videotoolbox", "hevc_amf", "libx265"),
+        "av1": (
+            "av1_nvenc", "av1_qsv", "av1_videotoolbox", "av1_amf",
+            "libsvtav1", "libaom-av1",
+        ),
+    },
+}
+
+
+def resolve_encoder_policy(policy: str | None = None) -> EncoderPolicy:
+    """Resolve and validate encoder selection policy.
+
+    The environment hook keeps one policy consistent across CLI, GUI, web, and
+    distributed workers without duplicating frontend options. An explicit encoder
+    override still wins over policy and is validated strictly by its caller.
+    """
+    value = (policy if policy is not None else os.environ.get(ENCODER_POLICY_ENV, "quality"))
+    value = value.strip().lower()
+    if value not in _ENCODER_POLICIES:
+        allowed = ", ".join(sorted(_ENCODER_POLICIES))
+        raise EncoderError(
+            f"invalid encoder policy {value!r}; expected one of: {allowed} "
+            f"(configure with {ENCODER_POLICY_ENV})"
+        )
+    return cast(EncoderPolicy, value)
 
 
 def detect_encoders(
@@ -178,11 +234,15 @@ def pick_encoder(
     *,
     prefer: Sequence[str] | None = None,
     codec: EncoderKind = "h264",
+    policy: str | None = None,
+    require_preferred: bool = False,
 ) -> EncoderCandidate:
-    """Pick highest-priority working encoder matching codec.
+    """Pick a working encoder matching codec and the requested policy.
 
-    Order: explicit `prefer` list first (in order), then the natural candidate
-    order. libx264/libx265 always available as fallback.
+    Explicit ``prefer`` entries win in order. When ``require_preferred`` is true,
+    failure to select one is an error rather than a silent automatic fallback.
+    Otherwise, ``quality`` (the production default), ``balanced``, or ``speed``
+    determines the automatic order.
     """
     working = [c for c in candidates if c.works and c.codec == codec]
     if not working:
@@ -196,15 +256,33 @@ def pick_encoder(
         for name in prefer:
             if name in by_name:
                 return by_name[name]
+        if require_preferred:
+            all_by_name = {c.name: c for c in candidates}
+            reasons: list[str] = []
+            for name in prefer:
+                candidate = all_by_name.get(name)
+                if candidate is None:
+                    reasons.append(f"{name}: unknown encoder")
+                elif candidate.codec != codec:
+                    reasons.append(
+                        f"{name}: codec is {candidate.codec}, requested profile needs {codec}"
+                    )
+                else:
+                    reasons.append(f"{name}: {candidate.error or 'probe failed'}")
+            raise EncoderError(
+                "requested encoder override is unavailable: " + "; ".join(reasons)
+            )
 
-    # Otherwise pick first working candidate in canonical order.
-    canonical_order = [name for name, _, k in _CANDIDATES if k == codec]
+    resolved_policy = resolve_encoder_policy(policy)
+    policy_order = _POLICY_ORDER[resolved_policy][codec]
     by_name = {c.name: c for c in working}
-    for name in canonical_order:
+    for name in policy_order:
         if name in by_name:
             return by_name[name]
 
-    return working[0]  # unreachable in practice
+    # Future/plugin candidates may not yet have a policy rank. Preserve their
+    # discovery order as a compatibility fallback after every known encoder.
+    return working[0]
 
 
 def _detect_max_parallel(vendor: EncoderVendor) -> int:
@@ -434,6 +512,8 @@ def _load_cache(
         raw: dict[str, Any] = json.loads(cache_path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
+    if raw.get("schema_version") != ENCODER_CACHE_SCHEMA_VERSION:
+        return None
     if raw.get("version_key") != version_key:
         return None
     if time.time() - raw.get("written_at", 0) > CACHE_TTL_SEC:
@@ -450,7 +530,7 @@ def _save_cache(
     cache_path = cache_path or _cache_path()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema_version": 1,
+        "schema_version": ENCODER_CACHE_SCHEMA_VERSION,
         "version_key": version_key,
         "written_at": time.time(),
         # mode="json" coerces any Enum/Path/datetime fields to JSON-native

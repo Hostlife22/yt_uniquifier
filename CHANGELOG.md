@@ -14,6 +14,17 @@ the last tag.
 
 ### Fixed
 
+- Make automatic encoder selection quality-first with explicit
+  `quality|balanced|speed` policies; reject an unavailable `--encoder` instead of
+  silently falling back, stop advertising the incomplete Vulkan AV1 path, and bump
+  the discovery-cache schema so stale Vulkan-capable entries cannot survive.
+- Share encoder capacity across concurrent in-process runs so separate web/GUI jobs
+  cannot each consume the full CPU/GPU session allowance.
+- Route concat and optional bitstream sanitization through the bounded-log,
+  progress-watchdog FFmpeg runner; remove fixed one-hour termination, preserve the
+  target container/metadata, and reject silent AV1/HEVC-to-H.264 conversion.
+- Measure benchmark peak RSS across the live Python/FFmpeg process tree with labelled
+  cross-platform fallback instead of platform-dependent `RUSAGE_SELF` units.
 - Reject `target_vmaf` feedback when geometry, retiming, mirroring, overlays,
   subtitles, or tonemapping make the plain source reference unregistered; enforce
   the guard in both preflight and direct segment processing before the first encode.

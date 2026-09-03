@@ -296,23 +296,9 @@ def test_lease_cursor_picks_up_files_added_after_drain(
 # ============================================================== F8
 
 
-def test_av1_vulkan_in_candidates() -> None:
-    """F8 (v0.6.0 bonus): av1_vulkan must be in the candidate list so
-    Vulkan-capable AMD/Intel GPUs get an AV1 path without NVENC/QSV."""
+def test_av1_vulkan_is_not_advertised_without_a_hwupload_pipeline() -> None:
+    """A CPU-frame probe cannot validate Vulkan's hardware-frame contract."""
     from yt_uniquifier.core.encoder import _CANDIDATES
 
     names = [name for name, _, _ in _CANDIDATES]
-    assert "av1_vulkan" in names, (
-        "FFmpeg 8.0 introduced av1_vulkan; the candidate list must "
-        "include it so detect_encoders probes for it on cold start"
-    )
-
-    # Vendor must be a recognised label so the runtime's
-    # max_parallel resolver doesn't fall through to the unknown
-    # default.
-    av1 = next(
-        (name, vendor, codec) for name, vendor, codec in _CANDIDATES
-        if name == "av1_vulkan"
-    )
-    assert av1[1] == "vulkan"
-    assert av1[2] == "av1"
+    assert "av1_vulkan" not in names

@@ -37,6 +37,7 @@ def preflight_cmd(
             detect_encoders(),
             prefer=[encoder_override] if encoder_override else None,
             codec=prof.target_codec,
+            require_preferred=encoder_override is not None,
         )
         plan = Plan(
             source=source, profile=prof, encoder=enc,

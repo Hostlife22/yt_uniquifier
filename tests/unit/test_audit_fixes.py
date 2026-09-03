@@ -204,6 +204,7 @@ def test_phase3_h3_no_env_mutation_in_parallel_batch(
     class _StubEncoder:
         max_parallel = 2
         name = "libx264"
+        vendor = "x264"
 
     class _StubPlan:
         encoder = _StubEncoder()
@@ -321,14 +322,11 @@ def test_phase6_m1_concat_error_includes_head_and_tail(
 
     big_stderr = "FATAL: bad container header\n" + ("noise\n" * 200) + "END."
 
-    def fake_run(cmd: list[str], **_kw: Any) -> Any:
-        raise subprocess.CalledProcessError(
-            returncode=1, cmd=cmd, stderr=big_stderr,
-        )
+    def fake_run(command: Any, *, log_path: Path, **_kw: Any) -> Any:
+        log_path.write_text(big_stderr, encoding="utf-8")
+        raise PipelineError("ffmpeg exited with 1")
 
-    # monkeypatch (not attribute assignment) — leaks across tests
-    # otherwise and breaks every other test using subprocess.run.
-    monkeypatch.setattr(seg_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(seg_mod, "run_ffmpeg", fake_run)
     with pytest.raises(PipelineError) as ei:
         seg_mod.concat_segments(
             [tmp_path / "seg_0.mkv"], None, tmp_path / "out.mp4",

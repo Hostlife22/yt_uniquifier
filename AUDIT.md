@@ -357,14 +357,12 @@ explicit failure state и constrained multi-objective/Pareto selection. Снач
 
 ## Long-form, reliability и performance
 
-- Runner хранит весь FFmpeg output в `list[str]` и пишет log после завершения;
-  long-form run расходует память и теряет журнал при crash.
-- Основной merged-stdout read loop не имеет stall/wall timeout. Ветка 3600 s для
-  real process недостижима, поскольку stderr merged в stdout.
-- Первый parallel failure отменяет соседние FFmpeg только если caller передал
-  `CancelToken`; иначе executor ждёт оставшиеся segment jobs.
-- Concat имеет жёсткий 3600 s timeout; sanitizer также 3600 s и держит PIPE до
-  `communicate`, что создаёт deadlock/false timeout risk для длинного encode.
+- **Исправлено:** runner хранит bounded 2 MiB tail, одновременно пишет полный log,
+  использует progress-based stall watchdog и завершает всё process tree.
+- **Исправлено:** concat и sanitizer используют общий runner без жёсткого часового
+  wall timeout; optional wall timeout остаётся настраиваемым через environment.
+- **Исправлено:** первый parallel failure всегда отменяет соседние FFmpeg через
+  internal token, даже если caller не передал собственный.
 - Checkpoint lock реализован check-then-replace, а не exclusive create: два процесса
   могут одновременно решить, что lock свободен. Cross-host lock сразу reclaim.
 - `CheckpointStore.close()` предусмотрен, но `run_full` его не вызывает; daemon
@@ -372,9 +370,9 @@ explicit failure state и constrained multi-objective/Pareto selection. Снач
 - `main_audio.m4a` resume проверяется лишь по существованию path, без hash/probe.
 - Scene segmentation игнорирует `target_size_sec` как upper bound: static фильм может
   стать одним гигантским segment, fast-cut — множеством малых.
-- Web запускает unbounded background threads, каждый до 64 segment workers; нет
-  global CPU/GPU budget. Одинаковый `output_name` даёт last-writer-wins race; registry
-  не очищается и не переживает restart; queue sentinel может блокировать worker.
+- **Исправлено process-locally:** web имеет admission limit/retention/persisted state,
+  одинаковый output reservation и неблокирующий terminal marker; overlapping jobs
+  делят CPU/vendor semaphore. Cross-process/device locking и disk reservation открыты.
 - Distributed heartbeat per hostname не различает два worker process на host;
   живой sibling маскирует погибший job. При lease на другой host меняется input path
   и plan hash, поэтому resume не переносится. Distributed worker отключает
@@ -390,14 +388,15 @@ Availability probing реальным коротким encode — сильная
 | NVENC | H264/HEVC/AV1 candidates, heuristic parallel cap | 10-bit/profile/level/resolution/rate-control/session and per-GPU routing unverified |
 | QSV | H264/HEVC/AV1 candidates | Device initialization, 10-bit and filters unverified |
 | AMF | H264/HEVC/AV1 candidates | Pixel formats/rate-control/driver capabilities unverified |
-| VideoToolbox | Real local H264/HEVC probe works | Quality args differ between paths; 10-bit HDR and concurrency unverified |
-| libx264 | Reliable fallback | Current default hardware-first conflicts with quality-first priority; GOP differs from YouTube guidance |
-| libx265 | Reliable availability | Mastering/CLL propagation not implemented |
-| AV1 | SVT-AV1 locally available | `av1_vulkan` lacks vendor-specific args; HW AV1 matrix absent |
+| VideoToolbox | Real local H264/HEVC capability probe; HLG and two-session H264 verified on this Mac | Other hardware/driver matrices remain unverified |
+| libx264 | Reliable quality-policy default | GOP differs from YouTube guidance |
+| libx265 | Reliable quality-policy default | Wider natural HDR corpus still required |
+| AV1 | SVT-AV1 locally available | Vulkan auto-selection disabled until a real hardware-frame upload graph exists; other HW AV1 unavailable locally |
 
-`--encoder` описан как Force, но selection фактически применяет override только среди
-candidates требуемого profile codec и может молча выбрать другой. Cache живёт 7 дней
-и keyed по FFmpeg version, но не по GPU/driver state.
+Automatic selection now has explicit `quality|balanced|speed` policy, defaulting to
+quality; `--encoder` is strict and cannot silently select another candidate. Cache
+includes OS/device environment plus NVIDIA UUID/driver state; non-NVIDIA runtime
+failure invalidation remains open.
 
 ## Security findings
 

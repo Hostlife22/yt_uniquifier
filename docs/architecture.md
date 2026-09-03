@@ -54,7 +54,7 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/audio_windows.py` | `~60 s` audio windowing for `divergent` strategy — per-window seed via `derive_segment_seed(plan_hash, window_idx + 1_000_000, run_seed)` with `0.1 s` crossfade; loudnorm stays global |
 | `core/metadata.py` | `-metadata` args + title templates |
 | `core/preflight.py` | YouTube target matrix + HDR validation + dry-run filter probes (`_ffmpeg_filter_works`) for `rubberband`, `zscale`, and tonemap dependencies |
-| `core/sanitizer.py` | Opt-in second-pass libx264 re-encode (`yt-uniq run --sanitize-bitstream`) to normalize file-level encoder signature; no-op on libx264 source, refuses HEVC/HDR-keep |
+| `core/sanitizer.py` | Opt-in libx264 interoperability normalization (`--sanitize-bitstream`); generation-loss warning, no-op on libx264, refuses HDR/HEVC/AV1 contracts |
 | `core/orchestrator.py` | `run_full(plan, options, on_event, cancel_token) -> RunSummary` |
 | `core/profile_loader.py` | YAML → `Profile` with pydantic validation (`extra=forbid`) |
 | `core/errors.py` | Typed exception hierarchy: `YtUniquifierError`, `ProbeError`, `EncoderError`, `FfmpegNotFoundError`, `PipelineError`, `CheckpointError`, `PreflightFailure` |
@@ -72,13 +72,14 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 input.mp4
   ├─ probe()              → SourceMeta (streams, HDR, chapters)
   ├─ load_profile()       → Profile (transforms, audio_tracks, keep_hdr, seed_strategy…)
-  ├─ pick_encoder()       → EncoderCandidate (with max_parallel cap)
+  ├─ pick_encoder()       → EncoderCandidate (quality/balanced/speed + strict override)
   ├─ compute_plan_hash()  → Plan (frozen)
   ├─ resolve_run_seed()   → run_seed (per_run / per_file / fixed / divergent base)
   ├─ preflight()          → list[PreflightFinding] (fail → stop)
   ├─ plan_segments()      → list[Segment] (keyframe-aligned)
   ├─ checkpoint init/resume
   ├─ process_video_segments_parallel(workers=N, cap=encoder.max_parallel):
+  │     acquire shared process CPU/vendor capacity per FFmpeg child
   │     for each pending segment:
   │       seg_plan = plan_for_segment(plan, idx)   # divergent: per-seg seed
   │       stream_copy_extract → seg_NNNN_src.mkv

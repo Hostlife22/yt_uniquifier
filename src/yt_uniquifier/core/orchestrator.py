@@ -64,10 +64,9 @@ class RunOptions:
     # >1 enables parallel segment encoding on CPU (libx264/libx265 only).
     # GPU encoders silently fall back to sequential (single VRAM context).
     workers: int = 1
-    # v0.4.3 — second-pass libx264 re-encode of the final output to strip
-    # NVENC/QSV/AMF/VideoToolbox bitstream signatures. Adds ~30-60 min
-    # wall time + ~3 VMAF points drop on long sources. No-op for
-    # libx264-source runs. Refused on HDR/HEVC paths.
+    # Optional libx264 interoperability normalization. Adds generation loss
+    # and substantial wall time, so it remains opt-in and is refused for
+    # HDR/HEVC/AV1 output contracts.
     sanitize_bitstream: bool = False
     # v0.7 R4 / F2 — live divergence sampling. After each re-encoded
     # segment, pull a few frames from both source[start..end] and the
@@ -142,6 +141,7 @@ def build_plan(input_path: Path, profile: Profile, encoder_override: str | None)
         detect_encoders(),
         prefer=[encoder_override] if encoder_override else None,
         codec=profile.target_codec,
+        require_preferred=encoder_override is not None,
     )
     run_seed = resolve_run_seed(profile, source)
     return Plan(
@@ -658,8 +658,13 @@ def _run_full_body(
         subtitle_codecs=[stream.codec for stream in plan.source.subtitle],
         auxiliary_streams=list(get_auxiliary_streams(plan.source)),
         target_duration_sec=expected_output_duration(plan),
+        on_event=lambda event: emit(RunEvent(
+            kind=event.kind,
+            payload={**event.payload, "phase": "concat"},
+        )),
+        cancel_token=cancel_token,
     )
-    # v0.4.3 — optional bitstream sanitization (second-pass libx264).
+    # Optional interoperability normalization (second-pass libx264).
     if options.sanitize_bitstream:
         from yt_uniquifier.core.sanitizer import (
             needs_sanitization,
@@ -673,7 +678,13 @@ def _run_full_body(
                 "message": f"re-encoding {plan.encoder.vendor} output via libx264",
             }))
             sanitize_bitstream(
-                options.output, options.output, cancel_token=cancel_token,
+                options.output,
+                options.output,
+                cancel_token=cancel_token,
+                on_event=lambda event: emit(RunEvent(
+                    kind=event.kind,
+                    payload={**event.payload, "phase": "sanitize"},
+                )),
             )
         else:
             emit(RunEvent(kind="log", payload={

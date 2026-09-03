@@ -8,25 +8,24 @@ silently swapped each other's contents.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from yt_uniquifier.core import segmenter as segmenter_mod
+from yt_uniquifier.core.errors import PipelineError
+from yt_uniquifier.core.runner import RunResult
 
 
-def _stub_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-    args = _args[0]
-    assert isinstance(args, list)
-    Path(args[-1]).write_bytes(b"muxed")
-    return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+def _stub_run(command, *, output, **_kwargs):  # type: ignore[no-untyped-def]
+    output.write_bytes(b"muxed")
+    return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
 
 def test_concat_list_written_in_work_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _stub_run)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _stub_run)
 
     work_dir = tmp_path / "work" / "job_A"
     work_dir.mkdir(parents=True)
@@ -55,11 +54,11 @@ def test_concat_list_isolated_between_parallel_jobs(
     """Two jobs sharing output.parent but with distinct work_dirs must
     not see each other's concat.txt."""
 
-    def _capture(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
-        Path(args[-1]).write_bytes(b"muxed")
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+    def _capture(command, *, output, **_kw):  # type: ignore[no-untyped-def]
+        output.write_bytes(b"muxed")
+        return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _capture)
 
     shared_out = tmp_path / "shared"
     shared_out.mkdir()
@@ -97,11 +96,12 @@ def test_concat_is_atomic_and_preserves_existing_output_on_failure(
     segment = tmp_path / "seg.mkv"
     segment.touch()
 
-    def _fail(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
-        Path(args[-1]).write_bytes(b"partial")
-        raise subprocess.CalledProcessError(1, args, stderr="mux failed")
+    def _fail(command, *, output, log_path, **_kw):  # type: ignore[no-untyped-def]
+        output.write_bytes(b"partial")
+        log_path.write_text("mux failed", encoding="utf-8")
+        raise PipelineError("ffmpeg exited with 1")
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _fail)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _fail)
 
     with pytest.raises(Exception, match="concat failed"):
         segmenter_mod.concat_segments(
@@ -117,12 +117,12 @@ def test_concat_maps_all_requested_passthrough_audio_tracks(
 ) -> None:
     captured: list[str] = []
 
-    def _capture(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
-        captured.extend(args)
-        Path(args[-1]).write_bytes(b"muxed")
-        return subprocess.CompletedProcess(args=args, returncode=0)
+    def _capture(command, *, output, **_kw):  # type: ignore[no-untyped-def]
+        captured.extend(command.args)
+        output.write_bytes(b"muxed")
+        return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _capture)
     segment = tmp_path / "seg.mkv"
     segment.touch()
     segmenter_mod.concat_segments(
@@ -146,12 +146,12 @@ def test_concat_maps_media_streams_and_chapters_from_original_source(
 ) -> None:
     captured: list[str] = []
 
-    def _capture(args: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
-        captured.extend(args)
-        Path(args[-1]).write_bytes(b"muxed")
-        return subprocess.CompletedProcess(args=args, returncode=0)
+    def _capture(command, *, output, **_kw):  # type: ignore[no-untyped-def]
+        captured.extend(command.args)
+        output.write_bytes(b"muxed")
+        return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _capture)
     segment = tmp_path / "seg.mkv"
     source = tmp_path / "source.mkv"
     segment.touch()

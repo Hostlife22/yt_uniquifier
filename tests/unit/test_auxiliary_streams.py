@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,6 +17,7 @@ from yt_uniquifier.core.models import SourceMeta
 from yt_uniquifier.core.pipeline import compute_plan_hash
 from yt_uniquifier.core.preflight import has_fail, preflight
 from yt_uniquifier.core.probe import _parse_auxiliary_streams
+from yt_uniquifier.core.runner import RunResult
 
 
 def _attachment() -> AuxiliaryStream:
@@ -121,12 +121,12 @@ def test_concat_maps_mkv_attachment_and_restores_required_metadata(
 ) -> None:
     captured: list[str] = []
 
-    def _capture(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured.extend(args)
-        Path(args[-1]).write_bytes(b"muxed")
-        return subprocess.CompletedProcess(args=args, returncode=0)
+    def _capture(command, *, output, **_kwargs):  # type: ignore[no-untyped-def]
+        captured.extend(command.args)
+        output.write_bytes(b"muxed")
+        return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _capture)
     segment = tmp_path / "segment.mkv"
     source = tmp_path / "source.mkv"
     segment.touch()
@@ -153,12 +153,12 @@ def test_concat_maps_mov_timecode_data(
 ) -> None:
     captured: list[str] = []
 
-    def _capture(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured.extend(args)
-        Path(args[-1]).write_bytes(b"muxed")
-        return subprocess.CompletedProcess(args=args, returncode=0)
+    def _capture(command, *, output, **_kwargs):  # type: ignore[no-untyped-def]
+        captured.extend(command.args)
+        output.write_bytes(b"muxed")
+        return RunResult(returncode=0, duration_sec=0.1, output_path=output)
 
-    monkeypatch.setattr(segmenter_mod.subprocess, "run", _capture)
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _capture)
     segment = tmp_path / "segment.mkv"
     source = tmp_path / "source.mov"
     segment.touch()
