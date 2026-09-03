@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import sleep
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.gui.workers.queue_status_worker import QueueStatusWorker
@@ -133,3 +133,48 @@ def test_queue_worker_heartbeats_during_encode(tmp_path: Path) -> None:
 
     assert len(observed_mtimes) == 2
     assert observed_mtimes[1] > observed_mtimes[0]
+
+
+def test_queue_worker_periodically_reconciles_even_when_reaper_moves_nothing(
+    tmp_path: Path,
+) -> None:
+    recover_commits = Mock(side_effect=[0, 1])
+    reap_stale = Mock(return_value=0)
+    heartbeat = Mock()
+    lease_calls = 0
+    worker = QueueWorker(
+        tmp_path,
+        _profile(),
+        tmp_path / "out",
+        poll_sec=0.0,
+    )
+
+    def lease() -> None:
+        nonlocal lease_calls
+        lease_calls += 1
+        if lease_calls == 4:
+            worker.request_cancel()
+        return None
+
+    fake_queue = Mock(
+        recover_commits=recover_commits,
+        reap_stale=reap_stale,
+        heartbeat=heartbeat,
+        lease=lease,
+    )
+    logs: list[str] = []
+    worker.log.connect(logs.append)
+
+    with (
+        patch(
+            "yt_uniquifier.gui.workers.queue_worker.FileQueue",
+            return_value=fake_queue,
+        ),
+        patch("yt_uniquifier.gui.workers.queue_worker.sleep", return_value=None),
+    ):
+        worker.run()
+
+    assert lease_calls == 4
+    assert reap_stale.call_count == 1
+    assert recover_commits.call_count == 2
+    assert any("reconciled 1" in message for message in logs)

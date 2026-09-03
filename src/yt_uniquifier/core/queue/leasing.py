@@ -13,6 +13,7 @@ Layout:
     │   ├── <worker-id>/            files claimed by one worker process
     │   └── <worker-id>.alive       mtime-as-heartbeat
     ├── done/                       completed (kept as a marker)
+    ├── .commits/                   durable output-publication journals
     └── failed/
         └── <worker-id>/
             ├── <input>
@@ -23,6 +24,8 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
+import logging
 import os
 import secrets
 import socket
@@ -31,6 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yt_uniquifier.core.errors import YtUniquifierError
+
+_log = logging.getLogger(__name__)
+_COMMIT_JOURNAL_DIR = ".commits"
+_COMMIT_JOURNAL_SCHEMA = 1
 
 
 class QueueError(YtUniquifierError):
@@ -294,32 +301,250 @@ class FileQueue:
             f".{output.stem}.{worker_key}.part{output.suffix}"
         )
 
+    def _commit_journal_dir(self) -> Path:
+        journal_dir = self.layout.root / _COMMIT_JOURNAL_DIR
+        try:
+            journal_dir.mkdir(mode=0o770, parents=True, exist_ok=True)
+        except OSError as exc:
+            raise QueueError(f"could not create commit journal storage: {exc}") from exc
+        if journal_dir.is_symlink() or not journal_dir.is_dir():
+            raise QueueError("commit journal storage is not a directory")
+        return journal_dir
+
+    def _write_commit_journal(
+        self,
+        leased: Path,
+        staged: Path,
+        output: Path,
+    ) -> tuple[Path, Path]:
+        """Persist commit intent before the lease-to-done fencing rename."""
+        journal_dir = self._commit_journal_dir()
+        token = secrets.token_hex(8)
+        journal = journal_dir / f"commit-{token}.json"
+        fence = self.layout.done / f".commit-{token}.fence"
+        temp = journal_dir / f".{journal.name}.{os.getpid()}.tmp"
+        payload = {
+            "schema_version": _COMMIT_JOURNAL_SCHEMA,
+            "worker_id": self.worker_id,
+            "input_name": leased.name,
+            "staged_name": staged.name,
+            "output_name": output.name,
+            "fence_name": fence.name,
+            "created_at": time.time(),
+        }
+        try:
+            fd = os.open(
+                temp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o660,
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, journal)
+        except BaseException as exc:
+            with contextlib.suppress(OSError):
+                temp.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                journal.unlink(missing_ok=True)
+            if isinstance(exc, Exception):
+                raise QueueError(f"could not persist output commit journal: {exc}") from exc
+            raise
+        return journal, fence
+
+    @staticmethod
+    def _remove_commit_journal(journal: Path) -> None:
+        with contextlib.suppress(OSError):
+            journal.unlink(missing_ok=True)
+
+    @staticmethod
+    def _journal_basename(payload: dict[str, object], field: str) -> str:
+        value = payload.get(field)
+        if (
+            not isinstance(value, str)
+            or value in {"", ".", ".."}
+            or "/" in value
+            or "\\" in value
+            or Path(value).name != value
+        ):
+            raise QueueError(f"commit journal has invalid {field}")
+        return value
+
+    def _journal_owner_is_live(self, worker_id: str, stale_sec: int) -> bool:
+        alive = self.layout.in_progress / f"{worker_id}.alive"
+        try:
+            age = time.time() - alive.stat().st_mtime
+        except OSError:
+            return False
+        return age <= stale_sec
+
+    def recover_commits(self, output_dir: Path, *, stale_sec: int = 300) -> int:
+        """Reconcile durable output commits left by interrupted workers.
+
+        A journal-specific hidden fence in ``done/`` proves that its staged
+        output may be published. A same-named marker from an older run cannot
+        authorize publication. Returns the number of journals resolved or
+        safely discarded.
+        """
+        if stale_sec < 0:
+            raise ValueError("stale_sec must be >= 0")
+        journal_dir = self.layout.root / _COMMIT_JOURNAL_DIR
+        if not journal_dir.exists():
+            return 0
+        if journal_dir.is_symlink() or not journal_dir.is_dir():
+            raise QueueError("commit journal storage is not a directory")
+        output_root = output_dir.resolve(strict=False)
+        resolved = 0
+        for journal in sorted(journal_dir.glob("commit-*.json")):
+            if journal.is_symlink() or not journal.is_file():
+                raise QueueError(f"commit journal entry is not a regular file: {journal}")
+            try:
+                payload = json.loads(journal.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise QueueError(f"commit journal is unreadable: {journal}") from exc
+            if not isinstance(payload, dict):
+                raise QueueError(f"commit journal has invalid payload: {journal}")
+            if payload.get("schema_version") != _COMMIT_JOURNAL_SCHEMA:
+                raise QueueError(f"unsupported commit journal schema: {journal}")
+
+            worker_id = self._journal_basename(payload, "worker_id")
+            input_name = self._journal_basename(payload, "input_name")
+            staged_name = self._journal_basename(payload, "staged_name")
+            output_name = self._journal_basename(payload, "output_name")
+            fence_name = self._journal_basename(payload, "fence_name")
+            if not fence_name.startswith(".commit-") or not fence_name.endswith(".fence"):
+                raise QueueError("commit journal has invalid fence_name")
+            leased = self.layout.in_progress / worker_id / input_name
+            pending = self.layout.pending / input_name
+            done = self.layout.done / input_name
+            fence = self.layout.done / fence_name
+            staged = output_root / staged_name
+            output = output_root / output_name
+
+            if self._journal_owner_is_live(worker_id, stale_sec):
+                continue
+
+            if fence.exists():
+                if fence.is_symlink() or not fence.is_file():
+                    raise QueueError(f"commit fence is not a regular file: {fence}")
+                if staged.exists():
+                    if staged.is_symlink() or not staged.is_file():
+                        raise QueueError(f"staged output is not a regular file: {staged}")
+                    try:
+                        os.replace(staged, output)
+                    except FileNotFoundError:
+                        # A concurrent recovery may have completed the same journal.
+                        if not output.is_file() or output.is_symlink():
+                            raise QueueError(
+                                f"staged output disappeared during recovery: {staged}"
+                            ) from None
+                elif not output.is_file() or output.is_symlink():
+                    raise QueueError(
+                        f"fenced commit has neither staged nor final output: {journal}"
+                    )
+                try:
+                    os.replace(fence, done)
+                except FileNotFoundError:
+                    # Another recovery may already have canonicalized the fence.
+                    if not done.is_file() or done.is_symlink():
+                        raise QueueError(
+                            f"commit fence disappeared during recovery: {fence}"
+                        ) from None
+                self._remove_commit_journal(journal)
+                resolved += 1
+                continue
+
+            if leased.exists():
+                # The original owner is still processing or awaiting stale reaping.
+                continue
+
+            another_lease = any(
+                candidate.is_dir() and (candidate / input_name).exists()
+                for candidate in self.layout.in_progress.iterdir()
+            )
+            failed = any(
+                candidate.is_dir() and (candidate / input_name).exists()
+                for candidate in self.layout.failed.iterdir()
+            )
+            if pending.exists() or another_lease or failed:
+                # No done fence: the old staged bytes must never be published.
+                if staged.exists() and (staged.is_symlink() or staged.is_file()):
+                    with contextlib.suppress(OSError):
+                        staged.unlink()
+                self._remove_commit_journal(journal)
+                resolved += 1
+                continue
+
+            if (
+                done.is_file()
+                and not done.is_symlink()
+                and output.is_file()
+                and not output.is_symlink()
+                and not staged.exists()
+            ):
+                # Publication and fence canonicalization completed before a crash.
+                self._remove_commit_journal(journal)
+                resolved += 1
+                continue
+            raise QueueError(f"commit journal cannot be reconciled safely: {journal}")
+        return resolved
+
     def commit_output(self, leased: Path, staged: Path, output: Path) -> Path:
         """Fence a completed lease, then atomically publish its staged output.
 
-        Moving ``leased`` to ``done`` is the synchronisation point. If a stale
-        lease was already reaped, this worker cannot publish an obsolete result.
-        The encoded file stays hidden until that ownership transition succeeds.
+        Moving ``leased`` to a journal-specific hidden fence is the
+        synchronisation point. If a stale lease was already reaped, this worker
+        cannot publish an obsolete result. The encoded file stays hidden until
+        that ownership transition succeeds.
         """
         if leased.parent != self.host_dir or leased.is_symlink() or not leased.is_file():
             raise QueueError(f"lease ownership lost before output commit: {leased}")
         if staged.parent != output.parent or not staged.is_file():
             raise QueueError(f"staged output is missing or on a different directory: {staged}")
         output.parent.mkdir(parents=True, exist_ok=True)
+        # Close the startup/recovery race: a peer must observe this commit owner
+        # as live before the journal and done fence can become visible.
+        self.heartbeat()
+        journal, fence = self._write_commit_journal(leased, staged, output)
 
         try:
-            done = self.release_done(leased)
+            os.rename(leased, fence)
         except OSError as exc:
+            self._remove_commit_journal(journal)
             raise QueueError(f"lease ownership lost before output commit: {leased}") from exc
         try:
             os.replace(staged, output)
         except OSError:
-            # Restore the lease so the caller can put it in failed/. This handles
-            # ordinary publish errors; a hard process crash between the two atomic
-            # renames remains an operational recovery case documented in the runbook.
-            with contextlib.suppress(OSError):
-                os.rename(done, leased)
+            # Restore the lease so the caller can put it in failed/. If rollback
+            # also fails, retain the journal and staged bytes for another worker.
+            restored = False
+            try:
+                os.rename(fence, leased)
+                restored = True
+            except OSError as rollback_exc:
+                _log.error(
+                    "output publication and lease rollback both failed; "
+                    "commit journal retained at %s: %s",
+                    journal,
+                    rollback_exc,
+                )
+            if restored:
+                self._remove_commit_journal(journal)
             raise
+        done = self.layout.done / leased.name
+        try:
+            os.replace(fence, done)
+        except OSError as exc:
+            _log.error(
+                "output published but commit fence finalization failed; "
+                "journal retained at %s: %s",
+                journal,
+                exc,
+            )
+            raise QueueError(f"could not finalize output commit: {done}") from exc
+        self._remove_commit_journal(journal)
         return done
 
     def release_failed(self, leased: Path, error: str) -> Path:

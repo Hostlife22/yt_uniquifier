@@ -56,6 +56,13 @@ class QueueWorker(WorkerBase):
             return
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            recovered = q.recover_commits(self.out_dir)
+        except Exception as exc:
+            self.failed.emit(f"commit recovery failed: {exc}")
+            return
+        if recovered:
+            self.log.emit(f"reconciled {recovered} interrupted commits")
         heartbeat_stop = threading.Event()
         heartbeat_thread = threading.Thread(
             target=_heartbeat_loop,
@@ -64,8 +71,21 @@ class QueueWorker(WorkerBase):
         )
         heartbeat_thread.start()
 
+        poll_count = 0
         try:
             while not self.cancel_token.is_cancelled():
+                poll_count += 1
+                if poll_count % 4 == 0:
+                    try:
+                        reaped = q.reap_stale()
+                        recovered = q.recover_commits(self.out_dir)
+                    except Exception as exc:
+                        self.failed.emit(f"queue recovery failed: {exc}")
+                        return
+                    if reaped:
+                        self.log.emit(f"reaped {reaped} stale leases")
+                    if recovered:
+                        self.log.emit(f"reconciled {recovered} interrupted commits")
                 leased = q.lease()
                 if leased is None:
                     if self.stop_after_empty:
@@ -92,9 +112,9 @@ class QueueWorker(WorkerBase):
                     q.commit_output(leased, staged, out)
                     self.file_done.emit(str(leased), str(out))
                 except Exception as exc:
-                    staged.unlink(missing_ok=True)
                     msg = f"{type(exc).__name__}: {exc}"
                     if leased.exists():
+                        staged.unlink(missing_ok=True)
                         with contextlib.suppress(Exception):
                             q.release_failed(leased, msg)
                     self.file_failed.emit(str(leased), msg)

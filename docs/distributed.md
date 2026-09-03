@@ -68,14 +68,25 @@ leased files back to `pending/`.
 
 CLI and GUI workers keep this heartbeat running while FFmpeg is active. A completed
 encode is first written to a hidden worker-specific file beside the final output.
-The worker may publish it only after atomically moving its lease to `done/`; if a
-reaper already reclaimed the lease, the stale result is discarded.
+The worker may publish it only after atomically moving its lease to a journal-specific
+hidden fence in `done/`; if a reaper already reclaimed the lease, the stale result is
+discarded. After publication, that fence becomes the ordinary `done/<input>` marker.
 
-The queue provides fenced, at-least-once processing, not a transactional exactly-once
-guarantee. A hard power loss in the very small interval between the lease-to-`done`
-rename and final-output rename can leave a hidden `.part.<container>` file that needs
-operator recovery. Cross-host NFS deployments must therefore run lease/reap/crash
-qualification on the actual mount before production.
+Before that fence, the worker persists a small permission-controlled journal under
+`<queue>/.commits/`. If the process dies between the lease-to-fence rename and final
+output rename, another CLI or GUI worker waits for the original heartbeat to become
+stale and publishes the already validated staged file. The random fence token belongs
+to exactly one journal, so an older same-name `done` marker or a requeued hard link
+cannot authorize a new output. If the lease was reaped before reaching its fence,
+recovery deletes the unfenced staged artifact instead of publishing it.
+
+This closes the local hard-crash publication window and preserves fenced,
+at-least-once processing. It is not a transactional exactly-once guarantee across a
+network partition. Cross-host NFS deployments must still run lease/reap/journal/crash
+qualification on the actual mount before production; that matrix is **NOT VERIFIED**.
+All worker service accounts need a shared UID/GID or ACL granting read/write/delete
+access to the queue, output directory, staged files and `.commits/`. Journal payloads
+contain basenames and a random fence token only, not absolute source/output paths.
 
 ## Per-machine encoder variation
 
@@ -100,7 +111,7 @@ output directory and race on equal stems. Avoid that deployment by:
 ```yaml
 services:
   worker:
-    image: yt-uniquifier:0.3
+    image: yt-uniquifier:1.4.0
     volumes:
       - /mnt/shared:/shared:rw            # NFSv4 noac mount on host
     environment:
@@ -125,6 +136,10 @@ services:
 ```bash
 find /shared/queue/done -mtime +30 -delete
 ```
+
+Do not prune a `done/` marker while a matching file remains in `<queue>/.commits/`:
+the marker is the publication fence. Healthy workers reconcile journals after the
+owner heartbeat timeout, well before the 30-day example retention window.
 
 (A `yt-uniq queue prune --done-older-than 30d` subcommand is deferred to
 v0.4 — there's no work going into it before the real-CID validation

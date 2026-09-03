@@ -53,6 +53,13 @@ def worker_cmd(
     """Drain a queue: lease → run_full → release_done/failed → repeat."""
     q = FileQueue(queue_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        recovered = q.recover_commits(out_dir)
+    except YtUniquifierError as exc:
+        console.print(f"[red]commit recovery error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    if recovered:
+        console.print(f"[dim]reconciled {recovered} interrupted commits[/dim]")
 
     try:
         prof = load_profile(profile)
@@ -90,6 +97,11 @@ def worker_cmd(
                 reaped = q.reap_stale()
                 if reaped:
                     console.print(f"[dim]reaped {reaped} stale leases[/dim]")
+                recovered = q.recover_commits(out_dir)
+                if recovered:
+                    console.print(
+                        f"[dim]reconciled {recovered} interrupted commits[/dim]"
+                    )
 
             leased = q.lease()
             if leased is None:
@@ -110,14 +122,15 @@ def worker_cmd(
                 processed += 1
                 console.print(f"[green]✓[/green] {leased.name}")
             except Exception as exc:  # noqa: BLE001 — worker swallows per-file
-                staged.unlink(missing_ok=True)
                 tb = "".join(traceback.format_exception(type(exc), exc,
                                                          exc.__traceback__))
                 if leased.exists():
+                    staged.unlink(missing_ok=True)
                     q.release_failed(leased, tb)
                 else:
                     console.print(
-                        f"[yellow]lease lost before publish:[/yellow] {leased.name}"
+                        f"[yellow]lease lost or commit recovery pending:[/yellow] "
+                        f"{leased.name}"
                     )
                 failed += 1
                 console.print(f"[red]✗[/red] {leased.name} — {exc}")

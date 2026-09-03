@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Recover distributed outputs after a hard crash between a journal-specific token
+  fence and final publication by using a durable commit journal shared by CLI and GUI
+  workers; an older same-name marker cannot authorize an unfenced staged artifact.
+- Stabilize the watchdog activity regression under subprocess coverage while keeping
+  its runtime longer than the asserted stall timeout.
 - Reserve final web outputs atomically across processes sharing an output filesystem,
   release only the exact owner, and conservatively recover dead same-host owners.
 - Derive the web output suffix from the selected profile container and reject an

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -211,6 +212,7 @@ def test_commit_output_fences_then_atomically_publishes(tmp_path: Path) -> None:
     assert done.exists()
     assert output.read_bytes() == b"complete output"
     assert not staged.exists()
+    assert not list((tmp_path / "q" / ".commits").glob("commit-*.json"))
 
 
 def test_commit_output_rejects_a_reaped_lease(tmp_path: Path) -> None:
@@ -234,6 +236,250 @@ def test_commit_output_rejects_a_reaped_lease(tmp_path: Path) -> None:
     assert not output.exists()
     assert staged.exists()
     assert (tmp_path / "q" / "pending" / "a.mp4").exists()
+
+
+def test_commit_output_recovers_hard_crash_after_fence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crash after the token fence must not strand a completed output."""
+    from yt_uniquifier.core.queue import leasing as leasing_mod
+
+    class SimulatedPowerLoss(BaseException):
+        pass
+
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    output = output_dir / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"complete output")
+    real_replace = leasing_mod.os.replace
+
+    def crash_before_publish(src: Path, dest: Path) -> None:
+        if Path(src) == staged and Path(dest) == output:
+            raise SimulatedPowerLoss
+        real_replace(src, dest)
+
+    monkeypatch.setattr(leasing_mod.os, "replace", crash_before_publish)
+    with pytest.raises(SimulatedPowerLoss):
+        worker.commit_output(leased, staged, output)
+
+    fences = list((tmp_path / "q" / "done").glob(".commit-*.fence"))
+    assert len(fences) == 1
+    assert not (tmp_path / "q" / "done" / "a.mp4").exists()
+    assert staged.exists()
+    assert not output.exists()
+
+    monkeypatch.setattr(leasing_mod.os, "replace", real_replace)
+    recovery = FileQueue(tmp_path / "q", host="recovery")
+    assert recovery.recover_commits(output_dir) == 0
+    alive = tmp_path / "q" / "in_progress" / "worker.alive"
+    old = time.time() - 1_000
+    os.utime(alive, (old, old))
+    recovered = recovery.recover_commits(
+        output_dir,
+    )
+
+    assert recovered == 1
+    assert output.read_bytes() == b"complete output"
+    assert not staged.exists()
+    assert not fences[0].exists()
+    assert (tmp_path / "q" / "done" / "a.mp4").exists()
+    assert not list((tmp_path / "q" / ".commits").glob("commit-*.json"))
+
+
+def test_commit_output_retains_journal_when_publish_and_rollback_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core.queue import leasing as leasing_mod
+
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    output = output_dir / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"recoverable output")
+    real_replace = leasing_mod.os.replace
+    real_rename = leasing_mod.os.rename
+
+    def fail_publish(src: Path, dest: Path) -> None:
+        if Path(src) == staged and Path(dest) == output:
+            raise OSError("injected publish failure")
+        real_replace(src, dest)
+
+    def fail_rollback(src: Path, dest: Path) -> None:
+        if Path(src).name.startswith(".commit-") and Path(dest) == leased:
+            raise OSError("injected rollback failure")
+        real_rename(src, dest)
+
+    monkeypatch.setattr(leasing_mod.os, "replace", fail_publish)
+    monkeypatch.setattr(leasing_mod.os, "rename", fail_rollback)
+    with pytest.raises(OSError, match="injected publish failure"):
+        worker.commit_output(leased, staged, output)
+
+    journals = list((tmp_path / "q" / ".commits").glob("commit-*.json"))
+    fences = list((tmp_path / "q" / "done").glob(".commit-*.fence"))
+    assert len(journals) == 1
+    assert len(fences) == 1
+    assert staged.exists()
+
+    monkeypatch.setattr(leasing_mod.os, "replace", real_replace)
+    monkeypatch.setattr(leasing_mod.os, "rename", real_rename)
+    alive = tmp_path / "q" / "in_progress" / "worker.alive"
+    old = time.time() - 1_000
+    os.utime(alive, (old, old))
+    assert FileQueue(tmp_path / "q", host="recovery").recover_commits(output_dir) == 1
+    assert output.read_bytes() == b"recoverable output"
+    assert not journals[0].exists()
+
+
+def test_commit_output_recovers_after_publish_before_fence_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core.queue import leasing as leasing_mod
+
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    output = output_dir / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"published output")
+    real_replace = leasing_mod.os.replace
+
+    def fail_fence_finalization(src: Path, dest: Path) -> None:
+        if Path(src).name.startswith(".commit-") and Path(dest).name == "a.mp4":
+            raise OSError("injected finalization failure")
+        real_replace(src, dest)
+
+    monkeypatch.setattr(leasing_mod.os, "replace", fail_fence_finalization)
+    with pytest.raises(QueueError, match="finalize output commit"):
+        worker.commit_output(leased, staged, output)
+
+    assert output.read_bytes() == b"published output"
+    assert not staged.exists()
+    assert len(list((tmp_path / "q" / "done").glob(".commit-*.fence"))) == 1
+    monkeypatch.setattr(leasing_mod.os, "replace", real_replace)
+    alive = tmp_path / "q" / "in_progress" / "worker.alive"
+    old = time.time() - 1_000
+    os.utime(alive, (old, old))
+
+    assert FileQueue(tmp_path / "q", host="recovery").recover_commits(output_dir) == 1
+    assert (tmp_path / "q" / "done" / "a.mp4").exists()
+    assert not list((tmp_path / "q" / "done").glob(".commit-*.fence"))
+    assert not list((tmp_path / "q" / ".commits").glob("commit-*.json"))
+
+
+def test_unfenced_journal_is_discarded_after_stale_lease_is_reaped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SimulatedPowerLoss(BaseException):
+        pass
+
+    init_queue(tmp_path / "q")
+    # An older completed input with the same basename must not authorize this commit.
+    old_done = tmp_path / "q" / "done" / "a.mp4"
+    old_done.write_bytes(b"same input")
+    os.link(old_done, tmp_path / "q" / "pending" / "a.mp4")
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    output = output_dir / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"unfenced output")
+
+    real_rename = os.rename
+
+    def crash_before_fence(src: Path, dest: Path) -> None:
+        if Path(src) == leased and Path(dest).name.startswith(".commit-"):
+            raise SimulatedPowerLoss
+        real_rename(src, dest)
+
+    monkeypatch.setattr(os, "rename", crash_before_fence)
+    with pytest.raises(SimulatedPowerLoss):
+        worker.commit_output(leased, staged, output)
+
+    alive = tmp_path / "q" / "in_progress" / "worker.alive"
+    old = time.time() - 1_000
+    os.utime(alive, (old, old))
+    recovery = FileQueue(tmp_path / "q", host="recovery")
+    assert recovery.reap_stale(stale_sec=300) == 1
+    assert recovery.recover_commits(output_dir) == 1
+
+    assert (tmp_path / "q" / "pending" / "a.mp4").exists()
+    assert old_done.read_bytes() == b"same input"
+    assert not output.exists()
+    assert not staged.exists()
+    assert not list((tmp_path / "q" / ".commits").glob("commit-*.json"))
+
+
+def test_commit_journal_fsync_failure_keeps_lease_and_cleans_partial_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core.queue import leasing as leasing_mod
+
+    init_queue(tmp_path / "q")
+    _seed_pending(tmp_path / "q", ["a.mp4"])
+    worker = FileQueue(tmp_path / "q", host="worker")
+    leased = worker.lease()
+    assert leased is not None
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    output = output_dir / "a.uniq.mp4"
+    staged = worker.staged_output_path(output)
+    staged.write_bytes(b"complete output")
+
+    def fail_fsync(fd: int) -> None:
+        del fd
+        raise OSError("injected journal fsync failure")
+
+    monkeypatch.setattr(leasing_mod.os, "fsync", fail_fsync)
+    with pytest.raises(QueueError, match="persist output commit journal"):
+        worker.commit_output(leased, staged, output)
+
+    assert leased.exists()
+    assert staged.exists()
+    assert not (tmp_path / "q" / "done" / "a.mp4").exists()
+    assert not list((tmp_path / "q" / ".commits").iterdir())
+
+
+def test_commit_recovery_rejects_journal_path_injection(tmp_path: Path) -> None:
+    init_queue(tmp_path / "q")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    journal_dir = tmp_path / "q" / ".commits"
+    journal_dir.mkdir()
+    (journal_dir / "commit-hostile.json").write_text(json.dumps({
+        "schema_version": 1,
+        "worker_id": "worker",
+        "input_name": "a.mp4",
+        "staged_name": ".a.part.mp4",
+        "output_name": "../outside.mp4",
+        "fence_name": ".commit-hostile.fence",
+    }), encoding="utf-8")
+
+    with pytest.raises(QueueError, match="invalid output_name"):
+        FileQueue(tmp_path / "q", host="recovery").recover_commits(output_dir)
+
+    assert not (tmp_path / "outside.mp4").exists()
 
 
 # ---- heartbeat + reaper ---------------------------------------------------

@@ -389,8 +389,10 @@ lowest normalized violation с явным non-converged result. Ограниче
   Global admission/device/disk quotas и NFS qualification остаются открыты.
 - **Частично исправлено:** distributed workers используют process-unique
   host+PID+nonce leases, content/plan-stable work paths и fenced staged publication.
-  Recoverable cross-host commit journal, mandatory QA parity и NFS qualification
-  остаются открыты.
+  Durable journal с уникальным token-fence автоматически завершает публикацию после
+  crash между ownership fence и final rename; old same-name marker не может разрешить
+  публикацию, а unfenced staged bytes отбрасываются после reaping.
+  Mandatory QA parity и NFS/network-partition qualification остаются открыты.
 
 ## Encoder audit
 
@@ -452,7 +454,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1497 passed, 2 skipped на fully provisioned macOS environment |
+| Full `make check` | 1505 passed, 2 skipped на fully provisioned macOS environment |
+| Branch coverage gate | 81.91% (`1404 passed`, required 80%) |
 | Ruff | Passed |
 | Strict mypy (`157` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |

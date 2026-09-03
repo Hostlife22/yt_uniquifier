@@ -286,10 +286,13 @@ def test_stall_watchdog_terminates_silent_process(tmp_path: Path) -> None:
 def test_output_activity_resets_stall_watchdog(tmp_path: Path) -> None:
     script = (
         "import time; "
-        "[(print(f'heartbeat={i}', flush=True), time.sleep(0.05)) for i in range(8)]"
+        "[(print(f'heartbeat={i}', flush=True), time.sleep(0.05)) for i in range(20)]"
     )
     cmd = BuiltCommand(
-        args=[sys.executable, "-c", script],
+        # ``-S`` keeps pytest-cov's site hook out of this timing-only child;
+        # otherwise coverage bootstrap can consume the whole stall budget
+        # before the first line is emitted.
+        args=[sys.executable, "-S", "-c", script],
         filter_complex="",
         output_video_label="",
     )
@@ -298,7 +301,9 @@ def test_output_activity_resets_stall_watchdog(tmp_path: Path) -> None:
         cmd,
         output=tmp_path / "unused",
         progress_via_stdout=False,
-        stall_timeout_sec=0.2,
+        # The process runs for ~1 s, so a watchdog that does not reset on output
+        # still fires; heartbeats are ten times more frequent than the timeout.
+        stall_timeout_sec=0.5,
     )
 
     assert result.returncode == 0

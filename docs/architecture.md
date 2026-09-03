@@ -63,7 +63,7 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/qa/sscd.py` | v0.8.0 R4 — opt-in ML-grade similarity via Meta's SSCD embedding (`[ml]` extra), see [sscd.md](./sscd.md) |
 | `core/qa/corpus_db.py` | v0.8.0 R2 — SQLite (WAL + `BEGIN IMMEDIATE`) corpus store; one-shot auto-migration from legacy `index.json` |
 | `core/calibration/` | `intensity.scale_profile` (multiplicative scaling around identity) + `loop.calibrate` (bisect against the selected metric: chromaprint `cid_predict` by default, or SSCD via v0.8.0 R6 `metric="sscd"`) |
-| `core/queue/leasing.py` | Atomic POSIX-rename file queue (`pending/`, `in_progress/`, `done/`, `failed/`) with heartbeat + reaper |
+| `core/queue/leasing.py` | Atomic POSIX-rename file queue (`pending/`, `in_progress/`, `done/`, `failed/`) with heartbeat, reaper and durable fenced-output commit recovery |
 | `cli/cmd_worker.py` | Long-running queue drainer that calls `orchestrator.run_full` per leased file |
 
 ## Data flow for one input

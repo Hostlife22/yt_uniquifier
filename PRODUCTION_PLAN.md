@@ -428,8 +428,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** deterministic multi-user/multi-worker behavior.
 - **Status:** in progress — restart/pruning, two independent app instances, a real
   subprocess conflict, owner-only release, dead same-host recovery and fail-closed
-  foreign-host ownership pass locally. Global quota scheduling, NFS/network-partition
-  qualification, distributed commit journal and mandatory QA parity are open.
+  foreign-host ownership pass locally. Distributed publication now has a durable
+  token-fenced journal with real `os._exit` recovery, old-marker isolation and
+  unfenced-artifact rejection.
+  Global quota scheduling, NFS/network-partition qualification and mandatory QA parity
+  remain open.
 
 ### 6.3 Supply chain/release
 

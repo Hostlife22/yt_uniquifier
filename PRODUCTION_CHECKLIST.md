@@ -177,13 +177,16 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] SSE full queue cannot block processing finalizer.
 - [ ] Web and distributed worker run the same mandatory final QA/correctness gates.
 - [x] Two worker processes on one host receive independent host+PID+nonce liveness IDs.
+- [x] Crash between a journal-specific token fence and final rename is recovered from
+      a durable journal; old same-name markers and unfenced staged outputs cannot
+      authorize publication.
 - [ ] Reaped job retains stable work/resume identity on another host.
 - [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap and
       final-output reservation; foreign-host stale owners intentionally fail closed.
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1497 passed`, `2 skipped`);
+- [x] Ruff, strict mypy and full local test gate pass (`1505 passed`, `2 skipped`);
       CI coverage gate remains required for the new commit.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -201,7 +204,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1497 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1505 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -213,8 +216,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1497 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1505 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
+- [x] CI-equivalent non-integration branch coverage gate: 81.91% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
