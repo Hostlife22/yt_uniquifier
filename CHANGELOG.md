@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Acquire the checkpoint work-directory lock before `--new-variant` archives state,
+  and release it immediately when checkpoint initialization or pause-observer startup
+  fails.
+- Preserve the last valid checkpoint/output under injected `fsync` and final replace
+  failures, and clean uniquely named checkpoint/final publication temporary files.
 - Replace prefix-only, first-success calibration with a deterministic bounded
   search over start/middle/end source samples; rank candidates feasibility-first,
   pin the quality backend, record real trial durations, and resume scored trials

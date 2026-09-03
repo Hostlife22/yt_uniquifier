@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -272,3 +273,26 @@ def test_mark_pending_clears_stale_sha256(tmp_path: Path) -> None:
 
     raw = json.loads(store.state_path.read_text(encoding="utf-8"))
     assert raw["segments"][0]["sha256"] is None
+
+
+def test_flush_failure_preserves_state_and_removes_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ENOSPC-like fsync failure must not damage the last checkpoint."""
+    store = CheckpointStore(tmp_path / "work", _plan(tmp_path))
+    store.init_or_resume(_segments())
+    state_before = store.state_path.read_bytes()
+
+    def fail_fsync(fd: int) -> None:
+        del fd
+        raise OSError("No space left on device")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, "fsync", fail_fsync)
+        with pytest.raises(OSError, match="No space"):
+            store.set_paused_at(1.0)
+
+    assert store.state_path.read_bytes() == state_before
+    assert not list(store.work_dir.glob("state.json.*.tmp"))
+    store.close()

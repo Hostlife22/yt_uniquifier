@@ -1163,4 +1163,8 @@ def concat_segments(
     if not tmp_output.exists() or tmp_output.stat().st_size == 0:
         tmp_output.unlink(missing_ok=True)
         raise PipelineError("concat reported success but produced no output")
-    os.replace(tmp_output, output)
+    try:
+        os.replace(tmp_output, output)
+    except OSError as exc:
+        tmp_output.unlink(missing_ok=True)
+        raise PipelineError(f"could not publish final output {output}: {exc}") from exc

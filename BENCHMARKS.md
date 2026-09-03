@@ -227,6 +227,13 @@ test процесс был остановлен после двух completed ke
 сохранил их SHA-256 и mtime, завершил `6/6`, дал `7200/7200` frames и duration
 `3600.000 s` за `18.35 s`.
 
+Дополнительный Mac chaos gate 2026-09-03: `YT_UNIQ_CHAOS_ROUNDS=3` трижды запускал
+CLI/FFmpeg в отдельной process group, посылал `SIGKILL` в детерминированные случайные
+моменты и затем завершал resume в том же work directory. Итоговый output прошёл
+VMAF ≥ 99 относительно чистого fixed-seed baseline; test завершился за `20.82 s`.
+Это подтверждает локальный POSIX/synthetic путь, но не имитирует power loss, NFS или
+сбой hardware encoder.
+
 ## Calibration v2 probe smoke — 2026-09-03
 
 Проверено локально на этом Intel Mac с FFmpeg 9.0.1: synthetic 30 s, 640×360,

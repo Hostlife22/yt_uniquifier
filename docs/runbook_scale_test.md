@@ -1,77 +1,130 @@
-# Runbook: Scale validation test
+# Runbook: Scale validation and long-form recovery
 
-Referenced by `specs/10-scale-validation.md`.
+Referenced by `specs/10-scale-validation.md`. This procedure qualifies the existing
+segment/checkpoint/audio/concat pipeline; it does not introduce a second pipeline.
 
-This runbook describes how to validate the segmenter + resume + concat
-pipeline against multi-hour inputs without spending CI budget.
+## Scope and evidence levels
 
-## Goal
+Use only media you own or are licensed to process. Run each declared production
+combination separately: container, SDR/HDR mode, encoder, channel layout and host.
 
-Verify, end-to-end, that:
+- `VERIFIED`: retained command, manifest, logs and QA/benchmark JSON exist for that
+  exact combination.
+- `LIMITED`: a synthetic fixture passed, but the natural licensed corpus did not.
+- `NOT VERIFIED`: no retained run exists. Do not infer support from encoder discovery.
 
-1. `plan_segments` produces keyframe-aligned cuts on a long source.
-2. `process_video_segments_parallel` honours `workers` and the encoder
-   `max_parallel` cap.
-3. `CheckpointStore` survives a crash-and-resume cycle and the resumed
-   run reproduces identical output byte-for-byte (for deterministic
-   `seed_strategy="fixed"`) or identical-per-segment for
-   `seed_strategy="divergent"`.
-4. `concat_segments` mux of N stream-copy segments + the separately
-   processed main audio plays back without seam artifacts.
+The 2026-09-03 Intel Mac baseline is retained in `BENCHMARKS.md`: synthetic 1/2/3 h
+SDR libx264 runs preserved all `7,200/14,400/21,600` frames. A 1 h interrupted run
+reused the first two segments without changing their SHA-256 or mtime. Natural
+long-form footage, NFS, NVENC/QSV/AMF and hardware-HDR recovery remain `NOT VERIFIED`.
 
 ## Prerequisites
 
-- ffmpeg ≥ 5 with `libx264`, `libfdk_aac` or `aac`, `libvmaf`.
-- A source clip 30–120 minutes long. The CI repo intentionally does
-  not check in fixtures of this size; provide your own.
-- Disk: ~3× source size free for `work_dir` (segments + main_audio).
+- Python environment from `make dev` and `.venv/bin/yt-uniq`.
+- `ffmpeg` and `ffprobe` on `PATH`; libvmaf is required only for the chaos-equivalence
+  assertion.
+- A fixed source checksum and enough free space. Start with `--dry-run`; do not rely on
+  a fixed `3× source` estimate for high-bitrate intermediates.
+- A dedicated work directory and output path per case. Never share a work directory
+  between live jobs.
 
-## Steps
+Record before every run:
 
 ```bash
-# 1) Smoke check on a 60 s clip (sanity).
-make test-integration
-
-# 2) Long-run, sequential.
-yt-uniq run \
-  --input ~/Movies/source_60min.mp4 \
-  --output /tmp/scale_seq.mp4 \
+shasum -a 256 "$SOURCE"
+ffmpeg -version | head -n 1
+.venv/bin/yt-uniq run "$SOURCE" \
   --profile src/yt_uniquifier/profiles/medium.yaml \
-  --workers 1 \
-  --keep-segments \
-  --work-dir /tmp/scale_seq.work
-
-# 3) Long-run, parallel.
-yt-uniq run \
-  --input ~/Movies/source_60min.mp4 \
-  --output /tmp/scale_par.mp4 \
-  --profile src/yt_uniquifier/profiles/medium.yaml \
-  --workers 4 \
-  --keep-segments \
-  --work-dir /tmp/scale_par.work
-
-# 4) Resume from mid-encode crash.
-yt-uniq run --input ... --output /tmp/scale_resume.mp4 \
-  --work-dir /tmp/scale_resume.work &
-PID=$!
-sleep 90 && kill -9 "$PID"      # simulate crash
-yt-uniq run --input ... --output /tmp/scale_resume.mp4 \
-  --work-dir /tmp/scale_resume.work   # should resume from last 'done' segment
+  --out "$OUTPUT" --encoder libx264 --work-dir "$WORK" --dry-run
 ```
 
-## Acceptance
+## Baseline and parallel qualification
 
-| Step | Pass criteria |
+```bash
+# Sequential baseline. Keep artifacts so resume identity can be inspected.
+.venv/bin/yt-uniq run "$SOURCE" \
+  --profile src/yt_uniquifier/profiles/medium.yaml \
+  --out "$CASE_DIR/sequential.mp4" \
+  --encoder libx264 --workers 1 --segment-sec 600 \
+  --keep-segments --work-dir "$CASE_DIR/sequential.work"
+
+# Parallel run of the same declared combination.
+.venv/bin/yt-uniq run "$SOURCE" \
+  --profile src/yt_uniquifier/profiles/medium.yaml \
+  --out "$CASE_DIR/parallel.mp4" \
+  --encoder libx264 --workers 4 --segment-sec 600 \
+  --keep-segments --work-dir "$CASE_DIR/parallel.work"
+```
+
+If the watermark guard triggers for authorized content, inspect the finding first and
+then add `--accept-watermark-risk` as the explicit operator attestation.
+
+## Crash and resume
+
+The repository chaos test starts the whole CLI in a separate process group, sends
+SIGKILL to the group at deterministic pseudo-random offsets, resumes the same work
+directory, and compares the result with a clean baseline:
+
+```bash
+YT_UNIQ_CHAOS_ROUNDS=3 \
+  .venv/bin/pytest tests/chaos/test_random_sigkill.py -q
+```
+
+For a long manual case, capture `state.json` and a manifest of completed segment
+SHA-256/mtime values immediately before interruption. Terminate the entire CLI/FFmpeg
+process group, not only the parent Python process. Resume with the exact original
+command, output path and work directory. Do not pass `--new-variant` during recovery.
+
+After resume, every segment that was durably `done` and still matches its recorded
+SHA-256 must retain its SHA-256 and mtime. An `in_progress`, missing, zero-byte or
+digest-mismatched segment must be reprocessed.
+
+## Deterministic fault-injection gates
+
+Run before a release candidate:
+
+```bash
+.venv/bin/pytest \
+  tests/unit/test_orchestrator_checkpoint_lifecycle.py \
+  tests/unit/test_checkpoint.py \
+  tests/unit/test_main_audio_atomic.py \
+  tests/unit/test_concat_segments_workdir.py \
+  tests/integration/test_resume_truncated.py \
+  tests/integration/test_resume_partial_cleanup.py -q
+```
+
+These tests cover rejected concurrent ownership, checkpoint initialization failure,
+checkpoint `fsync`/disk-full behavior, partial audio cleanup, concat failure, final
+replace failure, corrupt segments and partial cleanup. They assert that an existing
+published output/state/audio artifact is not overwritten by a failed attempt.
+
+## Validation and acceptance
+
+For every output retain `state.json`, FFmpeg logs, source/output SHA-256, QA JSON and a
+benchmark result. Acceptance is correctness-first:
+
+| Gate | Pass criterion |
 |---|---|
-| 2 | Output plays back; `yt-uniq qa` reports VMAF mean ≥ 88; no seam glitches at segment boundaries. |
-| 3 | Same VMAF / artifact criteria as (2). Wall-time ≥ 2× faster than (2) on a 4-core CPU. |
-| 4 | Resumed run completes without re-encoding 'done' segments (check `state.json` segment statuses). Output bit-identical to a single uninterrupted run for `seed_strategy="fixed"`. |
+| Decode | Primary video and every selected audio stream decode to EOF. |
+| Timeline | First video PTS, duration, stream count/metadata and A/V delta satisfy the final media contract. |
+| Seams | Frame count and monotonic timestamps match the expected cadence; inspect source/output around every planned boundary. |
+| Resume | Valid completed segment hashes and mtimes are unchanged; damaged/incomplete artifacts are reprocessed. |
+| Publication | Failed audio/concat/final replace leaves the previous valid artifact intact and no `.part` file. |
+| Quality | VMAF/SSIM/PSNR are interpreted only when source/output are spatially and temporally registered; otherwise mark them not applicable. |
+| Resources | Peak process-tree RSS, temporary disk high-water mark, wall time and encode time are retained. |
 
-## Out-of-scope
+Bit-identical final files are not a universal acceptance rule: encoder thread
+scheduling and container metadata can change bytes. For a fixed deterministic case,
+require exact reuse of already-completed segment artifacts and validate the final
+media contract plus registered quality metrics.
 
-- Distributed / multi-host runs — see `docs/distributed.md`.
-- HDR pipeline — see `docs/architecture.md` HDR section + `specs/06-hdr-pipeline.md`.
+## Remaining mandatory matrix
 
-## Owner
+- Owned/licensed natural content at 1 h, 2 h and 3 h+.
+- Stereo, 5.1 and multiple audio tracks; MP4, MKV and MOV.
+- SDR, HDR10 and HLG for every advertised encoder.
+- APFS/local disk plus any actually deployed network filesystem.
+- Power-loss/reboot and low-space tests on a disposable volume.
 
-Whoever last touched `core/segmenter.py` or `core/checkpoint.py`.
+Never simulate a full disk on a developer's main volume. Use a disposable image,
+container or dedicated CI worker and retain the recovery evidence.

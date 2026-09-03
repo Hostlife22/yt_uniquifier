@@ -118,10 +118,15 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Cross-host lease has worker UUID/fencing and cannot be stolen while live;
       process UUID, continuous CLI/GUI heartbeat and pre-publish fence verified on APFS,
       real NFS/network-partition qualification remains open.
-- [x] Checkpoint lock is released in the shared orchestrator `finally` path.
-- [ ] Kill/crash at each phase resumes without reprocessing valid completed segments.
+- [x] Checkpoint lock is acquired before `--new-variant` mutates state and is released
+      for checkpoint initialization, observer startup and processing failures.
+- [ ] Kill/crash at each phase resumes without reprocessing valid completed segments;
+      deterministic audio/concat/final-replace faults and POSIX random SIGKILL are
+      covered, but reboot/power-loss and every phase boundary are not yet qualified.
 - [x] Corrupt/zero/truncated segment is reprocessed automatically.
-- [ ] Low/full disk fails safely, preserves recoverable state and cleans partial output.
+- [ ] Low/full disk fails safely: injected checkpoint `fsync`, audio, concat and final
+      replace failures preserve prior artifacts and clean partials; a real disposable
+      full-volume/reboot qualification is still required.
 - [x] Synthetic 1 h, 2 h and 3 h tests pass with RAM/disk/elapsed results retained in
       `BENCHMARKS.md`; natural licensed corpus remains required.
 
@@ -194,7 +199,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1482 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1488 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -206,8 +211,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1482 passed, 2 expected skips; subsequent
-      Calibration v2/media-contract regressions passed in the final targeted 39-test gate.
+- [x] Fully provisioned `make check`: 1488 passed, 2 expected skips; fault-injection
+      recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

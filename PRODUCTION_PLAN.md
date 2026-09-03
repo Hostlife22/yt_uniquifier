@@ -392,7 +392,9 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 ### 6.1 Long-form recovery qualification
 
 - **Files:** orchestrator/checkpoint/runner tests, `docs/runbook_scale_test.md`.
-- **Current behavior:** unit resume tests, no completed 1/2/3h qualification here.
+- **Current behavior:** synthetic 1/2/3 h SDR/libx264 and one interrupted 1 h case are
+  retained in `BENCHMARKS.md`; natural long-form and cross-platform recovery remain
+  unqualified.
 - **Problem:** crash/restart/disk pressure/seams not proven.
 - **Proposed behavior:** qualification matrix on 1h/2h/3h+ SDR and HDR.
 - **Implementation:** fault injection at probe/segment/audio/concat/final replace; disk
@@ -400,6 +402,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** scheduled self-hosted long-form jobs and retained manifests/reports.
 - **Risk:** CI cost.
 - **Expected result:** completed segments reused and final output bitstream-correct.
+- **Status:** in progress — deterministic regressions now cover rejected concurrent
+  ownership, initialization cleanup, checkpoint `fsync` failure, atomic main-audio
+  failure, concat failure and final replace failure. The POSIX chaos test covers
+  process-group SIGKILL/resume. Disposable-volume low-space/power-loss, natural
+  licensed 1/2/3 h, NFS and hardware encoder/HDR cases remain `NOT VERIFIED`.
 
 ### 6.2 Web/distributed lifecycle
 

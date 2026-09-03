@@ -18,9 +18,11 @@ All writes are atomic (write tmp, fsync, os.replace).
 from __future__ import annotations
 
 import atexit
+import contextlib
 import json
 import logging
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -646,14 +648,11 @@ class CheckpointStore:
         # set_loudnorm, set_main_audio) wrap state mutations + flush
         # together so they are atomic w.r.t. concurrent workers.
         with self._lock:
-            # PID-suffix the tmp file so concurrent `yt-uniq batch`
-            # processes sharing a work_dir cannot stomp on each other's
-            # partially-written tmp before os.replace lands. Matches the
-            # convention used by encoder.py::_save_cache and the keyframe
-            # cache in segmenter.py. The intra-process RLock prevents
-            # racing within one worker; the PID prevents racing across
-            # workers.
-            tmp = self.state_path.with_suffix(f".json.{os.getpid()}.tmp")
+            # PID + random suffix keeps temporary files distinct even when
+            # multiple store instances are re-entered from the same process.
+            tmp = self.state_path.with_suffix(
+                f".json.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+            )
             payload = json.dumps(self._state, indent=2, default=str)
             # write → flush → fsync the *tmp* file before rename. Without
             # fsync the OS may have queued the page write but not committed
@@ -665,14 +664,21 @@ class CheckpointStore:
             # carries absolute paths to the user's source / output / main
             # audio files — on shared / mis-umask'd hosts this would
             # otherwise leak which content a user is processing.
-            fd = os.open(
-                tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, self.state_path)
+            try:
+                fd = os.open(
+                    tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp, self.state_path)
+            finally:
+                # ENOSPC, permission errors, and failed replaces must not
+                # accumulate partial checkpoint files. Never mask the primary
+                # persistence error if cleanup itself is refused.
+                with contextlib.suppress(OSError):
+                    tmp.unlink(missing_ok=True)
             # B4 (v0.6.0): reset debounce accounting after the real
             # write. Callers that bypass _flush_maybe (set_loudnorm,
             # set_main_audio, explicit flush()) still drop the counter.

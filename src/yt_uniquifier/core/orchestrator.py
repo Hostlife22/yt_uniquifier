@@ -396,42 +396,38 @@ def _run_full_impl(
     emit(RunEvent(kind="log", payload={"phase": "preflight",
                                        "findings": [f.model_dump() for f in findings]}))
 
-    # --new-variant: archive any existing state so we start fresh with the
-    # newly-resolved run_seed (otherwise the existing 'done' segments would be
-    # concat'd as-is and the new seed would be applied to nothing).
     options.work_dir.mkdir(parents=True, exist_ok=True)
-    if options.force_new_variant:
-        state_path = options.work_dir / "state.json"
-        if state_path.exists():
-            state_path.rename(state_path.with_suffix(
-                f".json.stale-variant-{int(time.time())}"
-            ))
-
     store = CheckpointStore(options.work_dir, plan)
-    segments = store.init_or_resume(
-        plan_segments(plan, target_size_sec=options.target_segment_sec)
-    )
-
-    # v0.7 R6 / F5 — pause observer thread. Watches pause_token state
-    # transitions and (a) persists `paused_at` to state.json so a crash
-    # mid-pause leaves an audit trail and (b) enforces the 24-hour
-    # auto-cancel safety net so a forgotten pause never strands work.
-    # The thread is daemon=True so process shutdown doesn't block on it,
-    # but we still drop the stop event in a try/finally so per-test
-    # observer threads don't accumulate across the long pytest run.
-    # Without this, an exception (preflight fail, cancel, segment error)
-    # would leak one daemon thread per call — CI matrices that run the
-    # full suite then OOM / time out on thread limits.
-    _pause_stop_event = _start_pause_observer(
-        pause_token, cancel_token, store, emit,
-    )
+    _pause_stop_event: threading.Event | None = None
     try:
+        # --new-variant: archive existing state only after CheckpointStore has
+        # acquired the work-dir lock. Otherwise a rejected concurrent process
+        # can rename the active owner's state.json before lock acquisition.
+        if options.force_new_variant:
+            state_path = options.work_dir / "state.json"
+            if state_path.exists():
+                state_path.rename(state_path.with_suffix(
+                    f".json.stale-variant-{time.time_ns()}"
+                ))
+
+        segments = store.init_or_resume(
+            plan_segments(plan, target_size_sec=options.target_segment_sec)
+        )
+
+        # v0.7 R6 / F5 — pause observer thread. Watches pause_token state
+        # transitions and (a) persists `paused_at` to state.json so a crash
+        # mid-pause leaves an audit trail and (b) enforces the 24-hour
+        # auto-cancel safety net so a forgotten pause never strands work.
+        _pause_stop_event = _start_pause_observer(
+            pause_token, cancel_token, store, emit,
+        )
         return _run_full_body(
             plan, options, emit, cancel_token, pause_token,
             store, segments, findings,
         )
     finally:
-        _pause_stop_event.set()
+        if _pause_stop_event is not None:
+            _pause_stop_event.set()
         store.close()
 
 

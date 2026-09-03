@@ -112,6 +112,34 @@ def test_concat_is_atomic_and_preserves_existing_output_on_failure(
     assert not list(tmp_path.glob(".*.part.mp4"))
 
 
+def test_concat_publish_failure_preserves_output_and_removes_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A final replace failure must preserve the previous published output."""
+    output = tmp_path / "final.mp4"
+    output.write_bytes(b"previous-good-output")
+    segment = tmp_path / "seg.mkv"
+    segment.touch()
+
+    monkeypatch.setattr(segmenter_mod, "run_ffmpeg", _stub_run)
+    real_replace = segmenter_mod.os.replace
+
+    def fail_final_replace(source: Path, destination: Path) -> None:
+        if destination == output:
+            raise PermissionError("publication denied")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(segmenter_mod.os, "replace", fail_final_replace)
+
+    with pytest.raises(PipelineError, match="publish final output"):
+        segmenter_mod.concat_segments(
+            [segment], None, output, [], work_dir=tmp_path / "work",
+        )
+
+    assert output.read_bytes() == b"previous-good-output"
+    assert not list(tmp_path.glob(".*.part.mp4"))
+
+
 def test_concat_maps_all_requested_passthrough_audio_tracks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -19,7 +19,7 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-03):
 
 - Ruff и strict mypy: passed (`156` source files).
-- Canonical `make check`: `1482 passed, 2 skipped` на полностью установленном
+- Canonical `make check`: `1488 passed, 2 skipped` на полностью установленном
   optional environment (`20:49`, финальный Phase 3 quality повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
@@ -445,7 +445,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1482 passed, 2 skipped на fully provisioned macOS environment |
+| Full `make check` | 1488 passed, 2 skipped на fully provisioned macOS environment |
 | Ruff | Passed |
 | Strict mypy (`155` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
