@@ -84,12 +84,13 @@ This closes the local hard-crash publication window and preserves fenced,
 at-least-once processing. It is not a transactional exactly-once guarantee across a
 network partition. Cross-host NFS deployments must still run lease/reap/journal/crash
 qualification on the actual mount before production; that matrix is **NOT VERIFIED**.
-All worker service accounts need a shared UID/GID or ACL granting read/write/delete
-access to the queue, output directory, staged files and `.commits/`. Journal payloads
-contain basenames and a random fence token only, not absolute source/output paths.
-Journal files are immutable after publication and owner-writable/group-readable
-(`0640`, further restricted by `umask`); shared-group recovery deletes their directory
-entries rather than modifying their contents.
+All workers need the same service UID, or an explicit inheritable ACL granting the
+required read/write/delete access to the queue, output directory, staged files and
+`.commits/`. A shared GID alone is insufficient for commit-journal recovery. Journal
+payloads contain basenames and a random fence token only, not absolute source/output
+paths. Journal files are immutable after publication and owner-only (`0600`, further
+restricted by `umask`); recovery deletes their directory entries rather than modifying
+their contents.
 
 ## Per-machine encoder variation
 
