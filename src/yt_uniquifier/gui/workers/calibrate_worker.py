@@ -66,7 +66,7 @@ class CalibrateWorker(WorkerBase):
                 encoder_override=self.encoder_override,
                 on_step=lambda s: self.step.emit(_step_as_dict(s)),
                 # A6 (v0.5.5): pass through the worker's cancel token so
-                # request_cancel() actually stops the bisection loop. The
+                # request_cancel() actually stops the bounded search. The
                 # previous build silently accepted the click and kept
                 # encoding for minutes.
                 cancel_token=self.cancel_token,

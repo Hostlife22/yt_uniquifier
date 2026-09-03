@@ -220,7 +220,7 @@ def test_calibrate_default_metric_is_chromaprint(
             TransformConfig(id="video.crop_resize",
                             params={"max_strength": 0.04}),
         ]),
-        CalibrationTarget(max_self_match=0.2, min_quality=88),
+        CalibrationTarget(max_self_match=0.2, min_quality=88, max_iterations=1),
         work_dir=tmp_path / "w",
     )
     assert res.converged

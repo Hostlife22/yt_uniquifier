@@ -1,4 +1,4 @@
-"""calibrate() bisect logic against scripted predict + quality_score."""
+"""Calibration v2 search against scripted similarity and quality scores."""
 
 from __future__ import annotations
 
@@ -72,25 +72,27 @@ def test_converges_when_first_step_passes(tmp_path: Path,
                                             monkeypatch: pytest.MonkeyPatch) -> None:
     _patch(monkeypatch, [(0.15, 92.0)])
     res = calibrate(tmp_path / "x.mp4", _profile(),
-                    CalibrationTarget(max_self_match=0.2, min_quality=88),
+                    CalibrationTarget(max_self_match=0.2, min_quality=88,
+                                      max_iterations=3),
                     work_dir=tmp_path / "w")
     assert res.converged
     assert res.final_self_match == 0.15
-    assert res.factor == 1.0
-    assert len(res.steps) == 1
+    # Equal-quality feasible candidates prefer the gentlest bounded factor.
+    assert res.factor == 0.25
+    assert len(res.steps) == 3
 
 
-def test_scales_up_until_target_reached(tmp_path: Path,
-                                           monkeypatch: pytest.MonkeyPatch) -> None:
+def test_samples_baseline_and_bounds_before_refinement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch(monkeypatch, [(0.6, 92.0), (0.4, 91.0), (0.15, 89.0)])
     res = calibrate(tmp_path / "x.mp4", _profile(),
                     CalibrationTarget(max_self_match=0.2, min_quality=88,
-                                       max_iterations=5),
+                                      max_iterations=3),
                     work_dir=tmp_path / "w")
     assert res.converged
     assert len(res.steps) == 3
-    assert res.steps[1].intensity_factor == pytest.approx(1.5)
-    assert res.steps[2].intensity_factor == pytest.approx(2.25)
+    assert [step.intensity_factor for step in res.steps] == [1.0, 0.25, 4.0]
     assert res.final_self_match == 0.15
 
 
@@ -114,7 +116,7 @@ def test_quality_floor_backs_off(tmp_path: Path,
     _patch(monkeypatch, [(0.05, 70.0), (0.18, 90.0)])
     res = calibrate(tmp_path / "x.mp4", _profile(),
                     CalibrationTarget(max_self_match=0.2, min_quality=88,
-                                       max_iterations=4),
+                                      max_iterations=2),
                     work_dir=tmp_path / "w")
     assert res.converged
     assert res.steps[1].intensity_factor < res.steps[0].intensity_factor
@@ -149,7 +151,7 @@ def test_iteration_exception_retries_same_factor(tmp_path: Path,
                         lambda *_a, **_kw: _Q())
 
     res = calibrate(tmp_path / "x.mp4", _profile(),
-                    CalibrationTarget(max_iterations=3),
+                    CalibrationTarget(max_iterations=1),
                     work_dir=tmp_path / "w")
     assert res.converged
     assert len(res.steps) == 1

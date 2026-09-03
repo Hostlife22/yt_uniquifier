@@ -242,6 +242,13 @@ def _compare_stream_metadata(
     for field_name in ("language", "title", "is_default", "dispositions"):
         expected = getattr(expected_stream, field_name)
         actual = getattr(actual_stream, field_name)
+        if field_name == "language":
+            # MP4/MOV commonly synthesizes ISO 639 ``und`` while Matroska
+            # omits the tag for the same semantic state: language unspecified.
+            # Treating that container boilerplate as metadata corruption makes
+            # valid MKV -> MP4 processing (including calibration probes) fail.
+            expected = _normalize_language(expected)
+            actual = _normalize_language(actual)
         if field_name == "is_default" and output_container in {"mp4", "mov"}:
             expected = bool(expected or muxer_adds_default)
         if field_name == "dispositions":
@@ -264,6 +271,12 @@ def _compare_stream_metadata(
             failures.append(MediaInvariantFailure(
                 f"streams.{kind}.{index}.{field_name}", expected, actual,
             ))
+
+
+def _normalize_language(value: object) -> object:
+    if value in {None, "", "und"}:
+        return None
+    return value
 
 
 def require_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:

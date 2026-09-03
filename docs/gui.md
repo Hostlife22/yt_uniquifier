@@ -48,16 +48,17 @@ default); uncheck to stop on the first failure.
 
 ### 3. Calibrate
 
-Auto-tune profile intensity to a target self-match. Pick source +
+Search profile intensity against a target self-match. Pick source +
 base profile + target self-match (default 0.2) + min quality (default
-88) + iterations (default 5) + clip seconds (default 60). The
-convergence chart plots three series per iteration:
+88) + iterations (default 5) + total probe seconds (default 60, spread
+across start/middle/end). The chart plots three series per trial:
 `intensity_factor`, `self_match`, `quality / 100`. When done, click
 "Save tuned profile as…" to write the result.
 
 If the calibrate loop didn't converge ("⚠ best-so-far"), the saved
-profile is still the best candidate seen, just not within the quality
-floor — bump `--clip-sec` or relax `--min-quality` and try again.
+profile is the lowest-violation candidate seen, but it did not pass both
+constraints. Inspect the reported VMAF/SSIM backend and candidates before
+changing the clip budget, base profile, or threshold.
 
 ### 4. QA Viewer
 

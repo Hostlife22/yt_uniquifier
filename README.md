@@ -52,9 +52,10 @@
   ([`docs/sscd.md`](./docs/sscd.md)), optional check against a local
   **corpus** of previous uploads. HTML report with per-chunk heatmap.
 - **Experimental calibration** (`yt-uniq calibrate`): explores profile
-  intensity against internal self-similarity and quality diagnostics.
-  It is not an external rights-system predictor and is not a production
-  quality optimizer until metric registration is completed.
+  intensity with a deterministic bounded search over start/middle/end samples,
+  independent self-similarity and quality constraints, and resumable scored
+  trials. It is not an external rights-system predictor; the tuned result still
+  requires full-file QA.
 - **Distributed batch** via shared filesystem: `yt-uniq worker` drains
   a queue across N machines using atomic POSIX rename leasing —
   **no redis, no database**, just NFSv4 with `noac` (or ZFS / ext4).

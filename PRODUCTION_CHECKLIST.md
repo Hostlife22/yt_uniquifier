@@ -152,10 +152,13 @@ release blockers, поэтому checklist намеренно не отмече�
       structured JSON axis fields await an approved stable-schema RFC.
 - [ ] Corpus IDs/content cache survive move and invalidate on content change.
 - [x] Calibration fixed seed/common random numbers reproduce trials.
-- [ ] Calibration clips cover opening/middle/end plus representative motion/audio.
+- [x] Calibration's fixed time budget covers opening/middle/end with video/audio;
+      natural-content representativeness remains a release qualification item.
 - [x] Failed trial is retried/aborted, never converted into optimization score.
-- [ ] Search handles non-monotone objective and returns feasible Pareto candidate only.
-- [ ] Old inverted SSCD calibration results are invalidated/migrated.
+- [x] Bounded search explores non-monotone intervals and selects feasible candidates
+      by quality before intensity/similarity; non-feasible fallback is explicit.
+- [x] Durable calibration cache uses v2 semantics, so old/inverted SSCD scores cannot
+      load; profiles exported by older builds must be recalibrated manually.
 
 ## 11. Web and distributed operation
 
@@ -175,7 +178,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] Ruff, strict mypy and full local test gate pass; CI coverage gate pending
       for the post-v1.4.0 commit.
-- [ ] CodeQL has zero open high/critical alerts or documented accepted risk.
+- [x] CodeQL has zero open alerts before this change; post-push commit scan is a
+      required final gate.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
 - [ ] Plugin manifest/sandbox/allowlist tests pass; pre-import disable documented.
@@ -190,7 +194,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1382 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1482 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -202,13 +206,15 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1447 passed, 2 expected skips; two subsequent
-      encoder cache/override edge regressions passed in the final targeted 38-test gate.
+- [x] Fully provisioned `make check`: 1482 passed, 2 expected skips; subsequent
+      Calibration v2/media-contract regressions passed in the final targeted 39-test gate.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
 - [x] Strict mypy: passed (156 source files).
 - [x] All 16 shipped profiles load.
+- [x] Real Calibration v2 CLI: stratified probe, 3 encode/quality/similarity trials,
+      strict media contract, tuned YAML and second-run scored-cache reuse passed.
 - [x] Подтверждённые local P0 correctness regressions исправлены.
 - [x] HDR10/HDR→SDR, Rubber Band и SSCD real model verified locally.
 - [x] Synthetic 1h/2h/3h, 4K AV1 и VideoToolbox H.264/HEVC smoke verified locally.

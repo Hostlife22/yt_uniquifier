@@ -19,7 +19,7 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-03):
 
 - Ruff и strict mypy: passed (`156` source files).
-- Canonical `make check`: `1442 passed, 2 skipped` на полностью установленном
+- Canonical `make check`: `1482 passed, 2 skipped` на полностью установленном
   optional environment (`20:49`, финальный Phase 3 quality повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
@@ -350,19 +350,20 @@ notes.
 
 ## Calibration audit
 
-Текущий algorithm уже фиксирует common seed, хеширует source для test clip, abort-ит
-повторную infrastructure error и после обнаружения обеих границ переходит к midpoint.
-Phase 5 также исключил маскировку низкого VMAF и pHash-as-quality fallback.
+Calibration v2 реализован внутри существующего engine без второго pipeline. Общий
+временной budget распределяется между opening/middle/end, а short source используется
+целиком. Поиск детерминированно измеряет factor 1.0 и bounds 0.25/4.0, затем уточняет
+информативные интервалы в logarithmic scale; поэтому он не требует монотонности всего
+transform stack. Common seed фиксирован, completed scores атомарно кэшируются по
+plan/metric/schema, infrastructure failure повторяется на том же factor и затем
+abort-ится. Backend качества pin-ится на первый trial, чтобы VMAF и SSIM не
+сравнивались внутри одного поиска. `duration_sec` теперь отражает реальное время.
 
-Остаются математические ограничения: используется только первый prefix clip,
-монотонность objective предполагается, scored trials не имеют durable cache,
-`CalibrationStep.duration_sec` всегда 0, а best-so-far не является полноценным
-feasibility/Pareto search для немонотонного transform stack.
-
-Production replacement должен остаться внутри существующего calibration engine:
-fixed seed/common random numbers, content-stratified clips, cached evaluations,
-explicit failure state и constrained multi-objective/Pareto selection. Сначала нужно
-исправить correctness и метрики; тюнинг поверх сломанного pipeline бессмысленен.
+Result selection feasibility-first: сначала оба независимых gate, затем максимальное
+измеренное качество и более мягкий factor. Если feasible point нет, возвращается
+lowest normalized violation с явным non-converged result. Ограничение остаётся
+экспериментальным: synthetic monotone/non-monotone tests и real-FFmpeg probe не
+заменяют calibration thresholds на licensed natural-content corpus.
 
 ## Long-form, reliability и performance
 
@@ -444,7 +445,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1415 passed, 2 skipped на fully provisioned macOS environment |
+| Full `make check` | 1482 passed, 2 skipped на fully provisioned macOS environment |
 | Ruff | Passed |
 | Strict mypy (`155` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |

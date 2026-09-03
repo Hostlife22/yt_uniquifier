@@ -29,7 +29,7 @@ def calibrate_cmd(
     out: Path = typer.Option(..., "--out", help="Where to write the tuned profile."),
     target_match: float = typer.Option(
         0.2, "--target",
-        help="Target maximum predicted Content ID self-match (0..1).",
+        help="Maximum internal source/derivative similarity diagnostic (0..1).",
     ),
     min_quality: float = typer.Option(
         88.0, "--min-quality",
@@ -38,7 +38,7 @@ def calibrate_cmd(
     iterations: int = typer.Option(5, "--iterations"),
     clip_sec: float = typer.Option(
         60.0, "--clip-sec",
-        help="Test clip length in seconds (calibration is run on this prefix).",
+        help="Total probe seconds spread across source start, middle, and end.",
     ),
     encoder_override: str | None = typer.Option(None, "--encoder"),
     work_dir: Path = typer.Option(
@@ -48,13 +48,13 @@ def calibrate_cmd(
     metric: str = typer.Option(
         "chromaprint", "--metric",
         help=(
-            "Similarity metric to bisect against. "
+            "Local similarity diagnostic used by the bounded search. "
             "'chromaprint' uses the v0.5 audio-fingerprint predictor (needs fpcalc); "
             "'sscd' uses the SSCD copy-detection embedding (needs the [ml] extra)."
         ),
     ),
 ) -> None:
-    """Bisect intensity until predicted self-match drops below --target.
+    """Search bounded intensity against similarity and quality constraints.
 
     Exit codes:
       0  converged within --iterations

@@ -85,7 +85,7 @@ def test_default_metric_is_chromaprint(
 
     res = calibrate(
         tmp_path / "x.mp4", _profile(),
-        CalibrationTarget(max_self_match=0.2, min_quality=88),
+        CalibrationTarget(max_self_match=0.2, min_quality=88, max_iterations=1),
         work_dir=tmp_path / "w",
     )
     assert res.converged
@@ -141,7 +141,7 @@ def test_metric_sscd_via_injected_evaluator(
 
     res = calibrate(
         tmp_path / "x.mp4", _profile(),
-        CalibrationTarget(max_self_match=0.2, min_quality=88),
+        CalibrationTarget(max_self_match=0.2, min_quality=88, max_iterations=1),
         work_dir=tmp_path / "w",
         metric="sscd",            # would route to _evaluate_sscd...
         evaluator=_stub_eval,     # ...but the seam wins.
@@ -209,13 +209,13 @@ def test_evaluate_sscd_clamps_pathological_similarity(
 # ----- bisect convergence with sscd-style evaluator -----------------------
 
 
-def test_bisect_converges_with_scripted_sscd_evaluator(
+def test_bounded_search_converges_with_scripted_sscd_evaluator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SSCD-style scores drive the same factor *=1.5 ramp as chromaprint."""
+    """SSCD scores drive the same baseline/lower/upper search as chromaprint."""
     _patch_pipeline(monkeypatch)
 
-    # Three iterations: collision risk 0.55 → 0.35 → 0.18, target 0.2.
+    # Three anchors: factors 1.0 → 0.25 → 4.0, final anchor is feasible.
     scores = iter([0.55, 0.35, 0.18])
 
     def _evil(_src: Path, _cand: Path, _ct: CancelToken | None) -> float:
@@ -224,7 +224,7 @@ def test_bisect_converges_with_scripted_sscd_evaluator(
     res = calibrate(
         tmp_path / "x.mp4", _profile(),
         CalibrationTarget(max_self_match=0.2, min_quality=88,
-                          max_iterations=5),
+                          max_iterations=3),
         work_dir=tmp_path / "w",
         metric="sscd",
         evaluator=_evil,
@@ -232,8 +232,8 @@ def test_bisect_converges_with_scripted_sscd_evaluator(
     assert res.converged
     assert len(res.steps) == 3
     assert res.steps[0].intensity_factor == pytest.approx(1.0)
-    assert res.steps[1].intensity_factor == pytest.approx(1.5)
-    assert res.steps[2].intensity_factor == pytest.approx(2.25)
+    assert res.steps[1].intensity_factor == pytest.approx(0.25)
+    assert res.steps[2].intensity_factor == pytest.approx(4.0)
     assert res.final_self_match == pytest.approx(0.18)
 
 
@@ -314,7 +314,7 @@ def test_evaluator_kwarg_takes_priority_over_metric_for_chromaprint(
 
     res = calibrate(
         tmp_path / "x.mp4", _profile(),
-        CalibrationTarget(max_self_match=0.2, min_quality=88),
+        CalibrationTarget(max_self_match=0.2, min_quality=88, max_iterations=1),
         work_dir=tmp_path / "w",
         evaluator=lambda *_a, **_kw: 0.10,
     )

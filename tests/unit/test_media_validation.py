@@ -38,6 +38,22 @@ def test_media_contract_accepts_matching_topology(tmp_path: Path, monkeypatch) -
     assert media_validation.inspect_output_contract(plan, output_meta.path).valid
 
 
+def test_media_contract_treats_missing_and_und_language_as_unspecified(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    source = _src(tmp_path).model_copy(update={
+        "audio": [_src(tmp_path).audio[0].model_copy(update={"language": None})],
+    })
+    plan = _plan(source, [])
+    output_meta = source.model_copy(update={
+        "path": tmp_path / "out.mp4",
+        "audio": [source.audio[0].model_copy(update={"language": "und"})],
+    })
+    monkeypatch.setattr(media_validation, "probe", lambda _path: output_meta)
+
+    assert media_validation.inspect_output_contract(plan, output_meta.path).valid
+
+
 def test_media_contract_detects_shifted_first_video_timestamp(
     tmp_path: Path, monkeypatch,
 ) -> None:

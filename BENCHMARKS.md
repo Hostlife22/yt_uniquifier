@@ -227,6 +227,20 @@ test процесс был остановлен после двух completed ke
 сохранил их SHA-256 и mtime, завершил `6/6`, дал `7200/7200` frames и duration
 `3600.000 s` за `18.35 s`.
 
+## Calibration v2 probe smoke — 2026-09-03
+
+Проверено локально на этом Intel Mac с FFmpeg 9.0.1: synthetic 30 s, 640×360,
+30 fps H.264/AAC source; calibration probe budget 6 s распределён по трём
+start/middle/end окнам. Cold extraction+concat занял `1.0868 s`, content-keyed warm
+reuse — `0.0048 s`. Результат содержит 1 video + 1 audio stream, декодируемая
+container duration `6.111 s`, размер `1,561,124 bytes`. Небольшой хвост относительно
+6.0 s вызван AAC priming и stream-copy packet boundaries; test gate ограничивает его
+и подтверждает, что budget не умножился на число окон. Второй real-FFmpeg regression
+заменяет source по тому же path и подтверждает новый probe cache key.
+
+Это smoke инфраструктуры, не quality benchmark: natural licensed footage, VMAF
+распределение и выбор similarity thresholds по-прежнему `NOT VERIFIED`.
+
 ## Production benchmark protocol
 
 1. Зафиксировать source checksum, ffmpeg/driver/package versions, profile canonical

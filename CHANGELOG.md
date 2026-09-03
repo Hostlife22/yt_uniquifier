@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Replace prefix-only, first-success calibration with a deterministic bounded
+  search over start/middle/end source samples; rank candidates feasibility-first,
+  pin the quality backend, record real trial durations, and resume scored trials
+  from an atomic content/plan/metric-keyed cache with session-isolated incomplete
+  artifacts.
 - Make QA correctness-first: reuse the plan media contract, validate first video PTS,
   decode primary video/all audio to EOF, and report covered failures as `INVALID`.
 - Separate CLI/HTML correctness, perceptual-quality and visual-similarity axes so a

@@ -1,120 +1,113 @@
 # Experimental calibration workflow
 
-`yt-uniq calibrate` explores profile intensity against the project's internal
-self-similarity heuristic and a provisional quality constraint. It does not predict
-or optimize the behavior of YouTube Content ID or another external rights system.
-The command remains experimental because one short clip is not representative and
-its current VMAF/SSIM/pHash fallback scales are not mathematically interchangeable.
+`yt-uniq calibrate` searches the intensity of an existing profile for processing
+owned or licensed media. It compares the source with an authorized derivative using
+local engineering diagnostics. It does not predict YouTube Content ID or any other
+external rights-management system.
 
-The output is a new YAML profile you then feed to `yt-uniq run` against
-the full source.
+The command remains experimental: similarity thresholds are corpus-dependent, and a
+short representative sample cannot prove full-file quality. Always run the tuned
+profile on the full source and inspect the final QA report before publication.
 
-## TL;DR
+## Quick start
 
 ```bash
 yt-uniq calibrate /path/to/master.mp4 \
   --base src/yt_uniquifier/profiles/medium.yaml \
-  --out  /path/to/tuned.yaml \
-  --target 0.2          # legacy internal similarity target
-  --min-quality 88.0    # provisional metric-specific constraint
-  --iterations 5        # max bisect steps (default)
-  --clip-sec 60.0       # test clip duration in seconds (default)
-  --metric phash        # v0.8 R6: 'phash' (default) | 'sscd' (semantic-similarity, requires [ml] extra)
+  --out /path/to/tuned.yaml \
+  --target 0.2 \
+  --min-quality 88.0 \
+  --iterations 7 \
+  --clip-sec 60.0 \
+  --metric chromaprint
 
 yt-uniq run /path/to/master.mp4 \
   --profile /path/to/tuned.yaml \
-  --out     /path/to/uniq.mp4
+  --out /path/to/derivative.mp4
 ```
 
-## What it does
+`chromaprint` needs `fpcalc`. `sscd` needs the optional `[ml]` dependencies and is
+substantially heavier.
 
-1. Cuts the first `--clip-sec` of the source via stream-copy (no re-encode).
-2. Runs a real `orchestrator.run_full` on the clip with the current
-   profile.
-3. Measures the legacy `cid_predict_self` heuristic and the **quality score** on
-   the resulting variant.
-4. Bisects an `intensity_factor` between 0.1 and 5.0:
-   - if `self_match > target` → factor × 1.5 (push harder)
-   - elif `quality < min_quality` → factor / 1.3 (back off)
-   - else → converged
-5. Tracks the best step seen so far (lowest `self_match` among steps
-   whose quality passed, or just lowest `self_match` if none did).
-6. Applies the winning factor to every transform via
-   `core.calibration.intensity.scale_profile`, which multiplicatively
-   scales the parameters that have an obvious "intensity" knob
-   (`max_strength`, `degrees`, `brightness` deltas, `strength`, `noise_db`,
-   `blackout_prob`, …) around their identity points, clamped to each
-   transform's pydantic schema bounds.
-7. Writes the resulting profile to `--out`.
+## Calibration v2 behavior
 
-## Quality fallback limitation
+1. The total `--clip-sec` budget is divided across the beginning, middle, and end of
+   a long source. A source shorter than the budget is used as one complete clip.
+2. The three windows are stream-copied and concatenated into one content-keyed probe.
+   This avoids spending three times the requested encode budget.
+3. Every candidate uses `seed_strategy: fixed` and the same seed, so stochastic
+   transform patterns do not move the objective between trials.
+4. The search first measures factor `1.0`, the lower bound `0.25`, and the upper bound
+   `4.0` (subject to the iteration budget). It then splits informative intervals on a
+   logarithmic scale. It does not assume that a transform stack is monotone.
+5. Each candidate goes through the existing `build_plan` and `run_full` pipeline.
+   Encode/evaluation failure is retried once at the same factor and then aborts; it is
+   never converted into a poor score.
+6. Similarity and perceptual quality are independent constraints. A candidate is
+   feasible only when both pass.
+7. The quality backend used by the first successful trial is pinned for the search.
+   If the backend changes between VMAF and SSIM, calibration aborts rather than
+   comparing incompatible numbers.
+8. Complete scored trials are cached atomically by plan hash, algorithm version, and
+   similarity metric. Re-running an interrupted search can reuse measurements. A
+   changed source, profile, encoder, seed, tool version, or metric gets a different
+   key. Incomplete runner/output artifacts are session-isolated so concurrent GUI or
+   CLI searches cannot corrupt each other. Custom programmatic evaluator callbacks
+   deliberately bypass this cache.
+9. Among feasible candidates, the result favors higher measured quality and then a
+   gentler factor. If none is feasible, it returns the candidate with the smallest
+   normalized constraint violation and exits with status 2.
 
-When VMAF is unavailable, the current implementation falls back through the table
-below. The rescaled values are **not equivalent**, so `--min-quality 88` does not
-have one stable perceptual meaning across environments. Pin the backend and treat a
-backend change as a different experiment.
+The three anchor trials are intentional. Calibration therefore does not stop merely
+because factor `1.0` passes; the extra evidence detects quality cliffs and
+non-monotone behavior. Durable trial reuse offsets that cost on repeated runs.
 
-| Priority | Metric | Source | Unified scale |
-|---|---|---|---|
-| 1 | VMAF | `libvmaf` filter | 0..100 verbatim |
-| 2 | SSIM × 100 | `ssim` filter | `ssim_mean * 100` |
-| 3 | pHash similarity × 100 | imagehash on 120 frames | `phash_similarity * 100` |
+## Quality threshold semantics
 
-`core.qa.quality.quality_score` picks the first available metric and
-returns a `QualityScore(score, metric)`. The HTML QA report shows which
-one was used so the calibration log is auditable.
+`--min-quality` is not a universal perceptual unit:
 
-Do not use the fallback chain as a production quality gate. Phase 5 of the production
-plan replaces it with explicit metric-specific constraints and registered references.
+| Backend | Reported value | Typical availability |
+|---|---:|---|
+| VMAF | native 0..100 score | FFmpeg built with `libvmaf` |
+| SSIM | mean SSIM × 100 | fallback when VMAF is unavailable |
 
-## Tuning the knobs
+pHash is not a perceptual-quality fallback. The CLI and GUI always show the backend
+next to the value. Treat a VMAF experiment and an SSIM experiment as different
+calibrations even if both use the numeric threshold `88`.
 
-| Flag | Default | When to change |
-|---|---|---|
-| `--target` | 0.2 | Legacy internal self-similarity constraint; not an external-system probability |
-| `--min-quality` | 88.0 | Keep fixed only when the metric backend/reference is also fixed |
-| `--iterations` | 5 | Bump to 8 if calibration logs say "didn't converge — best-so-far at iteration N" |
-| `--clip-sec` | 60.0 | Bump to 120s for content with high scene variance; shorter for very stable footage |
-| `--encoder` | auto | Pin to `libx264` if you need calibration to match later batch runs that use libx264; otherwise let it pick |
+## Options
 
-## When calibration "fails"
+| Flag | Default | Engineering meaning |
+|---|---:|---|
+| `--target` | 0.2 | Maximum local source/derivative similarity diagnostic; not an external probability |
+| `--min-quality` | 88.0 | Minimum score for the explicitly reported VMAF or SSIM backend |
+| `--iterations` | 5 | Total bounded-search trial budget; use 7–9 for heterogeneous long-form sources |
+| `--clip-sec` | 60.0 | Total time distributed over start/middle/end windows |
+| `--metric` | chromaprint | `chromaprint` or `sscd` local diagnostic |
+| `--encoder` | auto | Pin when the production encode will use a specific encoder |
+| `--work-dir` | `.yt_uniq_calib` | Probe, candidate, work, and scored-trial cache directory |
 
-You'll see one of:
+## Reading the result
 
-```
-warning: did not converge after 5 iterations.
-         using best-so-far: factor=2.25, self_match=0.41
-```
+`converged` means that at least one measured candidate passed both constraints within
+the requested factor bounds. It does not mean the full movie has been qualified.
 
-This means no step hit both the self-match target AND the quality floor.
-Two common causes:
+`not converged` means no sampled candidate passed both gates. Common causes are a
+flat/noisy similarity diagnostic, a quality-fragile source, an unsuitable base
+profile, or too small an iteration budget. Inspect the per-step backend and notes;
+do not compensate by blindly raising transform strength.
 
-1. **The heuristic is flat or non-monotone** — static scenes and transform
-   interactions can violate the search assumption. Do not compensate by blindly
-   increasing effect strength; inspect the rendered candidates.
-
-2. **Source is unusually quality-fragile** — text overlays, sharp lines,
-   colour gradients. Even small color jitter crashes VMAF.
-   - Disable `video.color_eq` or lower its delta in the base profile.
-   - Switch to `--base medium.yaml` (no CID-aware shifts).
-
-## What it doesn't do
-
-Calibration tunes **multiplicative intensity** on parameters that have a
-natural "more / less" axis. It does **not**:
-
-- Toggle transforms on/off (use the YAML for that).
-- Pick which `seed_strategy` to use (orthogonal — see [seed_strategy.md](./seed_strategy.md)).
-- Re-order transforms (pipeline is fixed at "video first → audio first" within each kind).
-- Calibrate or predict any external rights-management system. The legacy
-  `cid_predict_self` field is an internal diagnostic only.
+The work directory is reusable. A step marked `scored-trial cache hit` was not
+re-encoded. Delete only that calibration work directory if you intentionally need a
+fresh measurement with otherwise identical inputs.
 
 ## Programmatic API
 
 ```python
 from pathlib import Path
-from yt_uniquifier.core.calibration.loop import calibrate, CalibrationTarget
-from yt_uniquifier.core.profile_loader import load_profile, dump_profile
+
+from yt_uniquifier.core.calibration.loop import CalibrationTarget, calibrate
+from yt_uniquifier.core.profile_loader import dump_profile, load_profile
 
 base = load_profile(Path("profiles/medium.yaml"))
 result = calibrate(
@@ -125,26 +118,22 @@ result = calibrate(
         min_quality=86.0,
         max_iterations=8,
         test_clip_sec=90.0,
+        seed=0,
+        min_factor=0.25,
+        max_factor=4.0,
     ),
     work_dir=Path("/tmp/calib"),
 )
 
-if result.converged:
-    print(f"converged at factor={result.factor:.2f}")
-else:
-    print(f"best-so-far: factor={result.factor:.2f}, self_match={result.final_self_match:.3f}")
-
+print(result.converged, result.factor, result.final_quality_metric)
 dump_profile(result.profile, Path("tuned.yaml"))
 ```
 
-`CalibratedResult.steps[]` carries every intermediate iteration's profile,
-self-match, quality, and the metric that was used — useful when piping
-into a UI progress display or just for debugging.
+`CalibratedResult.steps` records every sampled factor, profile, similarity score,
+quality value/backend, elapsed scoring time, and cache/fallback note. Bounds are
+validated before any media work and must satisfy
+`0 < min_factor <= 1 <= max_factor`.
 
-## Integration with corpus
-
-If you have previous authorized derivatives indexed via
-`yt-uniq corpus add`, the QA reports during calibration also flag
-`corpus_matches`. Calibration itself uses only the legacy `cid_predict_self`
-heuristic, not the corpus. Use `--vs-corpus` for regression/self-collision
-diagnostics and review quality independently.
+Calibration only scales parameters with an existing intensity rule. It does not
+toggle transforms, reorder the filter graph, choose a second pipeline, or replace
+full-output correctness and quality validation.

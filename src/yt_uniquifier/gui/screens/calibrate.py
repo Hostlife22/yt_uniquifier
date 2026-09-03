@@ -1,4 +1,4 @@
-"""Calibrate — bisect intensity to target self-match with live chart."""
+"""Calibrate — bounded intensity search with a live diagnostics chart."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ class CalibrateScreen(ScreenBase):
         if idx >= 0:
             self.profile_combo.setCurrentIndex(idx)
         mark(self.profile_combo, "Base profile",
-             "Starting profile whose intensity gets bisected toward the target.")
+             "Starting profile whose existing transforms are scaled during search.")
         row_p.addWidget(self.profile_combo, stretch=1)
         layout.addLayout(row_p)
 
@@ -100,7 +100,7 @@ class CalibrateScreen(ScreenBase):
         self.iter_spin.setRange(1, 15)
         self.iter_spin.setValue(5)
         mark(self.iter_spin, "Iterations",
-             "Maximum number of bisection steps before stopping with the best-so-far profile.")
+             "Maximum bounded-search trials before selecting the best measured profile.")
         knobs.addWidget(self.iter_spin)
 
         knobs.addWidget(QLabel("Test clip (s):"))
@@ -108,7 +108,7 @@ class CalibrateScreen(ScreenBase):
         self.clip_spin.setRange(10, 600)
         self.clip_spin.setValue(60)
         mark(self.clip_spin, "Test clip duration",
-             "Seconds of the source used as the calibration probe (shorter = faster).")
+             "Total seconds sampled across source start, middle, and end.")
         knobs.addWidget(self.clip_spin)
 
         knobs.addWidget(QLabel("Metric:"))
@@ -130,7 +130,7 @@ class CalibrateScreen(ScreenBase):
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._on_run)
         mark(self.run_btn, "Run calibration",
-             "Start the bisection loop that tunes intensity toward the target self-match.",
+             "Search intensity against independent similarity and quality constraints.",
              shortcut="Ctrl+R")
         controls.addWidget(self.run_btn)
         self.cancel_btn = QPushButton("Cance&l")
@@ -138,7 +138,7 @@ class CalibrateScreen(ScreenBase):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._on_cancel)
         mark(self.cancel_btn, "Cancel calibration",
-             "Abort the bisection at the next iteration boundary.", shortcut="Esc")
+             "Abort the search at the next safe boundary.", shortcut="Esc")
         controls.addWidget(self.cancel_btn)
         self.save_btn = QPushButton("&Save tuned profile as…")
         self.save_btn.setEnabled(False)

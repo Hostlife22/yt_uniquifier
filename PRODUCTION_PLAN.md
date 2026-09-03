@@ -366,7 +366,7 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 ### 5.3 Calibration v2 within current engine
 
 - **Files:** `core/calibration/loop.py`, intensity, CLI/GUI/docs.
-- **Current behavior:** unbracketed multiplicative loop on first clip.
+- **Current behavior:** deterministic bounded search over a stratified probe.
 - **Problem:** source bias and random/non-monotone results.
 - **Proposed behavior:** fixed seed/common random numbers, 3–5 stratified clips,
   feasibility-first Pareto search, cached trials and deterministic resume.
@@ -377,11 +377,15 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   replacement, real corpus study.
 - **Risk:** more compute; parallel/cached clips offset cost.
 - **Expected result:** reproducible tuned profile with explicit confidence/limitations.
-- **Status:** partial — current engine already fixes the seed/common random draws,
-  hashes the source clip, retries then aborts infrastructure failures, and brackets
-  after observing both sides; Phase 5 removed invalid quality fallback. Stratified
-  clips, durable scored-trial cache, plateau/confidence and non-monotone Pareto search
-  remain for a dedicated calibration-v2 change.
+- **Status:** implemented for the current engine — the total probe budget now covers
+  start/middle/end, candidates use fixed common random draws, and the search samples
+  factor 1 plus bounded endpoints before logarithmic interval refinement. Scored
+  trials resume from an atomic plan/metric/schema-keyed cache; result selection is
+  feasibility-first and quality-preserving, backend changes abort, elapsed trial time
+  is recorded, and failures retry only at the same factor. Monotone/non-monotone,
+  cache corruption/reuse, source replacement and real-FFmpeg probe tests are present.
+  Confidence thresholds still require the explicitly listed natural-content corpus
+  study and are not claimed by the implementation.
 
 ## Phase 6 — Production hardening
 
