@@ -65,12 +65,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -170,7 +170,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -250,7 +250,7 @@ jobs:
       contents: write   # softprops/action-gh-release write
       id-token: write   # v1.1.0 Task 11: cosign keyless OIDC token
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # v1.1.0 Task 10: cyclonedx-py needs pyproject.toml present at
         # the repo root to enumerate the declared dependency closure.
         with:
@@ -287,7 +287,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Set up Python for SBOM
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

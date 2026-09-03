@@ -14,6 +14,8 @@ the last tag.
 
 ### Fixed
 
+- Upgrade official checkout and Python setup actions to their Node 24-compatible v7
+  majors across CI, docs, security, performance, mutation and release workflows.
 - Recover distributed outputs after a hard crash between a journal-specific token
   fence and final publication by using a durable commit journal shared by CLI and GUI
   workers; an older same-name marker cannot authorize an unfenced staged artifact.
