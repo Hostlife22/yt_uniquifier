@@ -25,6 +25,7 @@ from yt_uniquifier.core.qa import sscd
 from yt_uniquifier.core.qa.sscd import (
     SSCDResult,
     _ensure_model_cached,
+    _extract_frames,
     _pairwise_cosine,
     _sha256_file,
     compute_sscd,
@@ -93,7 +94,9 @@ def test_sscd_result_aggregates_mean_min_and_keeps_full_list(
     # Stub frame extraction so we never need ffmpeg in this test.
     monkeypatch.setattr(
         sscd, "_extract_frames",
-        lambda _src, _dest, *, frame_count: [Path(f"f{i}.png") for i in range(5)],
+        lambda _src, _dest, *, frame_count, cancel_token=None: [
+            Path(f"f{i}.png") for i in range(5)
+        ],
     )
     # Stub embedding to return paired sequences whose per-row cosines
     # we know in advance: [1.0, 0.9, 0.8, 0.5, 0.2].
@@ -125,7 +128,14 @@ def test_sscd_pairs_on_shorter_frame_count(
 
     calls: list[int] = []
 
-    def fake_extract(_src: Path, _dest: Path, *, frame_count: int) -> list[Path]:
+    def fake_extract(
+        _src: Path,
+        _dest: Path,
+        *,
+        frame_count: int,
+        cancel_token: CancelToken | None = None,
+    ) -> list[Path]:
+        del cancel_token
         calls.append(frame_count)
         # First call (source) returns 3 frames; second (output) returns 5.
         n = 3 if len(calls) == 1 else 5
@@ -188,7 +198,14 @@ def test_cancel_between_extractions(
     extract_calls: list[Path] = []
     token = CancelToken()
 
-    def fake_extract(srcp: Path, _dest: Path, *, frame_count: int) -> list[Path]:
+    def fake_extract(
+        srcp: Path,
+        _dest: Path,
+        *,
+        frame_count: int,
+        cancel_token: CancelToken | None = None,
+    ) -> list[Path]:
+        assert cancel_token is token
         extract_calls.append(srcp)
         # Cancel after the source extract; the cancel-check before
         # ``extract_output`` must fire.
@@ -206,6 +223,53 @@ def test_cancel_between_extractions(
         )
     # Only the source extract ran.
     assert extract_calls == [src]
+
+
+def test_extract_frames_batches_all_seeks_into_one_runner_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    from yt_uniquifier.core import probe as probe_module
+    from yt_uniquifier.core import runner
+
+    source = tmp_path / "source.mp4"
+    source.touch()
+    token = CancelToken()
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    monkeypatch.setattr(
+        probe_module,
+        "probe",
+        lambda _source: SimpleNamespace(duration_sec=8.0),
+    )
+
+    def fake_run(command: Any, **kwargs: Any) -> None:
+        calls.append((list(command.args), kwargs))
+        for arg in command.args:
+            if arg.endswith(".png"):
+                Path(arg).write_bytes(b"png")
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    frames = _extract_frames(
+        source,
+        tmp_path / "frames",
+        frame_count=4,
+        cancel_token=token,
+    )
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args.count("-i") == 4
+    assert args.count("-map") == 4
+    assert [args[idx + 1] for idx, arg in enumerate(args) if arg == "-ss"] == [
+        "1.000000", "3.000000", "5.000000", "7.000000",
+    ]
+    assert kwargs["cancel_token"] is token
+    assert kwargs["progress_via_stdout"] is False
+    assert frames == sorted(frames)
 
 
 # ---------------------------------------------------------------------------

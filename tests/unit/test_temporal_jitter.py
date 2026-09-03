@@ -1,10 +1,4 @@
-"""video.temporal_jitter — Poisson-sampled blackout/drop indices.
-
-Source: Fojcik & Syga, arXiv:2501.11171 (2025) — random frame perturbation
-breaks neural video copy detectors. v0.4.0 switches from deterministic
-mod-N periodicity to rng-sampled frame indices over a 60-second window
-(WINDOW_FRAMES=1440 at 24 fps).
-"""
+"""video.temporal_jitter — deterministic timestamp-bucket perturbations."""
 
 from __future__ import annotations
 
@@ -17,7 +11,10 @@ from pydantic import ValidationError
 from yt_uniquifier.core.transforms import get
 from yt_uniquifier.core.transforms.base import LabelAllocator, call_build
 from yt_uniquifier.core.transforms.video_temporal_jitter import (
+    TIME_BUCKETS_PER_SECOND,
+    WINDOW_BUCKETS,
     WINDOW_FRAMES,
+    WINDOW_SECONDS,
     TemporalJitterParams,
 )
 
@@ -44,24 +41,25 @@ def test_default_emits_blackout_and_drop() -> None:
         spec, TemporalJitterParams(),
         LabelAllocator(), "0:v:0", rng=random.Random(0),
     )
-    # 60s × 24fps = 1440 frame window.
-    assert f"mod(N\\,{WINDOW_FRAMES})" in chain.filter_str
-    assert f"mod(n\\,{WINDOW_FRAMES})" in chain.filter_str
+    assert WINDOW_FRAMES == WINDOW_BUCKETS  # compatibility alias
+    assert f"floor(mod(T\\,{WINDOW_SECONDS})*{TIME_BUCKETS_PER_SECOND})" in chain.filter_str
+    assert f"floor(mod(t\\,{WINDOW_SECONDS})*{TIME_BUCKETS_PER_SECOND})" in chain.filter_str
+    assert "mod(N" not in chain.filter_str
+    assert "mod(n" not in chain.filter_str
     assert "geq=" in chain.filter_str
     assert "select=" in chain.filter_str
 
 
-def test_blackout_emits_multiple_eq_terms() -> None:
-    """No more single-period mod-N; expect ~48 eq() terms for default prob."""
+def test_max_probabilities_keep_filter_expression_bounded() -> None:
+    """Allowed maxima must not create an enormous FFmpeg expression."""
     spec = get("video.temporal_jitter")
     chain = call_build(
-        spec, TemporalJitterParams(drop_prob=0.0),
+        spec, TemporalJitterParams(blackout_prob=0.2, drop_prob=0.2),
         LabelAllocator(), "0:v:0", rng=random.Random(0),
     )
-    eq_count = chain.filter_str.count(f"eq(mod(N\\,{WINDOW_FRAMES})")
-    # ~1440 * 0.033 = 47.5 → expect ~47, accept generous range.
-    # Multiplied by 3 channels (lum + cb + cr).
-    assert eq_count >= 30 * 3, f"expected ≥90 eq() terms (3 channels × ~47), got {eq_count}"
+    assert len(chain.filter_str) < 1_000
+    assert chain.filter_str.count("floor(mod(T") == 3
+    assert chain.filter_str.count("floor(mod(t") == 1
 
 
 def test_blackout_blur_uses_mid_gray() -> None:
@@ -88,23 +86,15 @@ def test_blackout_blur_false_uses_pure_black() -> None:
 
 
 def test_no_index_overlap_between_blackout_and_drop() -> None:
-    """A frame is either blackout-flagged or drop-flagged, never both."""
+    """Blackout and drop occupy adjacent, disjoint permutation ranks."""
     spec = get("video.temporal_jitter")
     chain = call_build(
         spec, TemporalJitterParams(blackout_prob=0.1, drop_prob=0.1),
         LabelAllocator(), "0:v:0", rng=random.Random(42),
     )
-    # Find indices in the lum geq cond (capital N) and select cond (lowercase n).
-    blackout_idx = set(int(m) for m in re.findall(
-        rf"eq\(mod\(N\\,{WINDOW_FRAMES}\)\\,(\d+)\)", chain.filter_str,
-    ))
-    drop_idx = set(int(m) for m in re.findall(
-        rf"eq\(mod\(n\\,{WINDOW_FRAMES}\)\\,(\d+)\)", chain.filter_str,
-    ))
-    assert blackout_idx and drop_idx
-    assert blackout_idx.isdisjoint(drop_idx), (
-        f"frame indices double-flagged: overlap={blackout_idx & drop_idx}"
-    )
+    expected_count = round(WINDOW_BUCKETS * 0.1)
+    assert f"\\,{expected_count})" in chain.filter_str
+    assert f"\\,{expected_count}\\,{expected_count * 2 - 1})" in chain.filter_str
 
 
 def test_all_probs_zero_returns_null_passthrough() -> None:

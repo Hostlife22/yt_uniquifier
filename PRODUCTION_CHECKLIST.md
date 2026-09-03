@@ -152,7 +152,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Audio fingerprint uses ordered start/middle/tail windows for >600 s media and
       derives all fields from one extraction per file; natural-film corpus pending.
 - [x] SSCD direction verified: higher cosine means higher similarity.
-- [ ] SSCD frame extraction is batched and reports temporal coverage/confidence.
+- [x] SSCD midpoint frame extraction is batched into one cancellable FFmpeg runner
+      process per file and returns the complete requested grid.
+- [ ] SSCD reports temporal coverage/confidence and supports registered comparison.
 - [x] CLI/HTML similarity diagnostics are clearly separated from correctness/quality;
       structured JSON axis fields await an approved stable-schema RFC.
 - [ ] Corpus IDs/content cache survive move and invalidate on content change.
@@ -189,8 +191,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1533 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `81.95%` (`1432 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1539 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `82.25%` (`1433 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -208,7 +210,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1533 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1539 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -222,9 +224,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1533 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1539 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 81.95% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 82.25% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

@@ -115,7 +115,7 @@ result: SSCDResult = compute_sscd(
     source=Path("in.mp4"),
     output=Path("out.mp4"),
     frame_count=32,            # default — 32 uniform samples
-    cancel_token=token,        # optional, honoured between phases
+    cancel_token=token,        # optional, including during FFmpeg extraction
     model_loader=None,         # test-only injection seam
 )
 print(result.mean_similarity, sscd_band(result.mean_similarity))
@@ -129,9 +129,9 @@ the multi-hundred-MB torch wheel installed (see
 
 `compute_sscd` is a 5–10 s CPU-bound call at the default frame_count.
 The `cancel_token` parameter is checked between each phase
-(`model_load`, `extract_source`, `extract_output`, `embed`, `cosine`),
-so a click on Cancel returns within a fraction of a second instead of
-waiting for the full embed pass to finish.
+(`model_load`, `extract_source`, `extract_output`, `embed`, `cosine`). Midpoint
+extraction also uses the shared runner, so cancellation terminates its complete
+FFmpeg process tree instead of waiting for all seeks to finish.
 
 `calibrate(metric="sscd")` forwards the same token into every iteration,
 matching the v0.5.5 A6 behaviour for the chromaprint path.
@@ -141,9 +141,10 @@ matching the v0.5.5 A6 behaviour for the chromaprint path.
 * **Lazy import**: `import torch` lives inside `compute_sscd`, not at
   module top. Importing `yt_uniquifier.core.qa.sscd` is free.
 * **Uniform timeline sampling**: midpoint seeks cover the complete source
-  timeline without decoding every preceding frame of a multi-hour file.
-  Samples are resized to 288×288 and receive the upstream ImageNet
-  mean/std normalization before inference.
+  timeline without decoding every preceding frame of a multi-hour file. All seeks
+  for one file are issued through one FFmpeg process with single-threaded decoder
+  inputs. Samples are resized to 288×288 and receive the upstream ImageNet mean/std
+  normalization before inference.
 * **Pair-wise cosine**: the model already emits L2-normalised vectors;
   the explicit `clamp([-1, 1])` is a safety net against float drift.
 * **Plugin layer untouched**: SSCD lives entirely in `core/qa/`, so a

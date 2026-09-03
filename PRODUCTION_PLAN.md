@@ -19,7 +19,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   licensed natural corpus и полный compatibility graph ещё не готовы.
 - **PARTIAL 2.4:** software CFR 23.976–60 и multi-segment VFR сохраняют decoded
   frames/cadence; non-zero input start PTS normalized; synthetic sparse long-GOP
-  seams and A/V impulses verified; hardware cadence и natural long-GOP corpus pending.
+  seams, A/V impulses and PTS-based temporal jitter verified; hardware cadence и
+  natural long-GOP corpus pending.
 - **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
   crash/no-op resume and APFS distributed fencing.
@@ -366,9 +367,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** metrics correlate with an engineering decision.
 - **Status:** partial — one audio analysis now derives all fingerprint diagnostics
   from one extraction per file and uses five start/middle/tail windows for >600 s
-  sources. Low VMAF is no longer hidden by SSIM and pHash can no longer substitute
+  sources. SSCD midpoint random-access is batched into one cancellable runner process
+  per file. Low VMAF is no longer hidden by SSIM and pHash can no longer substitute
   for unavailable quality evidence. Spatial/temporal registration, shared video
-  extraction/cache and SSCD coverage confidence remain open.
+  feature cache and SSCD coverage confidence remain open.
 
 ### 5.3 Calibration v2 within current engine
 

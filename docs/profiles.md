@@ -143,7 +143,7 @@ encode time.
 | `video.mirror`          | video | (no params) — horizontal flip; opt-in only |
 | `video.blend_b`         | video | `b_video_path`, `opacity` (0.01..0.15) |
 | `video.speed`           | video | `rate` (0.5..2.0) |
-| `video.temporal_jitter` | video | `blackout_prob` (0..0.2), `drop_prob` (0..0.2), `blackout_blur` (bool) |
+| `video.temporal_jitter` | video | Experimental/destructive, opt-in only: `blackout_prob` (0..0.2), `drop_prob` (0..0.2), `blackout_blur` (bool); deterministic 60 s pattern uses a 24 Hz PTS grid, independent of source FPS |
 | `video.tonemap_sdr`     | video | `tone` (hable / reinhard / mobius / aces), `peak_nits`, `desat` |
 | `audio.pitch_tempo`     | audio | `pitch`, `tempo`, `sample_rate`, `method` (rubberband / asetrate), `randomize_within` |
 | `audio.eq`              | audio | `bands` (list of `(freq_hz, gain_db)`), `width_q`, `randomize_bands` |

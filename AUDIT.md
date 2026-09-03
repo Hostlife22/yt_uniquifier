@@ -18,9 +18,9 @@ contract, stream title/disposition validation, bounded persistent web run store 
 
 Post-fix verification на этом хосте (обновлено 2026-09-03):
 
-- Ruff и strict mypy: passed (`156` source files).
-- Canonical `make check`: `1488 passed, 2 skipped` на полностью установленном
-  optional environment (`20:49`, финальный Phase 3 quality повтор).
+- Ruff и strict mypy: passed (`158` source files).
+- Canonical `make check`: `1539 passed, 2 skipped` на полностью установленном
+  optional environment (`21:22`, temporal/SSCD production повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -298,16 +298,18 @@ resolution/pixel format/rate-control/color args. Static HDR10 метаданны
 primaries и matrix, а для PQ рекомендует SMPTE ST 2086 и MaxCLL/MaxFALL metadata:
 [официальные HDR требования YouTube](https://support.google.com/youtube/answer/7126552?hl=en).
 
-Локальный FFmpeg-full 9.0.1 содержит `zscale`; real HDR10 keep-HDR и HDR→SDR tests
-прошли. HLG, natural HDR corpus и static metadata через hardware encoder:
-**NOT VERIFIED** (hardware static-HDR path намеренно rejected до доказательства).
+Локальный FFmpeg-full 9.0.1 содержит `zscale`; real HDR10 keep-HDR, HDR→SDR и HLG
+tests прошли. HLG подтверждён на libx265 и HEVC VideoToolbox этого Mac. Natural HDR
+corpus и static metadata через остальные hardware encoders остаются **NOT VERIFIED**.
 
 ### VFR
 
-Базовый односегментный VFR smoke: **VERIFIED PASS**. Но FFmpeg предупреждает, что
-muxer и `avoid_negative_ts` могут менять timestamps даже в passthrough mode:
+Одно- и многосегментный software VFR smoke: **VERIFIED PASS**. Temporal jitter теперь
+использует bounded 24 Hz PTS-bucket permutation и прошёл 24/30/60/VFR real-FFmpeg
+tests на максимальных параметрах. Но FFmpeg предупреждает, что muxer и
+`avoid_negative_ts` могут менять timestamps даже в passthrough mode:
 [FFmpeg fps/timestamp documentation](https://ffmpeg.org/ffmpeg.html#toc-Advanced-options).
-Segmented VFR, temporal jitter, hardware encoders и concat: **NOT VERIFIED**.
+Hardware encoder cadence остаётся **NOT VERIFIED**.
 
 ## QA и similarity audit
 
@@ -332,11 +334,9 @@ notes.
 
 - stable `QAReport` пока хранит correctness details в `notes[]`: structured LUFS,
   true peak, decoded frame/sample/end deltas требуют отдельного additive schema RFC.
-- SSCD cosine: чем выше, тем изображения более похожи. Официальная реализация Meta
-  прямо задаёт это направление и приводит `>0.75` как пример copy threshold:
-  [SSCD official repository](https://github.com/facebookresearch/sscd-copy-detection).
-  Calibration возвращает `1-similarity`, но затем требует это значение `<= target`,
-  то есть награждает сходство.
+- SSCD cosine: чем выше, тем изображения более похожи. Calibration теперь передаёт
+  direct clamped similarity и требует `mean_similarity <= target`; старые inverted
+  cache records отделены schema v2. Threshold всё равно требует authorized corpus.
 - `sscd_min` назван «tightest risk», хотя риск высокой похожести задаёт максимум;
   verdict SSCD вообще игнорирует.
 - pHash/VMAF/SSIM без geometric/temporal registration смешивают эффект намеренного
@@ -344,8 +344,8 @@ notes.
   `target_vmaf` это теперь fail-fast; post-run aligned QA остаётся незавершённым.
 - Legacy Jaccard через sets всё ещё теряет временной порядок внутри покрытых окон;
   Hamming window sequence остаётся доступной отдельно.
-- SSCD default 32 pair вызывает отдельный FFmpeg process на каждый frame каждой
-  стороны вместо одного extraction pass.
+- SSCD midpoint seeks теперь объединены в один cancellable runner process на файл;
+  temporal alignment, feature cache и явная coverage confidence ещё не реализованы.
 - `cid_predict_self` — max эвристик, а не калиброванная вероятность. Его нельзя
   представлять как вероятность реальной внешней системы.
 

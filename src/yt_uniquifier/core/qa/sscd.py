@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import subprocess
 import tempfile
 import urllib.request
 from collections.abc import Callable
@@ -174,12 +173,20 @@ def _sha256_file(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_frames(source: Path, dest_dir: Path, *, frame_count: int) -> list[Path]:
+def _extract_frames(
+    source: Path,
+    dest_dir: Path,
+    *,
+    frame_count: int,
+    cancel_token: CancelToken | None = None,
+) -> list[Path]:
     """Sample ``frame_count`` PNGs uniformly across ``source``'s duration.
 
-    Midpoint seeks cover the complete timeline without decoding every
-    preceding frame of a multi-hour source.  Frames are resized directly
-    to the square input used by the official SSCD inference recipe.
+    One FFmpeg process opens independently seekable inputs for all midpoint samples.
+    This retains fast random access for multi-hour sources without the previous one
+    process per frame overhead. Frames are resized directly to the square input used
+    by the official SSCD inference recipe. The shared runner makes a silent extraction
+    cancellable and applies the standard process-tree/stall-watchdog policy.
     """
     if frame_count < 1:
         raise PipelineError("sscd frame_count must be ≥ 1")
@@ -193,31 +200,45 @@ def _extract_frames(source: Path, dest_dir: Path, *, frame_count: int) -> list[P
     if duration_sec <= 0:
         raise PipelineError(f"sscd source duration is unknown for {source}")
 
+    from yt_uniquifier.core.pipeline import BuiltCommand
+    from yt_uniquifier.core.runner import run as run_ffmpeg
+
     dest_dir.mkdir(parents=True, exist_ok=True)
+    outputs = [dest_dir / f"frame_{idx:05d}.png" for idx in range(frame_count)]
+    cmd = [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y"]
     for idx in range(frame_count):
         timestamp = duration_sec * (idx + 0.5) / frame_count
-        output = dest_dir / f"frame_{idx:05d}.png"
-        cmd = [
-            ffmpeg_bin(),
-            "-hide_banner", "-loglevel", "error", "-y",
+        cmd.extend([
+            # A single decoder thread per random-access input prevents a 32-sample
+            # extraction from multiplying FFmpeg's automatic thread count.
+            "-threads", "1",
             "-ss", f"{timestamp:.6f}",
             "-i", str(source),
-            "-map", "0:v:0",
+        ])
+    for idx, output in enumerate(outputs):
+        cmd.extend([
+            "-map", f"{idx}:v:0",
             "-frames:v", "1",
             "-vf", f"scale={_MODEL_INPUT_SIZE}:{_MODEL_INPUT_SIZE}",
             "-an", "-sn",
             str(output),
-        ]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=60)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            raise PipelineError(
-                f"sscd frame extraction failed for {source} at {timestamp:.3f}s: "
-                f"{getattr(exc, 'stderr', exc)!r}"
-            ) from exc
+        ])
+    try:
+        run_ffmpeg(
+            BuiltCommand(args=cmd),
+            output=outputs[-1],
+            cancel_token=cancel_token,
+            progress_via_stdout=False,
+        )
+    except PipelineError as exc:
+        raise PipelineError(f"sscd frame extraction failed for {source}: {exc}") from exc
+
     frames = sorted(dest_dir.glob("frame_*.png"))
-    if not frames:
-        raise PipelineError(f"sscd frame extraction produced 0 frames for {source}")
+    if len(frames) != frame_count:
+        raise PipelineError(
+            f"sscd frame extraction produced {len(frames)}/{frame_count} frames "
+            f"for {source}"
+        )
     return frames
 
 
@@ -310,16 +331,21 @@ def compute_sscd(
         tmp_path = Path(tmp)
         _check_cancel("extract_source")
         src_frames = _extract_frames(
-            source, tmp_path / "src", frame_count=frame_count,
+            source,
+            tmp_path / "src",
+            frame_count=frame_count,
+            cancel_token=cancel_token,
         )
         _check_cancel("extract_output")
         out_frames = _extract_frames(
-            output, tmp_path / "out", frame_count=frame_count,
+            output,
+            tmp_path / "out",
+            frame_count=frame_count,
+            cancel_token=cancel_token,
         )
 
-        # If thumbnail filter returned different counts (very short
-        # source vs longer output, or vice versa), pair on the shorter
-        # length rather than crash — same approach as ``phash.compare``.
+        # Custom or injected extractors may return different counts. Pair on
+        # the shorter length rather than crash — same approach as ``phash.compare``.
         pair = min(len(src_frames), len(out_frames))
         src_frames = src_frames[:pair]
         out_frames = out_frames[:pair]

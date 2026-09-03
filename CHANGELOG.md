@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Make `video.temporal_jitter` use presentation-time buckets instead of a nominal
+  24-FPS frame counter, with a bounded deterministic permutation that remains valid
+  at the maximum configured blackout/drop probabilities.
+- Batch all SSCD midpoint seeks for one input into a single cancellable FFmpeg runner
+  process instead of spawning one process per sampled frame.
 - Coordinate encoder-session capacity across local CLI, GUI, web and queue-worker
   processes, and reserve estimated workspace/final-output bytes atomically per
   filesystem before processing; waits remain cancellable and stale same-host owners

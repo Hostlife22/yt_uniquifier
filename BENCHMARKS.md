@@ -18,6 +18,7 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | ASS subtitle → MKV/MOV | ASS copied to MKV; converted to `mov_text` in MOV; language/title retained | Text subtitle policy confirmed; real PGS fixture remains pending |
 | APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
 | Segmented VFR, libx264, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software VFR preserve contract разрешён; hardware paths остаются unverified |
+| Temporal jitter, maximum 0.2/0.2 | bounded 289-character filter; 24/30/60 FPS retained 58/72, 71/90, 145/180 frames; VFR cadence classes retained | Pattern is based on a 24 Hz PTS grid instead of source frame number; hardware paths remain unverified |
 | Auto encoder policy, H.264 | `quality` → libx264; `speed` → H.264 VideoToolbox | Default follows production quality priority; hardware requires explicit policy/override |
 | `soft`, 30.183 s, policy smoke | libx264: 17.86 s, 752 frames; VideoToolbox: 9.36 s, 752 frames; both A/V start 0 | Selection policy changes throughput without losing decoded frames on this Mac |
 | Benchmark RSS sampler, 10.01 s fixture | 497,832 KiB peak, `psutil_process_tree_sum_100ms` | New result includes simultaneous Python/FFmpeg RSS; single run, not a regression baseline |
@@ -25,6 +26,7 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | Mandatory decode gate, 3 s H.264/AAC MP4 | valid output passed; copy truncated by 8 KiB failed as `output.decode` on this Mac | Every `run_full` frontend now rejects corrupt tails before completion/publication |
 | Chromaprint dependency repair | `fpcalc 1.6.1`; 12 s identity audio similarity 1.0/Hamming 0 | Optional audio diagnostics operational on this Mac |
 | Long-form fingerprint smoke, 620 s AAC | five ordered windows, 600 s total coverage, identity 1.0; 3.73 s wall | Start/middle/tail coverage replaces first-600-only report path |
+| SSCD extraction, 30 s 640×360, 32 frames | 32 processes / 6.942 s → 1 process / 0.931 s; 32/32 PNG SHA-256 identical; 7.45× wall speedup | Batch midpoint seeks without changing sampled bytes; single Mac run, not a general throughput claim |
 | Full local quality gate after Phase 5 | 1466 passed, 2 expected skipped; Ruff + strict mypy pass; 22:13 | QA changes did not regress the full Mac suite or stable contracts |
 | Full local gate after mandatory decode validation | 1509 passed, 2 expected skipped; Ruff + strict mypy pass; 21:18 | Shared final decode gate is compatible with the complete Mac FFmpeg/GUI/test matrix |
 
@@ -276,6 +278,17 @@ reclaimed dead same-host owner и сохранил foreign/malformed owner fail-
 `1432 passed`, `1 skipped`, `81.95%` branch-aware coverage. Wheel v1.4.0 собран.
 Локальный `linux/amd64` Docker image собран и запущен под UID 1000: `/healthz` и
 `/readyz` прошли, registry `/data/work/.resource-admission` доступен для записи.
+
+## Temporal/SSCD smoke — 2026-09-03
+
+После перевода temporal jitter на ограниченную PTS-сетку real-FFmpeg smoke при
+максимальных `0.2/0.2` сохранил `58/72`, `71/90` и `145/180` кадров для 24/30/60 FPS;
+VFR-клип с регионами 30/20/60 FPS сохранил исходные классы cadence. SSCD extraction
+для 32 одинаковых midpoint samples сформировал byte-identical PNG: прежние 32
+процесса — `6.942 s`, один multi-input process — `0.931 s` (`7.45x` на этом Mac;
+не general throughput claim). Полный `make check`: `1539 passed`, `2 skipped` за
+`1282.79 s`; CI-equivalent core gate: `1433 passed`, `1 skipped`, `82.25%`
+branch-aware coverage. Wheel v1.4.0 собран.
 
 Это concurrency/correctness smoke, не throughput benchmark. Natural 4K/1–3 h
 bitrate-estimate accuracy, hard disk quotas, mixed GPU visibility, container encode,

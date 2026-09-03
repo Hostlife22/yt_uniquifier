@@ -1,26 +1,20 @@
-"""Temporal frame perturbation — blackout + drop on rng-sampled frame indices.
+"""Experimental timestamp-based blackout/drop perturbation.
 
-Per Fojcik & Syga, "Counteracting Temporal Attacks in Video Copy Detection"
-(arXiv:2501.11171, 2025), random blackouts on the order of 1/10 frames
-reduced neural video-copy-detector mean Average Precision (μAP) by 60 %+
-on Meta's VSC2022 benchmark. Per-frame *drop* has a similar effect on
-detectors that sample at a fixed stride.
+The transform is retained for controlled processing of owned or licensed media and
+is deliberately excluded from quality-first defaults.  It is a destructive temporal
+effect: QA must report its visual/timeline impact independently of similarity
+diagnostics.
 
-v0.3.3 implemented this as periodic-with-random-phase
-(`mod(N, period) == offset`). v0.4.0 switches to **Poisson-sampled frame
-indices over a 60-second window**: we draw N random frame indices (where
-N = window_frames × probability) at build time and embed them as
-`eq(mod(N, W), i0) + eq(mod(N, W), i1) + …`. No detectable periodicity.
-
-The expression repeats every 60 s of video — much longer than the v0.3.3
-30-frame period (48× larger window), so even stride-based subsampling
-can't reliably miss the perturbations.
-
-Source: Fojcik & Syga, arXiv:2501.11171 (2025).
+Older versions sampled absolute frame numbers in a nominal 1440-frame window.  That
+made the alleged 60-second pattern last 60 seconds only at 24 FPS, and made CFR/VFR
+sources receive different temporal behaviour.  The implementation now samples a
+fixed 24 Hz grid expressed in presentation timestamps.  The 60-second pattern is
+therefore duration-based for 24/30/60 FPS and VFR sources.
 """
 
 from __future__ import annotations
 
+import math
 import random as _random
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,20 +27,43 @@ from yt_uniquifier.core.transforms.base import (
     register,
 )
 
-# 60 s × 24 fps = 1440 frames. Long enough to defeat stride-based detection
-# while keeping the embedded expression tractable (~50 terms at default
-# probabilities).
-WINDOW_FRAMES = 60 * 24
+# A 24 Hz timestamp grid preserves the historical density while making the window
+# duration independent of source frame rate. ``WINDOW_FRAMES`` remains as an
+# internal compatibility alias for older tests/plugins that imported the constant.
+WINDOW_SECONDS = 60
+TIME_BUCKETS_PER_SECOND = 24
+WINDOW_BUCKETS = WINDOW_SECONDS * TIME_BUCKETS_PER_SECOND
+WINDOW_FRAMES = WINDOW_BUCKETS
+
+
+def _bucket_count(probability: float) -> int:
+    if probability <= 0:
+        return 0
+    return max(1, int(round(WINDOW_BUCKETS * probability)))
+
+
+def _coprime_stride(rng: _random.Random) -> int:
+    """Draw a stride that permutes every timestamp bucket exactly once."""
+    while True:
+        stride = rng.randrange(1, WINDOW_BUCKETS)
+        if math.gcd(stride, WINDOW_BUCKETS) == 1:
+            return stride
+
+
+def _bucket_rank(variable: str, stride: int, offset: int) -> str:
+    """Return a bounded-size deterministic permutation expression."""
+    bucket = (
+        f"floor(mod({variable}\\,{WINDOW_SECONDS})*{TIME_BUCKETS_PER_SECOND})"
+    )
+    return f"mod({bucket}*{stride}+{offset}\\,{WINDOW_BUCKETS})"
 
 
 class TemporalJitterParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Probability per frame of being blacked out. Defaults are conservative —
-    # 0.033 ≈ blackout 48 of 1440 frames per minute.
-    # Fojcik's reference attack used 1/10; that's visible, so we stay lower.
+    # Fraction of 24 Hz timeline buckets blacked out in each 60-second window.
     blackout_prob: float = Field(default=0.033, ge=0.0, le=0.2)
-    # Probability per frame of being dropped (one fewer output frame).
+    # Fraction of timeline buckets whose decoded frames are dropped.
     drop_prob: float = Field(default=0.025, ge=0.0, le=0.2)
     # If true, blackout frames become mid-gray (128,128,128) — perceived
     # as a "soft flash". If false, pure black (0,128,128) — sharper.
@@ -71,32 +88,30 @@ def _build_temporal_jitter(
     )
 
     parts: list[str] = []
-    blackout_set: set[int] = set()
+    blackout_count = _bucket_count(params.blackout_prob)
+    drop_count = _bucket_count(params.drop_prob)
+    stride = _coprime_stride(use_rng)
+    offset = use_rng.randrange(WINDOW_BUCKETS)
 
-    if params.blackout_prob > 0:
-        n = max(1, int(round(WINDOW_FRAMES * params.blackout_prob)))
-        blackout_idx = sorted(use_rng.sample(range(WINDOW_FRAMES), n))
-        blackout_set = set(blackout_idx)
-        cond_terms = "+".join(
-            f"eq(mod(N\\,{WINDOW_FRAMES})\\,{i})" for i in blackout_idx
-        )
+    if blackout_count:
+        blackout_rank = _bucket_rank("T", stride, offset)
+        blackout_condition = f"lt({blackout_rank}\\,{blackout_count})"
         y_const = 128 if params.blackout_blur else 0
         parts.append(
             "geq="
-            f"lum='if({cond_terms}\\,{y_const}\\,p(X\\,Y))':"
-            f"cb='if({cond_terms}\\,128\\,p(X\\,Y))':"
-            f"cr='if({cond_terms}\\,128\\,p(X\\,Y))'"
+            f"lum='if({blackout_condition}\\,{y_const}\\,p(X\\,Y))':"
+            f"cb='if({blackout_condition}\\,128\\,p(X\\,Y))':"
+            f"cr='if({blackout_condition}\\,128\\,p(X\\,Y))'"
         )
 
-    if params.drop_prob > 0:
-        n = max(1, int(round(WINDOW_FRAMES * params.drop_prob)))
-        # Don't drop frames that were blacked out (double-flagging is wasteful).
-        candidate_pool = sorted(set(range(WINDOW_FRAMES)) - blackout_set)
-        drop_idx = sorted(use_rng.sample(candidate_pool, min(n, len(candidate_pool))))
-        cond_terms = "+".join(
-            f"eq(mod(n\\,{WINDOW_FRAMES})\\,{i})" for i in drop_idx
+    if drop_count:
+        drop_rank = _bucket_rank("t", stride, offset)
+        first_drop_rank = blackout_count
+        last_drop_rank = first_drop_rank + drop_count - 1
+        drop_condition = (
+            f"between({drop_rank}\\,{first_drop_rank}\\,{last_drop_rank})"
         )
-        parts.append(f"select='not({cond_terms})'")
+        parts.append(f"select='not({drop_condition})'")
 
     out = alloc.next("v")
     if not parts:
