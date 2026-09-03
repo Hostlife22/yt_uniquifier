@@ -108,6 +108,12 @@ def test_checkpoint_store_concurrent_mark_no_lost_updates(tmp_path: Path) -> Non
     assert store.all_done(), (
         "concurrent mark() lost an update — not every segment is 'done'"
     )
+    # ``mark()`` is intentionally debounced.  The production orchestrator
+    # flushes at the segment-loop phase boundary before reopening/resuming;
+    # do the same here so this test isolates concurrent mutation integrity
+    # instead of depending on whether the 0.25 s debounce timer happened to
+    # fire before the first worker on a particular CI runner.
+    store.flush()
     # Re-open the store to verify state.json is intact and parseable.
     fresh = CheckpointStore(tmp_path / "work", plan)
     resumed = fresh.init_or_resume(segs)
