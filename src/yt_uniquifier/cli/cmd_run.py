@@ -13,6 +13,11 @@ from yt_uniquifier.core.models import Plan, Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.qa.report import build_report, render_html, write_json
+from yt_uniquifier.core.resource_budget import (
+    DISK_SAFETY_FACTOR,
+    estimate_encoded_bytes,
+    estimate_work_bytes,
+)
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 console = Console()
@@ -60,8 +65,7 @@ def run_cmd(
     ),
     workers: int = typer.Option(
         1, "--workers",
-        help="Parallel segment workers (libx264 / libx265 only; GPU encoders "
-             "stay sequential).",
+        help="Parallel segment workers, clamped to the detected encoder capacity.",
     ),
     no_progress: bool = typer.Option(False, "--no-progress", help="Suppress progress bar."),
     sanitize_bitstream: bool = typer.Option(
@@ -230,14 +234,14 @@ def _print_dry_run_report(
             f"({first.end_sec - first.start_sec:.2f} s)",
         )
 
-    # Disk estimate — same heuristic as preflight (bitrate × duration × 1.3).
-    bitrate = (
-        plan.source.video[0].bit_rate
-        if plan.source.video and plan.source.video[0].bit_rate
-        else 8_000_000
+    # Show the two budgets the orchestrator reserves. They are additive when
+    # work_dir and output live on the same filesystem.
+    work_bytes = int(estimate_work_bytes(plan.source) * DISK_SAFETY_FACTOR)
+    final_bytes = int(estimate_encoded_bytes(plan.source) * DISK_SAFETY_FACTOR)
+    console.print(
+        f"  disk estimate : workspace ~{work_bytes / (1024**3):.2f} GiB + "
+        f"final ~{final_bytes / (1024**3):.2f} GiB",
     )
-    est_bytes = int(plan.source.duration_sec * (bitrate / 8.0) * 1.3)
-    console.print(f"  disk estimate : ~{est_bytes / (1024**3):.2f} GiB")
 
     # ETA. v1.2.0 Task 28 — prefer the PGO cache prediction (calibrated
     # against this machine's actual encoder throughput); fall back to the

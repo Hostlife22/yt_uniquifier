@@ -16,6 +16,7 @@ from yt_uniquifier.core.auxiliary_streams import (
     unsupported_auxiliary_streams,
 )
 from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
+from yt_uniquifier.core.resource_budget import estimate_work_bytes
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 
 _log = _logging.getLogger(__name__)
@@ -548,10 +549,8 @@ def has_fail(findings: list[PreflightFinding]) -> bool:
 # adds ~25-35% to the raw bitrate-times-duration estimate on 1080p
 # libx264 runs. 1.3× is the safe upper end; the actual rule the run
 # stays within is the .1× warning margin below.
-_DISK_BYTES_OVERHEAD_FACTOR = 1.3
 _DISK_FREE_FAIL_FACTOR = 1.1
 _DISK_FREE_WARN_FACTOR = 1.5
-_DEFAULT_TARGET_BITRATE_BPS = 8_000_000
 
 
 def _check_disk_space(
@@ -599,15 +598,7 @@ def _check_disk_space(
             ),
         )]
 
-    bitrate = _DEFAULT_TARGET_BITRATE_BPS
-    if source.video and source.video[0].bit_rate:
-        # ffprobe bit_rate is in bits/sec.
-        bitrate = source.video[0].bit_rate
-    estimated = int(
-        max(0.0, source.duration_sec)
-        * (bitrate / 8.0)
-        * _DISK_BYTES_OVERHEAD_FACTOR,
-    )
+    estimated = estimate_work_bytes(source)
     try:
         usage = _shutil.disk_usage(probe_dir)
     except OSError as exc:

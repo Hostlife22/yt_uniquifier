@@ -8,7 +8,7 @@ from typing import NoReturn
 import pytest
 
 from yt_uniquifier.core import orchestrator
-from yt_uniquifier.core.errors import CheckpointError
+from yt_uniquifier.core.errors import CheckpointError, PipelineError
 from yt_uniquifier.core.models import (
     AudioStream,
     EncoderCandidate,
@@ -89,6 +89,11 @@ def test_completed_noop_revalidates_full_output(
         "_validate_final_output",
         lambda _plan, output, _emit, _cancel: validated.append(output),
     )
+    monkeypatch.setattr(
+        orchestrator,
+        "_reserve_run_disk_budget",
+        lambda *_args: pytest.fail("no-op resume must not reserve disk"),
+    )
 
     summary = orchestrator._run_full_body(
         plan,
@@ -98,6 +103,7 @@ def test_completed_noop_revalidates_full_output(
         None,
         CompletedStore(),  # type: ignore[arg-type]
         [segment],
+        [],
         [],
     )
 
@@ -190,3 +196,152 @@ def test_store_is_closed_when_checkpoint_initialization_fails(
         )
 
     assert closed
+
+
+def test_disk_reservations_release_when_run_body_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    released = False
+
+    class FakeReservation:
+        def release(self) -> None:
+            nonlocal released
+            released = True
+
+    class FakeStore:
+        def __init__(self, work_dir: Path, plan: Plan) -> None:
+            del work_dir, plan
+
+        def init_or_resume(self, segments: list[Segment]) -> list[Segment]:
+            return segments
+
+        def close(self) -> None:
+            return None
+
+    def fail_body(*args: object) -> NoReturn:
+        reservations = args[-1]
+        assert isinstance(reservations, list)
+        reservations.append(FakeReservation())
+        raise RuntimeError("injected body failure")
+
+    monkeypatch.setattr(orchestrator, "preflight", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        orchestrator,
+        "plan_segments",
+        lambda *args, **kwargs: [Segment(idx=0, start_sec=0.0, end_sec=10.0)],
+    )
+    monkeypatch.setattr(orchestrator, "CheckpointStore", FakeStore)
+    monkeypatch.setattr(orchestrator, "_start_pause_observer", lambda *args: None)
+    monkeypatch.setattr(orchestrator, "_run_full_body", fail_body)
+
+    with pytest.raises(RuntimeError, match="injected body failure"):
+        orchestrator._run_full_impl(
+            _plan(tmp_path),
+            _options(tmp_path),
+            lambda event: None,
+            None,
+        )
+
+    assert released
+
+
+def test_disk_budget_scales_workspace_to_remaining_segments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[int] = []
+
+    class FakeReservation:
+        def release(self) -> None:
+            return None
+
+    class FakeFactory:
+        @classmethod
+        def acquire(
+            cls,
+            target: Path,
+            run_id: str,
+            required: int,
+            **kwargs: object,
+        ) -> FakeReservation:
+            del cls, target, run_id, kwargs
+            requested.append(required)
+            return FakeReservation()
+
+    class ResumeStore:
+        def get_main_audio(self) -> Path:
+            return tmp_path / "main_audio.m4a"
+
+    monkeypatch.setattr(orchestrator, "DiskReservation", FakeFactory)
+    monkeypatch.setattr(orchestrator, "estimate_work_bytes", lambda _source: 1_000)
+    monkeypatch.setattr(orchestrator, "estimate_encoded_bytes", lambda _source: 500)
+    options = orchestrator.RunOptions(
+        work_dir=tmp_path / "work",
+        output=tmp_path / "output.mp4",
+        run_id="resume-run",
+    )
+    segments = [
+        Segment(idx=0, start_sec=0.0, end_sec=5.0, status="done"),
+        Segment(idx=1, start_sec=5.0, end_sec=10.0, status="pending"),
+    ]
+
+    reservations = orchestrator._reserve_run_disk_budget(
+        _plan(tmp_path),
+        options,
+        segments,
+        ResumeStore(),  # type: ignore[arg-type]
+        None,
+        lambda _event: None,
+    )
+
+    assert requested == [550, 550]
+    assert len(reservations) == 2
+
+
+def test_disk_budget_releases_partial_acquisition_on_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    released = False
+    calls = 0
+
+    class FakeReservation:
+        def release(self) -> None:
+            nonlocal released
+            released = True
+
+    class RejectSecond:
+        @classmethod
+        def acquire(cls, *args: object, **kwargs: object) -> FakeReservation:
+            nonlocal calls
+            del cls, args, kwargs
+            calls += 1
+            if calls == 2:
+                raise orchestrator.InsufficientDiskReservation(500, 500, 100)
+            return FakeReservation()
+
+    class EmptyStore:
+        def get_main_audio(self) -> None:
+            return None
+
+    monkeypatch.setattr(orchestrator, "DiskReservation", RejectSecond)
+    monkeypatch.setattr(orchestrator, "estimate_work_bytes", lambda _source: 1_000)
+    monkeypatch.setattr(orchestrator, "estimate_encoded_bytes", lambda _source: 500)
+    options = orchestrator.RunOptions(
+        work_dir=tmp_path / "work",
+        output=tmp_path / "output.mp4",
+        run_id="rejected-run",
+    )
+
+    with pytest.raises(PipelineError, match="insufficient unreserved disk"):
+        orchestrator._reserve_run_disk_budget(
+            _plan(tmp_path),
+            options,
+            [Segment(idx=0, start_sec=0.0, end_sec=10.0)],
+            EmptyStore(),  # type: ignore[arg-type]
+            None,
+            lambda _event: None,
+        )
+
+    assert released

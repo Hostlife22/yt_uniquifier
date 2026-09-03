@@ -508,6 +508,26 @@ rm -rf .venv ~/.cache/yt_uniquifier ~/.config/yt_uniquifier
 
 ---
 
+## Общие resource limits для нескольких процессов
+
+CLI, GUI, web и queue worker по умолчанию координируют encoder slots и оценочный
+disk budget через:
+
+```bash
+YT_UNIQ_RESOURCE_LOCK_DIR="$HOME/.cache/yt_uniquifier/resource-admission"
+```
+
+Для нескольких containers или service processes укажи один абсолютный writable path
+на общем локальном mount и запускай их от одного service account. Docker image уже
+использует `/data/work/.resource-admission`; containers должны монтировать один и тот
+же `/data/work`. Не очищай registry при активных encode. После изменения hardware,
+CPU allocation или detected encoder capacity сначала останови все процессы, затем
+удали только configured resource-admission directory и перезапусти их.
+
+Это estimate-based защита от одновременного oversubscription, а не hard quota:
+production filesystem quotas всё равно нужны. NFS/network partitions, разные UID и
+mixed `CUDA_VISIBLE_DEVICES` пока `NOT VERIFIED`.
+
 ## TL;DR — три команды
 
 С `make` (рекомендуется на macOS/Linux):

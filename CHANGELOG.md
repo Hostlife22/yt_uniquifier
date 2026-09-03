@@ -14,6 +14,10 @@ the last tag.
 
 ### Fixed
 
+- Coordinate encoder-session capacity across local CLI, GUI, web and queue-worker
+  processes, and reserve estimated workspace/final-output bytes atomically per
+  filesystem before processing; waits remain cancellable and stale same-host owners
+  are recovered conservatively.
 - Enforce the web run-count limit across server processes sharing an output
   directory with atomic owner slots, conservative stale-owner recovery and an
   immutable capacity contract; expose the cap through

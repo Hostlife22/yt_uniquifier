@@ -47,6 +47,7 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/transforms/hdr_wrap.py` | zscale linear-light roundtrip for color transforms over HDR |
 | `core/pipeline.py` | `FilterGraph.build()` + `build_video_segment_command` (+ `_fused`) + `build_main_audio_command` + `compute_plan_hash`; v0.8.0 R5 adds `crf_override` to support per-segment target-VMAF retries |
 | `core/runner.py` | subprocess wrapper with `-progress pipe:1`, RunEvent stream, CancelToken; v0.8.0 R5 adds `target_vmaf` / `target_vmaf_failed` event kinds |
+| `core/resource_budget.py` | shared local-process registry for encoder slots and estimated workspace/final-output byte reservations; `YT_UNIQ_RESOURCE_LOCK_DIR` selects the common registry |
 | `core/segmenter.py` | keyframe-aware split (or PySceneDetect-driven scene mode, v0.8.0 R3) + per-segment process (parallel where safe) + concat demuxer; v0.8.0 R5 adds the target-VMAF feedback loop |
 | `core/scene_detect.py` | v0.8.0 R3 — `detect_scene_boundaries` (PySceneDetect ContentDetector, opt-in) + `snap_to_keyframes` (preserves stream-copy invariant) |
 | `core/checkpoint.py` | atomic `state.json` for resume (thread-safe `RLock` + fsync + `os.replace`) |

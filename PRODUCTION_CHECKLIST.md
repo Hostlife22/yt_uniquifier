@@ -169,9 +169,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [ ] Production bind requires documented auth/TLS/reverse-proxy policy.
 - [ ] Global bounded resource scheduler and CPU/GPU/disk quotas enabled; the web
-      run-count cap is shared across processes using one output directory and
-      in-process CPU/vendor semaphores are complete, while cross-process per-device
-      locks and disk-byte reservation remain open.
+      run-count cap, encoder slots and estimated disk-byte reservations are shared
+      across local processes. Exact per-device routing, hard filesystem quotas,
+      mixed-UID/visibility deployments and NFS remain open.
 - [x] Duplicate active output reservation returns conflict across web processes sharing
       a local filesystem; exact-owner release and dead same-host recovery are tested.
 - [x] Run state persists across restart and completed records have TTL/count pruning.
@@ -189,8 +189,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1519 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `81.95%` (`1418 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1533 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `81.95%` (`1432 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -208,25 +208,27 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1509 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1533 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
 - [x] `make build-wheel` and clean-environment import smoke for v1.4.0
 - [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
+- [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
+      and `/readyz` pass, shared resource-registry path is writable.
 - [ ] Docker multi-arch build/start/health/process smoke
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1509 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1533 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 81.92% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 81.95% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
-- [x] Strict mypy: passed (157 source files).
+- [x] Strict mypy: passed (158 source files).
 - [x] All 16 shipped profiles load.
 - [x] Real Calibration v2 CLI: stratified probe, 3 encode/quality/similarity trials,
       strict media contract, tuned YAML and second-run scored-cache reuse passed.

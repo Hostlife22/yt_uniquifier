@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -9,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from yt_uniquifier.core import segmenter as seg_mod
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import (
     EncoderCandidate,
     HDRInfo,
@@ -18,7 +22,8 @@ from yt_uniquifier.core.models import (
     SourceMeta,
     VideoStream,
 )
-from yt_uniquifier.core.runner import RunEvent
+from yt_uniquifier.core.output_reservation import RunAdmission
+from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 
 def _plan(encoder_name: str, vendor: str, *, max_parallel: int = 1) -> Plan:
@@ -212,3 +217,79 @@ def test_process_resource_budget_is_shared_across_concurrent_runs(
 
     assert all(not thread.is_alive() for thread in threads)
     assert peak == 2
+
+
+def test_cross_process_resource_waits_until_slot_is_released(
+    tmp_path: Path,
+) -> None:
+    plan = _plan("libx264", "x264", max_parallel=1)
+    held = RunAdmission.acquire(seg_mod._resource_pool_dir(plan), "parent", 1)
+    marker = tmp_path / "child-ready"
+    snippet = textwrap.dedent(f"""
+        from pathlib import Path
+        from types import SimpleNamespace
+        from yt_uniquifier.core.segmenter import _acquire_cross_process_resource
+
+        Path({str(marker)!r}).write_text("ready", encoding="utf-8")
+        plan = SimpleNamespace(encoder=SimpleNamespace(
+            vendor="x264", max_parallel=1,
+        ))
+        admission = _acquire_cross_process_resource(
+            plan, cancel_token=None, on_event=None,
+        )
+        admission.release()
+    """)
+    child = subprocess.Popen(
+        [sys.executable, "-c", snippet],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists(), "child did not reach resource acquisition"
+        time.sleep(0.1)
+        assert child.poll() is None, "child bypassed the occupied shared slot"
+        held.release()
+        stdout, stderr = child.communicate(timeout=5)
+        assert child.returncode == 0, (stdout, stderr)
+    finally:
+        held.release()
+        if child.poll() is None:
+            child.kill()
+            child.communicate(timeout=5)
+
+
+def test_cross_process_resource_wait_is_cancellable(tmp_path: Path) -> None:
+    plan = _plan("libx264", "x264", max_parallel=1)
+    held = RunAdmission.acquire(seg_mod._resource_pool_dir(plan), "holder", 1)
+    token = CancelToken()
+    timer = threading.Timer(0.1, token.cancel)
+    timer.start()
+    try:
+        with pytest.raises(PipelineError, match="cancelled by user"):
+            seg_mod._acquire_cross_process_resource(
+                plan,
+                cancel_token=token,
+                on_event=None,
+            )
+    finally:
+        timer.cancel()
+        held.release()
+
+
+def test_cross_process_resource_rejects_capacity_mismatch(tmp_path: Path) -> None:
+    one_slot = _plan("libx264", "x264", max_parallel=1)
+    held = RunAdmission.acquire(seg_mod._resource_pool_dir(one_slot), "holder", 1)
+    two_slots = _plan("libx264", "x264", max_parallel=2)
+    try:
+        with pytest.raises(PipelineError, match="different capacity"):
+            seg_mod._acquire_cross_process_resource(
+                two_slots,
+                cancel_token=None,
+                on_event=None,
+            )
+    finally:
+        held.release()

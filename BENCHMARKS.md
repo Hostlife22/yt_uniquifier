@@ -261,8 +261,26 @@ release повторный запрос был принят. Fault injection п�
 fail-closed.
 
 Тест доказывает локальную атомарность и lifecycle admission boundary, но не измеряет
-throughput и не квалифицирует NFS, network partition, PID reuse или per-device/disk
-resource budgets.
+throughput и не квалифицирует NFS, network partition или PID reuse.
+
+## Local resource-budget smoke — 2026-09-03
+
+На APFS/macOS проверены общий encoder slot между parent и отдельным Python
+subprocess, cancellable wait и fail-fast при разных capacity одного pool. Disk
+registry под mutex допустил ровно одну из двух конкурентных 60-byte reservations при
+100 bytes synthetic free, суммировал active bytes, переиспользовал released budget,
+reclaimed dead same-host owner и сохранил foreign/malformed owner fail-closed.
+Инъекция ошибки второго `fsync` не оставила partial record. После включения budgets
+8 real-FFmpeg encode/resume тестов прошли за `155.45 s`. Полный `make check` после
+изменения: `1533 passed`, `2 skipped` за `1276.72 s`; CI-equivalent core gate:
+`1432 passed`, `1 skipped`, `81.95%` branch-aware coverage. Wheel v1.4.0 собран.
+Локальный `linux/amd64` Docker image собран и запущен под UID 1000: `/healthz` и
+`/readyz` прошли, registry `/data/work/.resource-admission` доступен для записи.
+
+Это concurrency/correctness smoke, не throughput benchmark. Natural 4K/1–3 h
+bitrate-estimate accuracy, hard disk quotas, mixed GPU visibility, container encode,
+multi-arch image, containers без общего registry и NFS/network partitions остаются
+`NOT VERIFIED`.
 
 ## Production benchmark protocol
 

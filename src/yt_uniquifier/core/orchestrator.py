@@ -8,6 +8,7 @@ progress events (RunEvent + custom phase markers).
 from __future__ import annotations
 
 import dataclasses
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -40,6 +41,14 @@ from yt_uniquifier.core.notifications import (
 from yt_uniquifier.core.pipeline import compute_plan_hash, expected_output_duration
 from yt_uniquifier.core.preflight import PreflightFinding, has_fail, preflight
 from yt_uniquifier.core.probe import probe as probe_file
+from yt_uniquifier.core.resource_budget import (
+    DISK_SAFETY_FACTOR,
+    DiskReservation,
+    DiskReservationError,
+    InsufficientDiskReservation,
+    estimate_encoded_bytes,
+    estimate_work_bytes,
+)
 from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.seed_resolver import resolve_run_seed
 from yt_uniquifier.core.segmenter import (
@@ -65,8 +74,8 @@ class RunOptions:
     # If True, ignore an existing state.json's run_seed and force a fresh
     # seed (per the profile's seed_strategy). Used by `yt-uniq run --new-variant`.
     force_new_variant: bool = False
-    # >1 enables parallel segment encoding on CPU (libx264/libx265 only).
-    # GPU encoders silently fall back to sequential (single VRAM context).
+    # >1 enables parallel segment encoding, clamped to the detected encoder
+    # capacity and the shared process/host resource budgets.
     workers: int = 1
     # Optional libx264 interoperability normalization. Adds generation loss
     # and substantial wall time, so it remains opt-in and is refused for
@@ -399,6 +408,7 @@ def _run_full_impl(
     options.work_dir.mkdir(parents=True, exist_ok=True)
     store = CheckpointStore(options.work_dir, plan)
     _pause_stop_event: threading.Event | None = None
+    disk_reservations: list[DiskReservation] = []
     try:
         # --new-variant: archive existing state only after CheckpointStore has
         # acquired the work-dir lock. Otherwise a rejected concurrent process
@@ -423,12 +433,16 @@ def _run_full_impl(
         )
         return _run_full_body(
             plan, options, emit, cancel_token, pause_token,
-            store, segments, findings,
+            store, segments, findings, disk_reservations,
         )
     finally:
         if _pause_stop_event is not None:
             _pause_stop_event.set()
-        store.close()
+        try:
+            store.close()
+        finally:
+            for reservation in reversed(disk_reservations):
+                reservation.release()
 
 
 def _run_full_body(
@@ -440,6 +454,7 @@ def _run_full_body(
     store: CheckpointStore,
     segments: list[Segment],
     findings: list[PreflightFinding],
+    disk_reservations: list[DiskReservation],
 ) -> RunSummary:
     """The hot-loop half of ``_run_full_impl`` — extracted so the pause
     observer cleanup in the caller's ``finally`` always fires, even on
@@ -511,6 +526,10 @@ def _run_full_body(
                 "missing_segments": [s.idx for s in missing],
             }))
 
+    disk_reservations.extend(_reserve_run_disk_budget(
+        plan, options, segments, store, cancel_token, emit,
+    ))
+
     # Resume: if state.json carried a run_seed from an earlier run, reuse it
     # so the resumed encoding reproduces the same stochastic transforms.
     if not options.force_new_variant:
@@ -526,8 +545,8 @@ def _run_full_body(
                                        "segments": len(segments)}))
 
     # Process pending video segments — sequentially (workers <= 1) or in
-    # parallel on CPU encoders (libx264/libx265). GPU encoders silently
-    # fall back to sequential inside process_video_segments_parallel.
+    # parallel up to the detected encoder capacity. The segmenter applies both
+    # in-process and cross-process resource budgets before spawning FFmpeg.
     pending = [s for s in segments if s.status != "done"]
     if pending:
         # Re-check cancellation between each mark. A single check before
@@ -718,6 +737,73 @@ def _run_full_body(
         segments_done=len(final_segments),
         preflight_findings=findings,
     )
+
+
+def _reserve_run_disk_budget(
+    plan: Plan,
+    options: RunOptions,
+    segments: list[Segment],
+    store: CheckpointStore,
+    cancel_token: CancelToken | None,
+    emit: Callable[[RunEvent], None],
+) -> list[DiskReservation]:
+    """Reserve remaining workspace and final-publication bytes atomically."""
+    duration = max(plan.source.duration_sec, 0.001)
+    remaining_duration = sum(
+        max(0.0, segment.end_sec - segment.start_sec)
+        for segment in segments
+        if segment.status != "done"
+    )
+    remaining_ratio = min(1.0, remaining_duration / duration)
+    encoded_estimate = estimate_encoded_bytes(plan.source)
+    workspace_estimate = int(estimate_work_bytes(plan.source) * remaining_ratio)
+    if plan.source.audio and store.get_main_audio() is None:
+        workspace_estimate = max(workspace_estimate, int(encoded_estimate * 0.1))
+
+    requirements = (
+        ("workspace", options.work_dir, workspace_estimate),
+        ("final output", options.output.parent, encoded_estimate),
+    )
+    acquired: list[DiskReservation] = []
+    run_id = options.run_id
+    assert run_id is not None
+    try:
+        for label, target, estimated in requirements:
+            required = math.ceil(estimated * DISK_SAFETY_FACTOR)
+            if required <= 0:
+                continue
+            reservation = DiskReservation.acquire(
+                target,
+                f"{run_id}:{label}",
+                required,
+                cancelled=(
+                    cancel_token.is_cancelled if cancel_token is not None else None
+                ),
+            )
+            acquired.append(reservation)
+            emit(RunEvent(kind="log", payload={
+                "phase": "disk",
+                "message": (
+                    f"reserved {required / (1024 ** 3):.2f} GiB for {label} "
+                    "against concurrent local runs"
+                ),
+                "reserved_bytes": required,
+                "target": label,
+            }))
+    except InsufficientDiskReservation as exc:
+        for reservation in reversed(acquired):
+            reservation.release()
+        available = max(0, exc.free - exc.already_reserved)
+        raise PipelineError(
+            "insufficient unreserved disk capacity: "
+            f"need {exc.required / (1024 ** 3):.2f} GiB, "
+            f"have {available / (1024 ** 3):.2f} GiB after active reservations"
+        ) from exc
+    except DiskReservationError as exc:
+        for reservation in reversed(acquired):
+            reservation.release()
+        raise PipelineError(f"disk reservation unavailable: {exc}") from exc
+    return acquired
 
 
 def _validate_final_output(

@@ -160,10 +160,18 @@ verify no encode process is still active, remove only that admission directory, 
 then restart the servers with the new common value. Dead same-host owners are
 recovered; malformed and foreign-host owners fail closed.
 
-This is a shared run-count boundary, not a complete resource scheduler. Per-device
-CPU/GPU limits across processes and temporary-disk byte reservations remain open;
-enforce those externally for multi-instance production deployments. Shared/NFS
-atomic-create, stale-owner and network-partition semantics remain **NOT VERIFIED**.
+Every `run_full` caller also coordinates encoder slots and estimated temporary-disk
+bytes through `YT_UNIQ_RESOURCE_LOCK_DIR` (default:
+`~/.cache/yt_uniquifier/resource-admission`). The Docker image points it at the
+mounted `/data/work/.resource-admission`, so sibling containers must share that work
+volume to share the budget. Use the same absolute registry path and service account
+for all local instances. Stop all participating processes before clearing it or
+changing a detected encoder capacity.
+
+This remains an estimate-based local safety boundary, not a cluster scheduler.
+Mixed GPU visibility/device routing, different service accounts, NFS atomicity,
+network partitions and the accuracy of natural 4K/long-form bitrate estimates remain
+**NOT VERIFIED**; enforce hard filesystem quotas externally in those deployments.
 
 ## What's *not* on the web yet
 

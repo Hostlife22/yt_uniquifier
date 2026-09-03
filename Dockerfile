@@ -68,6 +68,7 @@ ENV YT_UNIQ_WEB_HOST=0.0.0.0 \
     YT_UNIQ_WEB_WORK_DIR=/data/work \
     YT_UNIQ_WEB_OUTPUT_DIR=/data/output \
     YT_UNIQ_WEB_INPUT_ROOT=/data/input \
+    YT_UNIQ_RESOURCE_LOCK_DIR=/data/work/.resource-admission \
     PYTHONUNBUFFERED=1
 
 VOLUME ["/data/input", "/data/output", "/data/work"]

@@ -28,6 +28,11 @@ from yt_uniquifier.core.auxiliary_streams import (
 )
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import AudioStream, Plan, Segment
+from yt_uniquifier.core.output_reservation import (
+    RunAdmission,
+    RunAdmissionError,
+    RunAdmissionFull,
+)
 from yt_uniquifier.core.pipeline import (
     BuiltCommand,
     build_main_audio_command,
@@ -35,6 +40,7 @@ from yt_uniquifier.core.pipeline import (
     build_video_segment_command,
     build_video_segment_command_fused,
 )
+from yt_uniquifier.core.resource_budget import resource_pool_dir
 from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
@@ -756,6 +762,53 @@ def _resource_budget(plan: Plan) -> tuple[int, threading.BoundedSemaphore]:
         return created
 
 
+def _resource_pool_dir(plan: Plan) -> Path:
+    """Return a filesystem-safe directory for one physical-resource key."""
+    return resource_pool_dir(f"encoder:{_resource_budget_key(plan)}")
+
+
+def _acquire_cross_process_resource(
+    plan: Plan,
+    *,
+    cancel_token: CancelToken | None,
+    on_event: Callable[[RunEvent], None] | None,
+) -> RunAdmission:
+    """Wait for one host-wide encoder slot, remaining cancellable."""
+    limit = parallel_safe(plan)
+    pool_dir = _resource_pool_dir(plan)
+    owner_id = (
+        f"encoder-{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(8)}"
+    )
+    queued_emitted = False
+    while True:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            raise PipelineError(
+                "cancelled by user while waiting for cross-process encoder capacity"
+            )
+        try:
+            return RunAdmission.acquire(pool_dir, owner_id, limit)
+        except RunAdmissionFull:
+            if not queued_emitted and on_event is not None:
+                on_event(RunEvent(kind="log", payload={
+                    "phase": "workers",
+                    "message": (
+                        f"waiting for cross-process {plan.encoder.vendor} capacity "
+                        f"(shared limit {limit})"
+                    ),
+                }))
+                queued_emitted = True
+            if cancel_token is not None:
+                cancel_token.wait(0.25)
+            else:
+                time.sleep(0.25)
+        except RunAdmissionError as exc:
+            raise PipelineError(
+                "cross-process encoder admission is unavailable or has a "
+                "different capacity; stop active runs and clear the configured "
+                "YT_UNIQ_RESOURCE_LOCK_DIR before retrying"
+            ) from exc
+
+
 def _process_video_segment_with_budget(
     segment: Segment,
     plan: Plan,
@@ -766,7 +819,7 @@ def _process_video_segment_with_budget(
     pause_token: PauseToken | None,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[Path | None, Path]:
-    """Acquire the process-wide encoder slot before spawning FFmpeg."""
+    """Acquire process- and filesystem-wide slots before spawning FFmpeg."""
     limit, semaphore = _resource_budget(plan)
     queued_emitted = False
     while not semaphore.acquire(timeout=0.25):
@@ -781,7 +834,13 @@ def _process_video_segment_with_budget(
                 ),
             }))
             queued_emitted = True
+    resource_admission: RunAdmission | None = None
     try:
+        resource_admission = _acquire_cross_process_resource(
+            plan,
+            cancel_token=cancel_token,
+            on_event=on_event,
+        )
         return process_video_segment(
             segment,
             plan,
@@ -792,6 +851,8 @@ def _process_video_segment_with_budget(
             extra_env=extra_env,
         )
     finally:
+        if resource_admission is not None:
+            resource_admission.release()
         semaphore.release()
 
 
@@ -808,7 +869,7 @@ def process_video_segments_parallel(
 ) -> list[tuple[int, Path | None, Path]]:
     """Run `process_video_segment` over `pending` segments concurrently.
 
-    Falls back to sequential when workers <= 1 or the encoder isn't CPU-only.
+    Falls back to sequential when workers <= 1 or the detected encoder cap is one.
     Each worker is encouraged to use a single ffmpeg thread (`OMP_NUM_THREADS=1`)
     so concurrency doesn't oversubscribe the CPU.
 

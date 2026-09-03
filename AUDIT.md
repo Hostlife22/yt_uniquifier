@@ -165,7 +165,7 @@ Web / distributed worker: rich diagnostic QA is not automatic
 | Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | Математически неустойчива, SSCD objective ошибочен |
 | CLI | `cli/` | user orchestration | args → core APIs | Полное покрытие функций; `--encoder Force` фактически preference |
 | GUI | `gui/` | desktop orchestration/workers | UI → core APIs | Core не дублируется; реальные heavy e2e opt-in |
-| Web | `web/`, `core/output_reservation.py` | API/SSE/static UI, persisted status and shared admission | requests → background threads | Shared run/output bounds implemented on local FS; device/disk quotas, NFS qualification and rich QA policy remain open |
+| Web | `web/`, `core/output_reservation.py`, `core/resource_budget.py` | API/SSE/static UI, persisted status and shared admission | requests → background threads | Shared run/output/encoder and estimated disk bounds implemented on local FS; hard quotas, device routing, NFS qualification and rich QA policy remain open |
 | Distributed | `core/queue`, `cli/cmd_worker.py` | shared-FS lease/worker | pending → done/failed | Atomic rename хорош; heartbeat только per-host и resume не переносим |
 
 ## Что уже реализовано и не следует дублировать
@@ -387,8 +387,9 @@ lowest normalized violation с явным non-converged result. Ограниче
 - **Исправлено на общей локальной FS:** web имеет общий для процессов run-count
   admission limit, retention/persisted state, атомарную межпроцессную final-output
   reservation с owner-only release и неблокирующий terminal marker; overlapping
-  jobs внутри процесса делят CPU/vendor semaphore. Per-device cross-process и disk
-  quotas, multi-instance state aggregation и NFS qualification остаются открыты.
+  jobs всех `run_full` frontends делят filesystem encoder slots и estimate-based
+  workspace/final-output byte reservations. Hard filesystem quotas, точное per-GPU
+  routing, multi-instance state aggregation и NFS qualification остаются открыты.
 - **Исправлено для общего correctness gate:** distributed workers используют process-unique
   host+PID+nonce leases, content/plan-stable work paths и fenced staged publication.
   Durable journal с уникальным token-fence автоматически завершает публикацию после
@@ -435,8 +436,9 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
   deployment trust-boundary concern.
 - Web может быть поднят на `0.0.0.0` без auth; rate limiting не заменяет auth/TLS.
 - Multi-process web deployment имеет общий run-count admission для одного
-  `output_dir`, но не имеет cross-process per-device/disk quotas; общие только внутри
-  процесса encoder semaphores не закрывают остаточный resource-exhaustion risk.
+  `output_dir` и общий local registry encoder/disk reservations. Это не hard quota:
+  bitrate estimate может ошибаться, разные UID/registry paths не координируются, а
+  mixed GPU visibility и cross-host semantics не квалифицированы.
 - Plugin import происходит до CLI `--no-plugins`; только environment switch даёт
   pre-import disable, что честно указано в help.
 - Shared queue доверяет общему filesystem и basename identity; multi-tenant deployment

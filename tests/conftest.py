@@ -28,6 +28,18 @@ needs_ffmpeg = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_resource_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep host-wide encoder lock records out of the real user cache."""
+    monkeypatch.setenv(
+        "YT_UNIQ_RESOURCE_LOCK_DIR",
+        str(tmp_path / "resource-admission"),
+    )
+
+
 @pytest.fixture(scope="session")
 def tiny_clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Generate a 2-second 320x180 24fps mp4 with sine audio. Session-scoped."""
