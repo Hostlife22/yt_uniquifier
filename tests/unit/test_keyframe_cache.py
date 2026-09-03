@@ -19,12 +19,21 @@ def _redirect_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return cache
 
 
-def _stub_ffprobe(monkeypatch: pytest.MonkeyPatch, frames: list[float]) -> dict[str, int]:
+def _stub_ffprobe(
+    monkeypatch: pytest.MonkeyPatch,
+    frames: list[float],
+    *,
+    stream_start: float | None = None,
+) -> dict[str, int]:
     calls = {"n": 0}
 
     def fake_run(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
         calls["n"] += 1
-        payload = {"frames": [{"pts_time": str(t)} for t in frames]}
+        payload: dict[str, object] = {
+            "frames": [{"pts_time": str(t)} for t in frames],
+        }
+        if stream_start is not None:
+            payload["streams"] = [{"start_time": str(stream_start)}]
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
     monkeypatch.setattr(seg_mod.subprocess, "run", fake_run)
@@ -69,6 +78,43 @@ def test_force_bypasses_cache(
     seg_mod.list_keyframes(src)
     seg_mod.list_keyframes(src, force=True)
     assert calls["n"] == 2
+
+
+def test_keyframes_are_relative_to_video_stream_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
+) -> None:
+    src = tmp_path / "offset.mp4"
+    src.write_bytes(b"fake offset mp4")
+    calls = _stub_ffprobe(
+        monkeypatch,
+        [5.0, 6.0, 7.0],
+        stream_start=5.0,
+    )
+
+    assert seg_mod.list_keyframes(src) == [0.0, 1.0, 2.0]
+    assert calls["n"] == 1
+
+
+def test_old_absolute_pts_cache_schema_is_invalidated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _redirect_cache: Path,
+) -> None:
+    src = tmp_path / "offset.mp4"
+    src.write_bytes(b"fake offset mp4")
+    cache_path = seg_mod._keyframe_cache_path(src)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps({
+        "schema_version": 1,
+        "written_at": seg_mod.time.time(),
+        "keyframes": [5.0, 6.0, 7.0],
+    }))
+    calls = _stub_ffprobe(
+        monkeypatch,
+        [5.0, 6.0, 7.0],
+        stream_start=5.0,
+    )
+
+    assert seg_mod.list_keyframes(src) == [0.0, 1.0, 2.0]
+    assert calls["n"] == 1
 
 
 def test_different_file_different_cache(

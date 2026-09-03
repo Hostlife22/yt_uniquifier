@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Normalize keyframe timestamps by the selected video stream's start time so
+  MP4/MOV edit lists and transport-stream offsets cannot produce out-of-range
+  segment plans; invalidate old absolute-PTS keyframe caches with schema v2.
+- Lock software cadence correctness with real CFR 23.976–60, VFR, sparse
+  long-GOP seam-content, and internal A/V impulse regressions.
 - Preserve MKV attachment streams, MOV `tmcd` timecode tracks, and supported
   MP4 JPEG/PNG cover art through final muxing, including semantic metadata and
   final media-contract validation.

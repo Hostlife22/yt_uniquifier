@@ -21,7 +21,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Output с no audio transforms сохраняет selected main audio.
 - [x] Negative AAC priming/edit-list PTS не сдвигает video на regression fixture.
 - [x] Нет unintended frame drop на regression fixture (752/752); long-form matrix pending.
-- [ ] A/V sync проходит start/end/impulse tests.
+- [x] A/V sync проходит start/end и internal flash/impulse tests на software path;
+      hardware and natural-content listening matrix pending.
 - [x] Chapters сохраняются согласно policy на MKV→MP4 regression fixture.
 - [x] Selected multi-audio/subtitle language, title и supported dispositions
       сохраняются и валидируются вместе с supported auxiliary streams.
@@ -54,12 +55,13 @@ release blockers, поэтому checklist намеренно не отмече�
       bounds и faststart (`moov` before `mdat`).
 - [x] MKV roundtrip: streams, byte-identical attachment, SRT/ASS, chapters.
 - [x] MOV roundtrip: `tmcd`, edit-list/audio bounds, SRT/ASS conversion и metadata.
-- [ ] CFR: 23.976/24/25/29.97/30/50/59.94/60.
-- [ ] VFR: multi-segment libx264 preserves 220/220 frames and 30/20/60 FPS cadence;
+- [x] CFR: software libx264 23.976/24/25/29.97/30/50/59.94/60 сохраняет frame/PTS.
+- [x] VFR: multi-segment libx264 preserves 220/220 frames and 30/20/60 FPS cadence;
       advertised hardware encoders remain pending.
-- [ ] Long-GOP, sparse keyframes, static scene and rapid scene-cut segmentation;
-      static/sparse target bounds and minimum edge length are unit-verified.
-- [ ] Every concat seam checked against matching source interval.
+- [x] Synthetic long-GOP/sparse keyframes, static scene and rapid scene-cut
+      segmentation verified; natural licensed corpus remains pending.
+- [x] Every concat seam checked against its matching source interval on the
+      deterministic sparse long-GOP fixture; full natural corpus remains pending.
 
 ## 5. Audio
 

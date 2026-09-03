@@ -13,8 +13,9 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   watchdog/bounded logs; persistent bounded web lifecycle; per-process queue IDs.
 - **PARTIAL:** 2.1, 2.3, 3.2 — безопасные локальные fixes выполнены, но полная
   platform/HDR/channel matrix ещё не подтверждена.
-- **PARTIAL 2.4:** software multi-segment VFR сохраняет decoded frames/cadence;
-  scene gaps bounded target duration; hardware VFR и long-GOP corpus pending.
+- **PARTIAL 2.4:** software CFR 23.976–60 и multi-segment VFR сохраняют decoded
+  frames/cadence; non-zero input start PTS normalized; synthetic sparse long-GOP
+  seams and A/V impulses verified; hardware cadence и natural long-GOP corpus pending.
 - **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
   crash/no-op resume and APFS distributed fencing.
@@ -202,6 +203,11 @@ multiple program-video inputs fail preflight. Real PGS remains `NOT VERIFIED`.
 - **Expected result:** correct HDR or explicit `NOT SUPPORTED`, never accidental SDR.
 
 ### 2.4 VFR and segmentation correctness
+
+**Status 2026-09-03:** software libx264 CFR/VFR, non-zero start PTS, synthetic
+sparse long-GOP seams и internal A/V impulses verified. Keyframe cache schema v2
+stores relative timestamps. Hardware encoders and natural-content corpus remain
+`NOT VERIFIED`.
 
 - **Files:** probe, segmenter, pipeline, scene_detect.
 - **Current behavior:** basic VFR works; complex paths unspecified; scene ignores max.

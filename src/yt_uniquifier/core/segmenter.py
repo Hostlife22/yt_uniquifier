@@ -42,6 +42,7 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 _log = logging.getLogger(__name__)
 
 KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
+KEYFRAME_CACHE_SCHEMA_VERSION = 2
 _CACHE_REPLACE_ATTEMPTS = 12
 _CACHE_REPLACE_MAX_DELAY_SEC = 0.1
 
@@ -61,7 +62,7 @@ KEYFRAME_CACHE_DIR = Path.home() / ".cache" / "yt_uniquifier" / "keyframes"
 # ---- planning ----------------------------------------------------------------
 
 def list_keyframes(source: Path, *, force: bool = False) -> list[float]:
-    """Return keyframe presentation timestamps (seconds) for stream v:0.
+    """Return keyframe timestamps relative to the start of stream v:0.
 
     Cached at ~/.cache/yt_uniquifier/keyframes/<md5>.json for 30 days. For
     1080p+ feature-length files this saves 30-60s per resume.
@@ -76,8 +77,9 @@ def list_keyframes(source: Path, *, force: bool = False) -> list[float]:
         "-v", "error",
         "-select_streams", "v:0",
         "-skip_frame", "nokey",
+        "-show_streams",
         "-show_frames",
-        "-show_entries", "frame=pts_time",
+        "-show_entries", "frame=pts_time:stream=start_time",
         "-of", "json",
         str(source),
     ]
@@ -93,13 +95,28 @@ def list_keyframes(source: Path, *, force: bool = False) -> list[float]:
         raise PipelineError(f"keyframe scan emitted invalid JSON: {exc}") from exc
 
     frames = raw.get("frames", [])
+    # ffprobe reports frame PTS in the container timeline.  ``-ss`` input
+    # seeking, segment durations and ``SourceMeta.duration_sec`` are relative
+    # to the media start, so carrying an MP4/MOV edit-list offset (or an MPEG-TS
+    # start near 1.4 s) into the planner creates boundaries beyond duration.
+    # The old cache schema persisted those absolute values; schema v2 below
+    # deliberately invalidates it.
+    stream_start = 0.0
+    streams = raw.get("streams", [])
+    if isinstance(streams, list) and streams:
+        try:
+            stream_start = float(streams[0].get("start_time", 0.0))
+        except (AttributeError, TypeError, ValueError):
+            stream_start = 0.0
     ks: list[float] = []
     for f in frames:
         t = f.get("pts_time")
         if t is None:
             continue
         try:
-            ks.append(float(t))
+            # Clamp edit-list preroll to zero. It is useful to the decoder but
+            # is not part of the user-visible output timeline.
+            ks.append(max(0.0, float(t) - stream_start))
         except (TypeError, ValueError):
             continue
     # Deduplicate with 1 ms tolerance: containers with imprecise PTS can
@@ -177,6 +194,9 @@ def _load_keyframe_cache(source: Path) -> list[float] | None:
     if not isinstance(raw, dict):
         _log.warning("keyframe cache schema invalid at %s; will re-scan", path)
         return None
+    if raw.get("schema_version") != KEYFRAME_CACHE_SCHEMA_VERSION:
+        _log.info("keyframe cache schema outdated at %s; will re-scan", path)
+        return None
     if time.time() - raw.get("written_at", 0) > KEYFRAME_CACHE_TTL_SEC:
         return None
     kfs = raw.get("keyframes")
@@ -189,7 +209,11 @@ def _load_keyframe_cache(source: Path) -> list[float] | None:
 def _save_keyframe_cache(source: Path, kfs: list[float]) -> None:
     path = _keyframe_cache_path(source)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"schema_version": 1, "written_at": time.time(), "keyframes": kfs}
+    payload = {
+        "schema_version": KEYFRAME_CACHE_SCHEMA_VERSION,
+        "written_at": time.time(),
+        "keyframes": kfs,
+    }
     # PID + random-hex tmp suffix + fsync before os.replace. Mirrors the
     # encoder.py::_save_cache pattern so the keyframe cache survives the
     # same two failure modes:

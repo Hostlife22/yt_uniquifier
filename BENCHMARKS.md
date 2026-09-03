@@ -163,6 +163,10 @@ measurement limitation, а не основание скрывать резуль
 | MKV+SubRip → MP4 | Post-fix `mov_text` subtitle — PASS |
 | Divergent windowed audio 125.0 s | Post-fix ≤0.03 s error — PASS |
 | Basic 4 s VFR | 90→90 frames, avg 22.5 fps — PASS |
+| CFR 23.976/24/25/29.97/30/50/59.94/60 | Multi-segment exact frame count, monotonic matching PTS and AAC-frame A/V bound — PASS |
+| Sparse long-GOP, 7 s dynamic fixture | 3 s GOP; exact frame count and correct source-frame match around every concat seam — PASS |
+| Non-zero start PTS | MP4 `start_time=5 s`; normalized 0–4 s keyframes and exact 5-segment coverage — PASS |
+| A/V internal impulses | Flashes/click impulses at 0.5/3.0/6.5 s stay within one video frame after independent main-audio processing — PASS |
 | SSCD direction stub, similarity 0.99 | Direct similarity 0.99 — PASS |
 | HDR10 static metadata | x265 preserves ST2086 + MaxCLL/FALL — PASS |
 | HDR→SDR | Real `zscale`/tonemap integration — PASS |
@@ -225,7 +229,7 @@ test процесс был остановлен после двух completed ke
 | Decode | ffmpeg/ffprobe success, zero corrupt/decode errors |
 | Stream topology | 100% соответствует declared policy |
 | Video frame/content | no unintended drop/dup; first/last content present |
-| A/V sync | absolute start/end delta ≤ 20 ms or ≤ one video frame, whichever larger |
+| A/V sync | absolute start/end/internal-event delta ≤ 20 ms, one video frame, or one encoded audio frame, whichever larger |
 | Audio duration | ≤ one encoded audio frame from expected timeline |
 | Loudness | target ±0.5 LU; true peak ≤ configured ceiling + 0.1 dB |
 | HDR | required tags + mastering/light metadata preserved; unsupported dynamic HDR rejected |

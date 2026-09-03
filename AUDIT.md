@@ -18,9 +18,9 @@ contract, stream title/disposition validation, bounded persistent web run store 
 
 Post-fix verification на этом хосте (обновлено 2026-09-03):
 
-- Ruff и strict mypy: passed (`155` source files).
-- Canonical `make check`: `1415 passed, 2 skipped` на полностью установленном
-  optional environment (финальный повтор после fixes).
+- Ruff и strict mypy: passed (`156` source files).
+- Canonical `make check`: `1428 passed, 2 skipped` на полностью установленном
+  optional environment (`20:18`, финальный повтор после timeline fixes).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -36,6 +36,12 @@ Post-fix verification на этом хосте (обновлено 2026-09-03):
   frames; 3 h no-op resume сохранил output SHA и занял `4.24 s`.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
+- Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
+  multi-segment concat; synthetic sparse 3-second GOP сохраняет соответствие кадров
+  на каждом seam, а три A/V flash/impulse события остаются синхронны.
+- Ненулевой MP4 video `start_time=5 s` теперь нормализуется: keyframes `5..9 s`
+  становятся относительными `0..4 s`, а план покрывает ровно source duration вместо
+  ошибочных 9 секунд. Старый absolute-PTS keyframe cache инвалидируется schema v2.
 - Scene planning теперь ограничивает static/sparse gaps target duration и не
   создаёт sub-minimum edge segments; changed segment topology invalidates resume.
 
