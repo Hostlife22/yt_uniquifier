@@ -40,6 +40,11 @@ pair checks. The candidate's primary video and all audio streams are then decode
 to EOF with FFmpeg `-xerror -err_detect explode`, so a corrupt unsampled tail becomes
 `correctness: full output decode failed` in `notes[]` and the status is `INVALID`.
 
+Independently of report generation, `run_full` performs that complete decode as a
+mandatory final publication gate for CLI, GUI, web and distributed workers. This also
+applies to `--no-qa`. Automatic post-run reports reuse the successful gate instead of
+decoding the same output twice; standalone `yt-uniq qa` performs its own decode.
+
 ### Visual similarity
 
 | Field | Source | Range | Meaning |

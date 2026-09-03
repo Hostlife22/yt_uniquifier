@@ -279,6 +279,8 @@ class RunWorker(WorkerBase):
             plan=self.plan,
             samples=60 if self.fast_qa else 120,
             run_vmaf=not self.fast_qa,
+            # run_full already performed the mandatory complete A/V decode.
+            verify_decode=False,
         )
         json_path = summary.output.with_suffix(summary.output.suffix + ".qa.json")
         html_path = summary.output.with_suffix(summary.output.suffix + ".qa.html")

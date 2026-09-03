@@ -68,6 +68,10 @@ leased files back to `pending/`.
 
 CLI and GUI workers keep this heartbeat running while FFmpeg is active. A completed
 encode is first written to a hidden worker-specific file beside the final output.
+The shared orchestrator probes its stream/timestamp/color contract and decodes the
+complete primary video plus every audio stream before the worker may commit that file.
+This correctness gate is mandatory; rich pHash/VMAF/SSIM HTML/JSON reports remain
+separate diagnostics and are not a publication criterion.
 The worker may publish it only after atomically moving its lease to a journal-specific
 hidden fence in `done/`; if a reaper already reclaimed the lease, the stale result is
 discarded. After publication, that fence becomes the ordinary `done/<input>` marker.

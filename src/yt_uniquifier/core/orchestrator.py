@@ -26,6 +26,7 @@ from yt_uniquifier.core.logging_config import get_logger
 from yt_uniquifier.core.media_validation import (
     allowed_output_suffixes,
     require_output_contract,
+    require_output_decode,
 )
 from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import Plan, Profile, Segment
@@ -457,17 +458,33 @@ def _run_full_body(
         and not options.force_new_variant
     ):
         if store.output_is_valid(options.output):
-            emit(RunEvent(kind="log", payload={
-                "phase": "resume",
-                "message": "output already exists and all segments done — no-op",
-                "output": str(options.output),
-            }))
-            return RunSummary(
-                output=options.output,
-                plan=plan,
-                segments_done=len(segments),
-                preflight_findings=findings,
-            )
+            try:
+                _validate_final_output(
+                    plan, options.output, emit, cancel_token,
+                )
+            except PipelineError:
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    raise
+                emit(RunEvent(kind="log", payload={
+                    "phase": "resume",
+                    "message": (
+                        "recorded output failed current final validation — "
+                        "rebuilding from recoverable artifacts"
+                    ),
+                    "output": str(options.output),
+                }))
+            else:
+                emit(RunEvent(kind="log", payload={
+                    "phase": "resume",
+                    "message": "output already exists and all segments done — no-op",
+                    "output": str(options.output),
+                }))
+                return RunSummary(
+                    output=options.output,
+                    plan=plan,
+                    segments_done=len(segments),
+                    preflight_findings=findings,
+                )
         # A3 (v0.5.5): output gone but state.json reports done →
         # segments were cleaned up after a successful concat. We need
         # per-segment recovery, not all-or-nothing reset. The previous
@@ -687,7 +704,7 @@ def _run_full_body(
                 "message": "encoder is already libx264 — skipping (no-op)",
             }))
 
-    require_output_contract(plan, options.output)
+    _validate_final_output(plan, options.output, emit, cancel_token)
     store.set_output(options.output)
 
     emit(RunEvent(kind="done", payload={"output": str(options.output)}))
@@ -700,6 +717,28 @@ def _run_full_body(
         plan=plan,
         segments_done=len(final_segments),
         preflight_findings=findings,
+    )
+
+
+def _validate_final_output(
+    plan: Plan,
+    output: Path,
+    emit: Callable[[RunEvent], None],
+    cancel_token: CancelToken | None,
+) -> None:
+    """Apply the same non-optional final gate to fresh and resumed outputs."""
+    require_output_contract(plan, output)
+    emit(RunEvent(kind="log", payload={
+        "phase": "validation",
+        "message": "decoding complete output to verify every video/audio packet",
+    }))
+    require_output_decode(
+        output,
+        on_event=lambda event: emit(RunEvent(
+            kind=event.kind,
+            payload={**event.payload, "phase": "validation"},
+        )),
+        cancel_token=cancel_token,
     )
 
 

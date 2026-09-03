@@ -415,7 +415,8 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   each final output has an owner-only atomic reservation shared by processes using the
   same filesystem. Queue workers use process-unique leases and fenced staged output.
 - **Problem:** process-global admission/device/disk quotas, NFS qualification,
-  recoverable distributed publication and cross-frontend QA parity remain open.
+  recoverable distributed publication and cross-frontend correctness parity are
+  complete locally; global quotas and NFS qualification remain open.
 - **Proposed behavior:** preserve the current stores and reservation boundary; add a
   global scheduler only when deployment requirements prove one is needed, qualify
   shared-filesystem semantics, and use the same QA gates in every frontend.
@@ -431,8 +432,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   foreign-host ownership pass locally. Distributed publication now has a durable
   token-fenced journal with real `os._exit` recovery, old-marker isolation and
   unfenced-artifact rejection.
-  Global quota scheduling, NFS/network-partition qualification and mandatory QA parity
-  remain open.
+  The shared orchestrator now requires the plan-aware media contract and complete
+  primary-video/all-audio decode before any frontend can complete or a queue worker
+  can enter its publication fence. Rich similarity/quality reports remain optional
+  diagnostics by design. Global quota scheduling and NFS/network-partition
+  qualification remain open.
 
 ### 6.3 Supply chain/release
 

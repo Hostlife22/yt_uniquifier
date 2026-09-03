@@ -137,13 +137,14 @@ segmenter.plan_segments() -> CheckpointStore
                                   v
                          atomic final output
 
-CLI / GUI only: output -> correctness-first QA report -> JSON/HTML
-Web / distributed worker: final media contract is mandatory; rich QA is not automatic
+All frontends: output -> media contract -> complete primary-video/all-audio decode
+CLI / GUI only: validated output -> optional rich QA report -> JSON/HTML
+Web / distributed worker: rich diagnostic QA is not automatic
 ```
 
 Заданная пользователем схема соответствует коду до `Output`. Final `Validation`
-теперь обязателен в общем orchestrator; богатый QA остаётся опциональным и не должен
-заменять media contract.
+теперь обязателен в общем orchestrator и включает contract плюс полный decode до EOF;
+богатый QA остаётся опциональным и не должен заменять correctness gate.
 
 ### Карта компонентов
 
@@ -387,12 +388,14 @@ lowest normalized violation с явным non-converged result. Ограниче
   state, атомарную межпроцессную final-output reservation с owner-only release и
   неблокирующий terminal marker; overlapping jobs делят CPU/vendor semaphore.
   Global admission/device/disk quotas и NFS qualification остаются открыты.
-- **Частично исправлено:** distributed workers используют process-unique
+- **Исправлено для общего correctness gate:** distributed workers используют process-unique
   host+PID+nonce leases, content/plan-stable work paths и fenced staged publication.
   Durable journal с уникальным token-fence автоматически завершает публикацию после
   crash между ownership fence и final rename; old same-name marker не может разрешить
   публикацию, а unfenced staged bytes отбрасываются после reaping.
-  Mandatory QA parity и NFS/network-partition qualification остаются открыты.
+  Общий `run_full` теперь не публикует результат до успешного полного A/V decode.
+  Rich QA sidecars остаются опциональной диагностикой; NFS/network-partition
+  qualification остаётся открытой.
 
 ## Encoder audit
 
@@ -454,8 +457,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1505 passed, 2 skipped на fully provisioned macOS environment |
-| Branch coverage gate | 81.91% (`1404 passed`, required 80%) |
+| Full `make check` | 1509 passed, 2 skipped на fully provisioned macOS environment |
+| Branch coverage gate | 81.92% (`1408 passed`, required 80%) |
 | Ruff | Passed |
 | Strict mypy (`157` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |

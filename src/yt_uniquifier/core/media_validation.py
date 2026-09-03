@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from yt_uniquifier.core.runner import CancelToken, RunEvent
+
+from yt_uniquifier.core import runner
 from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream, get_auxiliary_streams
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Container, Plan, SourceMeta
-from yt_uniquifier.core.pipeline import expected_output_duration
+from yt_uniquifier.core.pipeline import BuiltCommand, expected_output_duration
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.transforms.hdr_wrap import is_tonemap_active
+from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 _OUTPUT_SUFFIXES: dict[Container, frozenset[str]] = {
     "mp4": frozenset({".mp4", ".m4v"}),
@@ -40,6 +48,69 @@ class MediaInvariantReport:
     @property
     def valid(self) -> bool:
         return not self.failures
+
+
+def inspect_output_decode(
+    output: Path,
+    *,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
+) -> MediaInvariantFailure | None:
+    """Decode the complete primary video and every audio stream.
+
+    ``ffprobe`` validates structure and metadata, but it does not visit every
+    packet.  A truncated or corrupt tail can therefore satisfy the media
+    contract unless FFmpeg decodes the complete output before publication.
+    """
+    cmd = BuiltCommand(args=[
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-v", "error",
+        "-xerror",
+        "-err_detect", "explode",
+        "-i", str(output),
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-sn",
+        "-dn",
+        "-f", "null",
+        os.devnull,
+    ])
+    try:
+        runner.run(
+            cmd,
+            output=Path(os.devnull),
+            on_event=on_event,
+            cancel_token=cancel_token,
+        )
+    except PipelineError as exc:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            raise
+        return MediaInvariantFailure(
+            "output.decode",
+            "complete primary video and all audio streams decode without errors",
+            str(exc),
+        )
+    return None
+
+
+def require_output_decode(
+    output: Path,
+    *,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
+) -> None:
+    """Raise before publication when a full output decode finds corruption."""
+    failure = inspect_output_decode(
+        output,
+        on_event=on_event,
+        cancel_token=cancel_token,
+    )
+    if failure is not None:
+        raise PipelineError(
+            "final output failed decode validation: "
+            f"{failure.code}: expected={failure.expected!r}, actual={failure.actual!r}"
+        )
 
 
 def inspect_output_contract(

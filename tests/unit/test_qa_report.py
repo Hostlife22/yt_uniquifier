@@ -342,22 +342,19 @@ def test_build_report_uses_strict_plan_media_contract(
 def test_complete_decode_failure_is_a_correctness_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
+    from yt_uniquifier.core import media_validation
+
     output = tmp_path / "broken.mp4"
     output.touch()
 
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise PipelineError("ffmpeg exited with 1; corrupt tail")
 
-    monkeypatch.setattr(report_mod.runner, "run", _fail)
-    note = report_mod._verify_decodable(
-        output,
-        duration_sec=10.0,
-        progress=lambda _phase, _fraction: None,
-        cancel_token=None,
-    )
-    assert note is not None
-    assert note.startswith("correctness:")
-    assert "corrupt tail" in note
+    monkeypatch.setattr(media_validation.runner, "run", _fail)
+    failure = media_validation.inspect_output_decode(output)
+    assert failure is not None
+    assert failure.code == "output.decode"
+    assert "corrupt tail" in str(failure.actual)
 
 
 def test_write_json_roundtrip(tmp_path: Path) -> None:

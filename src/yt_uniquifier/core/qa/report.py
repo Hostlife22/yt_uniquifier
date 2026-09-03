@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,15 +14,15 @@ if TYPE_CHECKING:
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from yt_uniquifier.core import runner
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.media_validation import inspect_output_contract
+from yt_uniquifier.core.media_validation import (
+    inspect_output_contract,
+    inspect_output_decode,
+)
 from yt_uniquifier.core.models import Plan, QAReport, SourceMeta
-from yt_uniquifier.core.pipeline import BuiltCommand
 from yt_uniquifier.core.probe import probe as probe_file
 from yt_uniquifier.core.qa import audio_fp, cid_predict, hashes, phash, ssim, vmaf
 from yt_uniquifier.core.qa.corpus import Corpus
-from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 ProgressFn = Callable[[str, float], None]  # phase name, fraction in [0..1]
 
@@ -194,59 +193,6 @@ def _correctness_notes(
     return notes
 
 
-def _verify_decodable(
-    output_path: Path,
-    *,
-    duration_sec: float,
-    progress: ProgressFn,
-    cancel_token: CancelToken | None,
-) -> str | None:
-    """Decode the complete primary video and every audio stream.
-
-    Sampling metrics can miss a corrupt tail.  A null-mux decode is deliberately
-    correctness-first and uses the shared bounded-log/cancellation runner.
-    """
-    cmd = BuiltCommand(args=[
-        ffmpeg_bin(),
-        "-hide_banner",
-        "-v", "error",
-        "-xerror",
-        "-err_detect", "explode",
-        "-i", str(output_path),
-        "-map", "0:v:0",
-        "-map", "0:a?",
-        "-sn",
-        "-dn",
-        "-f", "null",
-        os.devnull,
-    ])
-
-    def _on_event(event: RunEvent) -> None:
-        if event.kind != "progress" or duration_sec <= 0:
-            return
-        raw = event.payload.get("out_time_us")
-        if not isinstance(raw, str):
-            return
-        try:
-            fraction = int(raw) / 1_000_000 / duration_sec
-        except ValueError:
-            return
-        progress("decode", max(0.0, min(0.99, fraction)))
-
-    try:
-        runner.run(
-            cmd,
-            output=Path(os.devnull),
-            on_event=_on_event,
-            cancel_token=cancel_token,
-        )
-    except PipelineError as exc:
-        if cancel_token is not None and cancel_token.is_cancelled():
-            raise
-        return f"correctness: full output decode failed: {exc}"
-    return None
-
-
 def build_report(
     input_path: Path,
     output_path: Path,
@@ -297,14 +243,25 @@ def build_report(
     if verify_decode and out_meta.video:
         _check_cancel("decode")
         p("decode", 0.0)
-        decode_failure = _verify_decodable(
+        def _on_decode_event(event: RunEvent) -> None:
+            if event.kind != "progress" or out_meta.duration_sec <= 0:
+                return
+            raw = event.payload.get("out_time_us")
+            if not isinstance(raw, str):
+                return
+            try:
+                fraction = int(raw) / 1_000_000 / out_meta.duration_sec
+            except ValueError:
+                return
+            p("decode", max(0.0, min(0.99, fraction)))
+
+        decode_failure = inspect_output_decode(
             output_path,
-            duration_sec=out_meta.duration_sec,
-            progress=p,
+            on_event=_on_decode_event,
             cancel_token=cancel_token,
         )
         if decode_failure is not None:
-            notes.append(decode_failure)
+            notes.append(f"correctness: full output decode failed: {decode_failure.actual}")
         p("decode", 1.0)
 
     _check_cancel("md5")

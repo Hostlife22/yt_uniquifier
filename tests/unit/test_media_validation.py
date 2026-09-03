@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.unit.test_pipeline_graph import _plan, _src
 from yt_uniquifier.core import media_validation
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import AudioStream, Chapter, SourceMeta, TransformConfig
 
 
@@ -36,6 +39,45 @@ def test_media_contract_accepts_matching_topology(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(media_validation, "probe", lambda _path: output_meta)
 
     assert media_validation.inspect_output_contract(plan, output_meta.path).valid
+
+
+def test_require_output_decode_raises_on_corrupt_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "broken.mp4"
+    output.touch()
+
+    def fail_decode(*_args: object, **_kwargs: object) -> None:
+        raise PipelineError("ffmpeg exited with 1; corrupt tail")
+
+    monkeypatch.setattr(media_validation.runner, "run", fail_decode)
+
+    with pytest.raises(PipelineError, match="output.decode.*corrupt tail"):
+        media_validation.require_output_decode(output)
+
+
+def test_require_output_decode_forwards_progress_and_maps_all_audio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "valid.mp4"
+    output.touch()
+    events: list[object] = []
+    observed_args: list[str] = []
+    sentinel = object()
+
+    def pass_decode(command, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        observed_args.extend(command.args)
+        callback = kwargs["on_event"]
+        callback(sentinel)
+
+    monkeypatch.setattr(media_validation.runner, "run", pass_decode)
+
+    media_validation.require_output_decode(output, on_event=events.append)
+
+    assert events == [sentinel]
+    assert observed_args[observed_args.index("-map") + 1] == "0:v:0"
+    assert "0:a?" in observed_args
+    assert observed_args[-2:] == ["null", media_validation.os.devnull]
 
 
 def test_media_contract_treats_missing_and_und_language_as_unspecified(

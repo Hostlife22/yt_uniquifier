@@ -22,9 +22,11 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | `soft`, 30.183 s, policy smoke | libx264: 17.86 s, 752 frames; VideoToolbox: 9.36 s, 752 frames; both A/V start 0 | Selection policy changes throughput without losing decoded frames on this Mac |
 | Benchmark RSS sampler, 10.01 s fixture | 497,832 KiB peak, `psutil_process_tree_sum_100ms` | New result includes simultaneous Python/FFmpeg RSS; single run, not a regression baseline |
 | Correctness-first QA, video-only candidate | real MP4 missing source audio → `INVALID`; full candidate decode passed | Sampled visual similarity cannot hide missing topology |
+| Mandatory decode gate, 3 s H.264/AAC MP4 | valid output passed; copy truncated by 8 KiB failed as `output.decode` on this Mac | Every `run_full` frontend now rejects corrupt tails before completion/publication |
 | Chromaprint dependency repair | `fpcalc 1.6.1`; 12 s identity audio similarity 1.0/Hamming 0 | Optional audio diagnostics operational on this Mac |
 | Long-form fingerprint smoke, 620 s AAC | five ordered windows, 600 s total coverage, identity 1.0; 3.73 s wall | Start/middle/tail coverage replaces first-600-only report path |
 | Full local quality gate after Phase 5 | 1466 passed, 2 expected skipped; Ruff + strict mypy pass; 22:13 | QA changes did not regress the full Mac suite or stable contracts |
+| Full local gate after mandatory decode validation | 1509 passed, 2 expected skipped; Ruff + strict mypy pass; 21:18 | Shared final decode gate is compatible with the complete Mac FFmpeg/GUI/test matrix |
 
 Natural-content viewing/listening, NFS cross-host, NVENC/QSV/AMF и YouTube
 ingestion/transcode остаются `NOT VERIFIED`.

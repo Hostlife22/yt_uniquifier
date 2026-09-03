@@ -297,6 +297,8 @@ def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
         plan=plan,
         samples=60 if fast else 120,
         run_vmaf=not fast,
+        # run_full already performed the mandatory complete A/V decode.
+        verify_decode=False,
     )
     json_path = output.with_suffix(output.suffix + ".qa.json")
     html_path = output.with_suffix(output.suffix + ".qa.html")

@@ -14,6 +14,9 @@ the last tag.
 
 ### Fixed
 
+- Make complete primary-video/all-audio decode validation a mandatory `run_full`
+  publication gate for CLI, GUI, web and distributed workers, including `--no-qa`;
+  corrupt tails now fail before checkpoint completion or segment cleanup.
 - Upgrade official checkout and Python setup actions to their Node 24-compatible v7
   majors across CI, docs, security, performance, mutation and release workflows.
 - Recover distributed outputs after a hard crash between a journal-specific token

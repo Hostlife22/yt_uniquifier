@@ -128,6 +128,8 @@ def _process_one(
                 plan=plan,
                 samples=60 if fast_qa else 120,
                 run_vmaf=not fast_qa,
+                # run_full already performed the mandatory complete A/V decode.
+                verify_decode=False,
             )
             write_json(report, out.with_suffix(out.suffix + ".qa.json"))
             render_html(report, plan, out.with_suffix(out.suffix + ".qa.html"))

@@ -15,9 +15,11 @@ from yt_uniquifier.core.models import (
     HDRInfo,
     Plan,
     Profile,
+    Segment,
     SourceMeta,
     VideoStream,
 )
+from yt_uniquifier.core.runner import RunEvent
 
 
 def _plan(tmp_path: Path) -> Plan:
@@ -62,6 +64,73 @@ def _options(tmp_path: Path, *, force_new_variant: bool = False) -> orchestrator
         enforce_preflight=False,
         force_new_variant=force_new_variant,
     )
+
+
+def test_completed_noop_revalidates_full_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan(tmp_path)
+    options = _options(tmp_path)
+    segment = Segment(
+        idx=0,
+        start_sec=0.0,
+        end_sec=10.0,
+        status="done",
+        out_path=tmp_path / "segment.mkv",
+    )
+    validated: list[Path] = []
+
+    class CompletedStore:
+        def output_is_valid(self, path: Path) -> bool:
+            return path == options.output
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_validate_final_output",
+        lambda _plan, output, _emit, _cancel: validated.append(output),
+    )
+
+    summary = orchestrator._run_full_body(
+        plan,
+        options,
+        lambda _event: None,
+        None,
+        None,
+        CompletedStore(),  # type: ignore[arg-type]
+        [segment],
+        [],
+    )
+
+    assert validated == [options.output]
+    assert summary.output == options.output
+
+
+def test_final_validation_orders_contract_before_decode_and_labels_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    events: list[RunEvent] = []
+
+    def contract(_plan: Plan, _output: Path) -> None:
+        calls.append("contract")
+
+    def decode(_output: Path, **kwargs: object) -> None:
+        calls.append("decode")
+        callback = kwargs["on_event"]
+        assert callable(callback)
+        callback(RunEvent(kind="progress", payload={"out_time_us": "1000"}))
+
+    monkeypatch.setattr(orchestrator, "require_output_contract", contract)
+    monkeypatch.setattr(orchestrator, "require_output_decode", decode)
+
+    orchestrator._validate_final_output(
+        _plan(tmp_path), _options(tmp_path).output, events.append, None,
+    )
+
+    assert calls == ["contract", "decode"]
+    assert events[0].payload["phase"] == "validation"
+    assert events[1].kind == "progress"
+    assert events[1].payload == {"out_time_us": "1000", "phase": "validation"}
 
 
 def test_new_variant_does_not_archive_state_before_lock_acquisition(
