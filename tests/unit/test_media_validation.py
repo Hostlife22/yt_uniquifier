@@ -38,6 +38,20 @@ def test_media_contract_accepts_matching_topology(tmp_path: Path, monkeypatch) -
     assert media_validation.inspect_output_contract(plan, output_meta.path).valid
 
 
+def test_media_contract_detects_shifted_first_video_timestamp(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    source = _src(tmp_path)
+    plan = _plan(source, [])
+    output_meta = source.model_copy(update={"path": tmp_path / "shifted.mp4"})
+    output_meta._first_video_pts_sec = 1.021
+    monkeypatch.setattr(media_validation, "probe", lambda _path: output_meta)
+
+    report = media_validation.inspect_output_contract(plan, output_meta.path)
+
+    assert {failure.code for failure in report.failures} == {"timeline.video_start"}
+
+
 def test_media_contract_detects_stream_metadata_loss(tmp_path: Path, monkeypatch) -> None:
     source = _src(tmp_path).model_copy(update={
         "audio": [AudioStream(

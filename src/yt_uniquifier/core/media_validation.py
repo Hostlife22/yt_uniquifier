@@ -7,7 +7,7 @@ from pathlib import Path
 
 from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream, get_auxiliary_streams
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.models import Plan
+from yt_uniquifier.core.models import Plan, SourceMeta
 from yt_uniquifier.core.pipeline import expected_output_duration
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
@@ -31,11 +31,16 @@ class MediaInvariantReport:
         return not self.failures
 
 
-def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
+def inspect_output_contract(
+    plan: Plan,
+    output: Path,
+    *,
+    probed_output: SourceMeta | None = None,
+) -> MediaInvariantReport:
     """Probe *output* and compare non-negotiable source→output invariants."""
     failures: list[MediaInvariantFailure] = []
     try:
-        result = probe(output)
+        result = probed_output if probed_output is not None else probe(output)
     except Exception as exc:  # noqa: BLE001 - normalize probe failures
         return MediaInvariantReport(
             output=output,
@@ -114,6 +119,15 @@ def inspect_output_contract(plan: Plan, output: Path) -> MediaInvariantReport:
             "timeline.duration",
             round(duration_expected, 6),
             round(result.duration_sec, 6),
+        ))
+
+    first_video_pts = result._first_video_pts_sec
+    start_tolerance = max(0.1, 1.5 / max(fps, 1.0))
+    if first_video_pts is not None and abs(first_video_pts) > start_tolerance:
+        failures.append(MediaInvariantFailure(
+            "timeline.video_start",
+            0.0,
+            round(first_video_pts, 6),
         ))
 
     if plan.source.video and result.video:

@@ -276,6 +276,7 @@ class RunWorker(WorkerBase):
         report = build_report(
             self.plan.source.path,
             summary.output,
+            plan=self.plan,
             samples=60 if self.fast_qa else 120,
             run_vmaf=not self.fast_qa,
         )

@@ -3,95 +3,255 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from yt_uniquifier.core.runner import CancelToken
-from typing import Literal
+    from yt_uniquifier.core.runner import CancelToken, RunEvent
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from yt_uniquifier.core.models import Plan, QAReport
+from yt_uniquifier.core import runner
+from yt_uniquifier.core.errors import PipelineError
+from yt_uniquifier.core.media_validation import inspect_output_contract
+from yt_uniquifier.core.models import Plan, QAReport, SourceMeta
+from yt_uniquifier.core.pipeline import BuiltCommand
 from yt_uniquifier.core.probe import probe as probe_file
 from yt_uniquifier.core.qa import audio_fp, cid_predict, hashes, phash, ssim, vmaf
 from yt_uniquifier.core.qa.corpus import Corpus
+from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 ProgressFn = Callable[[str, float], None]  # phase name, fraction in [0..1]
 
-Verdict = Literal["green", "yellow", "red"]
+Verdict = Literal["invalid", "green", "yellow", "red"]
+CorrectnessBand = Literal["valid", "invalid"]
+QualityBand = Literal["pass", "warning", "fail", "unavailable"]
+SimilarityBand = Literal["low", "moderate", "high", "unavailable"]
 
 
 @dataclass(frozen=True)
 class VerdictResult:
     band: Verdict
+    correctness: CorrectnessBand
+    quality: QualityBand
+    visual_similarity: SimilarityBand
     reasons: list[str]
+    correctness_reasons: list[str]
+    quality_reasons: list[str]
+    similarity_reasons: list[str]
 
 
 def verdict(report: QAReport) -> VerdictResult:
-    """Cheap rule of thumb for the HTML banner."""
-    reasons: list[str] = []
-    band: Verdict = "green"
+    """Assess correctness, perceptual quality and similarity independently.
 
-    correctness_notes = [
+    Similarity is diagnostic: high or low pHash similarity cannot prove rights-system
+    behaviour and must not turn an otherwise correct, high-quality output red.  The
+    overall band is therefore driven only by correctness and quality evidence.
+    """
+    correctness_reasons = [
         note for note in report.notes if note.startswith("correctness:")
     ]
-    if correctness_notes:
-        band = "red"
-        reasons.extend(correctness_notes)
-
-    # pHash similarity: too high = barely unique; too low = unrecognisable.
-    if report.phash_similarity > 0.97:
-        band = "red"
-        reasons.append(
-            f"pHash similarity {report.phash_similarity:.3f} > 0.97 — output too close to input."
-        )
-    elif report.phash_similarity > 0.85:
-        if band == "green":
-            band = "yellow"
-        reasons.append(
-            f"pHash similarity {report.phash_similarity:.3f} in 0.85..0.97 band."
-        )
-    elif report.phash_similarity < 0.50:
-        band = "red"
-        reasons.append(
-            f"pHash similarity {report.phash_similarity:.3f} < 0.50 — too different visually."
-        )
-
-    if report.vmaf_mean is not None:
-        if report.vmaf_mean < 75:
-            band = "red"
-            reasons.append(f"VMAF {report.vmaf_mean:.1f} < 75 — strong quality drop.")
-        elif report.vmaf_mean < 85 and band == "green":
-            band = "yellow"
-            reasons.append(f"VMAF {report.vmaf_mean:.1f} < 85 — visible quality drop.")
-
-    if report.ssim_mean is not None and report.ssim_mean < 0.90 and band == "green":
-        band = "yellow"
-        reasons.append(f"SSIM {report.ssim_mean:.3f} < 0.90 — measurable change.")
-
-    # Duration mismatch ≥ 0.5s means the encode silently changed video length —
-    # a correctness failure, not a metric drift. Never let this slip into a
-    # GREEN verdict. (MED-1 from 2026-05-30 test report.)
     if not report.duration_match:
-        if band == "green":
-            band = "red"
-        reasons.append(
-            f"duration mismatch: input {report.input_duration_sec:.3f}s vs "
+        correctness_reasons.append(
+            f"correctness: duration mismatch: input {report.input_duration_sec:.3f}s vs "
             f"output {report.output_duration_sec:.3f}s — encode changed length."
         )
+    correctness: CorrectnessBand = (
+        "invalid" if correctness_reasons else "valid"
+    )
 
-    if not reasons:
-        reasons.append("All metrics within expected bands.")
-    return VerdictResult(band=band, reasons=reasons)
+    quality_reasons: list[str] = []
+    quality: QualityBand = "unavailable"
+    if report.vmaf_mean is not None:
+        if not math.isfinite(report.vmaf_mean) or not 0.0 <= report.vmaf_mean <= 100.0:
+            quality = "fail"
+            quality_reasons.append(f"invalid VMAF result: {report.vmaf_mean!r}.")
+        elif report.vmaf_mean < 75:
+            quality = "fail"
+            quality_reasons.append(f"VMAF {report.vmaf_mean:.1f} < 75 — strong quality drop.")
+        elif report.vmaf_mean < 85:
+            quality = "warning"
+            quality_reasons.append(f"VMAF {report.vmaf_mean:.1f} < 85 — visible quality drop.")
+        else:
+            quality = "pass"
+            quality_reasons.append(f"VMAF {report.vmaf_mean:.1f} is within the quality band.")
+    if report.ssim_mean is not None:
+        if not math.isfinite(report.ssim_mean) or not 0.0 <= report.ssim_mean <= 1.0:
+            quality = "fail"
+            quality_reasons.append(f"invalid SSIM result: {report.ssim_mean!r}.")
+        elif report.ssim_mean < 0.90 and quality != "fail":
+            quality = "warning"
+            quality_reasons.append(f"SSIM {report.ssim_mean:.3f} < 0.90 — measurable change.")
+        elif quality == "unavailable":
+            quality = "pass"
+            quality_reasons.append(
+                f"SSIM {report.ssim_mean:.3f} is within the quality band."
+            )
+    if quality == "unavailable":
+        quality_reasons.append("No VMAF or SSIM result is available.")
+
+    similarity_reasons: list[str] = []
+    visual_similarity: SimilarityBand
+    if report.phash_samples <= 0:
+        visual_similarity = "unavailable"
+        similarity_reasons.append("pHash visual similarity is unavailable.")
+    elif report.phash_similarity > 0.97:
+        visual_similarity = "high"
+        similarity_reasons.append(
+            f"pHash visual similarity {report.phash_similarity:.3f} > 0.97."
+        )
+    elif report.phash_similarity > 0.85:
+        visual_similarity = "moderate"
+        similarity_reasons.append(
+            f"pHash visual similarity {report.phash_similarity:.3f} is in 0.85..0.97."
+        )
+    else:
+        visual_similarity = "low"
+        similarity_reasons.append(
+            f"pHash visual similarity {report.phash_similarity:.3f} <= 0.85."
+        )
+
+    band: Verdict
+    if correctness == "invalid":
+        band = "invalid"
+    elif quality == "fail":
+        band = "red"
+    elif quality in {"warning", "unavailable"}:
+        band = "yellow"
+    else:
+        band = "green"
+    reasons = [*correctness_reasons, *quality_reasons]
+    return VerdictResult(
+        band=band,
+        correctness=correctness,
+        quality=quality,
+        visual_similarity=visual_similarity,
+        reasons=reasons,
+        correctness_reasons=correctness_reasons,
+        quality_reasons=quality_reasons,
+        similarity_reasons=similarity_reasons,
+    )
+
+
+def _correctness_notes(
+    src_meta: SourceMeta,
+    out_meta: SourceMeta,
+    *,
+    plan: Plan | None,
+    output_path: Path,
+) -> list[str]:
+    if plan is not None:
+        contract = inspect_output_contract(
+            plan,
+            output_path,
+            probed_output=out_meta,
+        )
+        return [
+            "correctness: "
+            f"{failure.code}: expected={failure.expected!r}, actual={failure.actual!r}"
+            for failure in contract.failures
+        ]
+
+    notes: list[str] = []
+    out_video = getattr(out_meta, "video", ())
+    src_audio = getattr(src_meta, "audio", ())
+    out_audio = getattr(out_meta, "audio", ())
+    src_subtitles = getattr(src_meta, "subtitle", ())
+    out_subtitles = getattr(out_meta, "subtitle", ())
+    src_chapters = getattr(src_meta, "chapters", ())
+    out_chapters = getattr(out_meta, "chapters", ())
+
+    if len(out_video) != 1:
+        notes.append(
+            f"correctness: expected one primary video stream, found {len(out_video)}"
+        )
+    if src_audio and not out_audio:
+        notes.append("correctness: source main audio stream is missing from output")
+    if len(out_subtitles) != len(src_subtitles):
+        notes.append(
+            "correctness: subtitle stream count changed "
+            f"({len(src_subtitles)} -> {len(out_subtitles)})"
+        )
+    if len(out_chapters) != len(src_chapters):
+        notes.append(
+            "correctness: chapter count changed "
+            f"({len(src_chapters)} -> {len(out_chapters)})"
+        )
+    source_aux = getattr(src_meta, "_auxiliary_streams", ())
+    output_aux = getattr(out_meta, "_auxiliary_streams", ())
+    for kind in ("attachment", "data", "attached_pic"):
+        source_count = sum(stream.kind == kind for stream in source_aux)
+        output_count = sum(stream.kind == kind for stream in output_aux)
+        if source_count != output_count:
+            notes.append(
+                f"correctness: {kind} stream count changed "
+                f"({source_count} -> {output_count})"
+            )
+    return notes
+
+
+def _verify_decodable(
+    output_path: Path,
+    *,
+    duration_sec: float,
+    progress: ProgressFn,
+    cancel_token: CancelToken | None,
+) -> str | None:
+    """Decode the complete primary video and every audio stream.
+
+    Sampling metrics can miss a corrupt tail.  A null-mux decode is deliberately
+    correctness-first and uses the shared bounded-log/cancellation runner.
+    """
+    cmd = BuiltCommand(args=[
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-v", "error",
+        "-xerror",
+        "-err_detect", "explode",
+        "-i", str(output_path),
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-sn",
+        "-dn",
+        "-f", "null",
+        os.devnull,
+    ])
+
+    def _on_event(event: RunEvent) -> None:
+        if event.kind != "progress" or duration_sec <= 0:
+            return
+        raw = event.payload.get("out_time_us")
+        if not isinstance(raw, str):
+            return
+        try:
+            fraction = int(raw) / 1_000_000 / duration_sec
+        except ValueError:
+            return
+        progress("decode", max(0.0, min(0.99, fraction)))
+
+    try:
+        runner.run(
+            cmd,
+            output=Path(os.devnull),
+            on_event=_on_event,
+            cancel_token=cancel_token,
+        )
+    except PipelineError as exc:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            raise
+        return f"correctness: full output decode failed: {exc}"
+    return None
 
 
 def build_report(
     input_path: Path,
     output_path: Path,
     *,
+    plan: Plan | None = None,
     samples: int = 120,
     run_vmaf: bool = True,
     run_ssim: bool = True,
@@ -102,6 +262,7 @@ def build_report(
     cancel_token: CancelToken | None = None,
     compute_sscd: bool = False,
     sscd_frame_count: int = 32,
+    verify_decode: bool = True,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order.
 
@@ -115,8 +276,36 @@ def build_report(
 
     def _check_cancel(phase: str) -> None:
         if cancel_token is not None and cancel_token.is_cancelled():
-            from yt_uniquifier.core.errors import PipelineError
             raise PipelineError(f"QA cancelled by user (during {phase})")
+
+    # Probe and validate the media contract before any sampled metric.  A
+    # sampled metric can look healthy while an unvisited tail is corrupt or a
+    # non-video stream is missing.
+    _check_cancel("probe")
+    p("probe", 0.0)
+    src_meta = probe_file(input_path)
+    out_meta = probe_file(output_path)
+    p("probe", 1.0)
+    notes.extend(_correctness_notes(
+        src_meta,
+        out_meta,
+        plan=plan,
+        output_path=output_path,
+    ))
+    duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
+
+    if verify_decode and out_meta.video:
+        _check_cancel("decode")
+        p("decode", 0.0)
+        decode_failure = _verify_decodable(
+            output_path,
+            duration_sec=out_meta.duration_sec,
+            progress=p,
+            cancel_token=cancel_token,
+        )
+        if decode_failure is not None:
+            notes.append(decode_failure)
+        p("decode", 1.0)
 
     _check_cancel("md5")
     p("md5", 0.0)
@@ -126,41 +315,22 @@ def build_report(
 
     _check_cancel("phash")
     p("phash", 0.0)
-    ph = phash.compare(input_path, output_path, n=samples)
+    try:
+        ph = phash.compare(input_path, output_path, n=samples)
+    except PipelineError as exc:
+        notes.append(f"phash: {exc}")
+        ph_samples = 0
+        ph_distance_min = 0
+        ph_distance_mean = 0.0
+        ph_distance_max = 0
+        ph_similarity = 0.0
+    else:
+        ph_samples = ph.samples
+        ph_distance_min = ph.distance_min
+        ph_distance_mean = ph.distance_mean
+        ph_distance_max = ph.distance_max
+        ph_similarity = ph.similarity
     p("phash", 1.0)
-
-    # B5 (v0.6.0): probe early so the auto-subsample decision for VMAF
-    # has the source duration. Previously probe ran AFTER VMAF, which
-    # forced the long path to score every frame. Probe is cheap
-    # (single ffprobe call), so the reorder is essentially free.
-    p("probe", 0.0)
-    src_meta = probe_file(input_path)
-    out_meta = probe_file(output_path)
-    p("probe", 1.0)
-
-    # Keep QA usable with partial/custom probe adapters: missing optional
-    # topology fields mean "unknown", not a report-building exception.
-    src_audio = getattr(src_meta, "audio", ())
-    out_audio = getattr(out_meta, "audio", ())
-    src_subtitles = getattr(src_meta, "subtitle", ())
-    out_subtitles = getattr(out_meta, "subtitle", ())
-    src_chapters = getattr(src_meta, "chapters", ())
-    out_chapters = getattr(out_meta, "chapters", ())
-
-    if not out_meta.video:
-        notes.append("correctness: output has no video stream")
-    if src_audio and not out_audio:
-        notes.append("correctness: source main audio stream is missing from output")
-    if len(out_subtitles) != len(src_subtitles):
-        notes.append(
-            "correctness: subtitle stream count changed "
-            f"({len(src_subtitles)} -> {len(out_subtitles)})"
-        )
-    if len(out_chapters) != len(src_chapters):
-        notes.append(
-            "correctness: chapter count changed "
-            f"({len(src_chapters)} -> {len(out_chapters)})"
-        )
 
     af_sim: float | None = None
     af_hamming: float | None = None
@@ -170,20 +340,28 @@ def build_report(
     if run_audio_fp:
         _check_cancel("audio_fp")
         p("audio_fp", 0.0)
-        af = audio_fp.compare(input_path, output_path)
+        fingerprint_analysis = audio_fp.analyze_pair(
+            input_path,
+            output_path,
+            input_duration_sec=src_meta.duration_sec,
+            output_duration_sec=out_meta.duration_sec,
+        )
+        af = fingerprint_analysis.similarity
         if af.available:
             af_sim = af.similarity
         elif af.note:
             notes.append(f"audio_fp: {af.note}")
-        afh = audio_fp.compare_hamming(input_path, output_path)
+        afh = fingerprint_analysis.hamming
         if afh.available:
             af_hamming = afh.hamming_per_frame
             af_confidence = afh.match_confidence
         # v0.4.2 — per-window variance KPI.
-        afv = audio_fp.compare_hamming_per_window(input_path, output_path)
+        afv = fingerprint_analysis.variance
         if afv.available:
             af_per_window = afv.hamming_per_window
             af_variance = afv.variance_between_windows
+        if fingerprint_analysis.coverage_note:
+            notes.append(f"audio_fp: {fingerprint_analysis.coverage_note}")
         # If afh/afv.available is False, af.compare() above already produced
         # an equivalent note about fpcalc missing/failing — no second log.
         p("audio_fp", 1.0)
@@ -207,6 +385,7 @@ def build_report(
 
     ssim_mean: float | None = None
     if run_ssim:
+        _check_cancel("ssim")
         p("ssim", 0.0)
         s = ssim.compute(input_path, output_path)
         if s.score is not None:
@@ -214,8 +393,6 @@ def build_report(
         elif s.note:
             notes.append(f"ssim: {s.note}")
         p("ssim", 1.0)
-
-    duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
 
     sscd_mean: float | None = None
     sscd_min: float | None = None
@@ -239,8 +416,6 @@ def build_report(
             # the entire QA report (which already collected the cheap
             # metrics). Re-raise only on user cancellation so the
             # cancel button still works.
-            from yt_uniquifier.core.errors import PipelineError
-
             if isinstance(exc, PipelineError) and "cancelled" in str(exc):
                 raise
             notes.append(f"sscd: {exc}")
@@ -255,6 +430,7 @@ def build_report(
     chunk_dump: list[dict[str, float]] = []
     corpus_dump: list[dict[str, float | str]] = []
     if predict_cid:
+        _check_cancel("cid_predict")
         p("cid_predict", 0.0)
         cid = cid_predict.predict(
             input_path, output_path,
@@ -292,11 +468,11 @@ def build_report(
         output_size_bytes=out_meta.size_bytes,
         input_duration_sec=src_meta.duration_sec,
         output_duration_sec=out_meta.duration_sec,
-        phash_samples=ph.samples,
-        phash_distance_min=ph.distance_min,
-        phash_distance_mean=ph.distance_mean,
-        phash_distance_max=ph.distance_max,
-        phash_similarity=ph.similarity,
+        phash_samples=ph_samples,
+        phash_distance_min=ph_distance_min,
+        phash_distance_mean=ph_distance_mean,
+        phash_distance_max=ph_distance_max,
+        phash_similarity=ph_similarity,
         audio_fp_similarity=af_sim,
         audio_fp_hamming_per_frame=af_hamming,
         audio_fp_match_confidence=af_confidence,
@@ -352,6 +528,7 @@ def render_html(report: QAReport, plan: Plan | None, dest: Path) -> None:
     html = tpl.render(
         report=report,
         plan=plan,
+        assessment=v,
         verdict_band=v.band,
         verdict_reasons=v.reasons,
     )

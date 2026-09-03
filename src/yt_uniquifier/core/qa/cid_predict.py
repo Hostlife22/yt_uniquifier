@@ -1,15 +1,16 @@
-"""Chunked similarity predictor — closer to how Content ID actually matches.
+"""Legacy chunked source/candidate similarity heuristic.
 
-Content ID looks at overlapping ~4-second windows. Averaging similarity
-across the whole file hides the weakest chunk where a match would actually
-trigger. We measure per-chunk and take the maximum.
+This module does not model or predict any external rights-management system.
+It measures local pHash/Chromaprint similarity in short windows so an operator
+can locate self-collisions and regressions that a whole-file mean would hide.
 
 For each chunk:
   visual = pHash similarity between one frame from each file
   audio  = chromaprint Jaccard over chunk's slice of the fingerprint
 combined = max(visual, audio)
 
-match_probability_self = max(combined) over all chunks.
+``match_probability_self`` is a compatibility field name.  Its value is an
+uncalibrated maximum similarity heuristic, not a probability.
 """
 
 from __future__ import annotations
@@ -83,8 +84,8 @@ def predict(
         if lo >= hi:
             vis = 0.0
         else:
-            # Content ID fires on the most-similar moment in a window, not
-            # the average — take the MAX phash-similarity within this chunk.
+            # Retain the maximum to expose local self-collisions that a mean
+            # would hide.
             vis = max(
                 _phash_pair_similarity(in_phashes[j], out_phashes[j])
                 for j in range(lo, hi)
@@ -104,11 +105,8 @@ def predict(
         weakest: ChunkSimilarity | None = None
     else:
         match_prob = max(c.combined for c in chunks)
-        # `weakest_chunk` is the chunk where our CID-evasion defence is
-        # weakest — i.e. the chunk most similar to the source, which is
-        # also where Content ID is most likely to fire. So it is argmax
-        # of `combined`, not argmin. Naming preserved for QAReport
-        # field compatibility (see docs/qa_report.md).
+        # ``weakest_chunk`` is a compatibility name for the most-similar
+        # source/candidate window. It is argmax, not argmin.
         weakest = max(chunks, key=lambda c: c.combined)
 
     corpus_matches: list[CorpusMatch] = []

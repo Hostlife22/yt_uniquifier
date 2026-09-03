@@ -343,13 +343,10 @@ def compute_sscd(
 
 
 def sscd_band(value: float) -> str:
-    """Map a mean SSCD similarity to a CID-risk band for the HTML banner.
+    """Map mean SSCD representation similarity to legacy display buckets.
 
-    Thresholds picked from the SSCD paper's threshold-vs-precision
-    curves on the DISC21 evaluation set:
-      * ≥ 0.85 — high risk (probable duplicate by Meta's CID surrogate)
-      * 0.65-0.85 — caution (worth manual review)
-      * < 0.65 — clean (the encode looks unrelated to the source)
+    Bucket names are retained for compatibility. They are descriptive local
+    diagnostics, not calibrated quality gates or external-system predictions.
     """
     if value >= 0.85:
         return "high"

@@ -294,6 +294,7 @@ def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
     report = build_report(
         plan.source.path,
         output,
+        plan=plan,
         samples=60 if fast else 120,
         run_vmaf=not fast,
     )

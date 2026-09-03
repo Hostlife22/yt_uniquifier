@@ -181,6 +181,16 @@ def test_build_report_raises_at_phash_phase_when_cancel_fires_mid_md5(
         return "deadbeef"
 
     monkeypatch.setattr(report_mod.hashes, "md5_file", fake_md5)
+    fake_meta = type("Meta", (), {
+        "size_bytes": 1,
+        "duration_sec": 1.0,
+        "video": [object()],
+        "audio": [],
+        "subtitle": [],
+        "chapters": [],
+        "_auxiliary_streams": (),
+    })()
+    monkeypatch.setattr(report_mod, "probe_file", lambda _path: fake_meta)
 
     with pytest.raises(PipelineError, match="QA cancelled by user.*phash"):
         report_mod.build_report(
@@ -188,4 +198,5 @@ def test_build_report_raises_at_phash_phase_when_cancel_fires_mid_md5(
             run_vmaf=False, run_ssim=False, run_audio_fp=False,
             predict_cid=False,
             cancel_token=cancel_token,
+            verify_decode=False,
         )

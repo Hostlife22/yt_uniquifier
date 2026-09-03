@@ -1,4 +1,4 @@
-"""quality_score: VMAF → SSIM → pHash fallback chain."""
+"""quality_score: VMAF with SSIM fallback only when VMAF is unavailable."""
 
 from __future__ import annotations
 
@@ -24,27 +24,15 @@ class _Ssim:
     note: str | None = None
 
 
-@dataclass
-class _Phash:
-    samples: int = 30
-    distance_min: int = 0
-    distance_mean: float = 0.0
-    distance_max: int = 0
-    similarity: float = 1.0
-
-
 def _patch(monkeypatch: pytest.MonkeyPatch, *,
             vmaf_score: float | None = None,
             vmaf_note: str | None = None,
             ssim_score: float | None = None,
-            ssim_note: str | None = None,
-            phash_sim: float = 0.5) -> None:
+            ssim_note: str | None = None) -> None:
     monkeypatch.setattr(quality_mod.vmaf, "compute",
                         lambda *_a, **_kw: _Vmaf(score=vmaf_score, note=vmaf_note))
     monkeypatch.setattr(quality_mod.ssim, "compute",
                         lambda *_a, **_kw: _Ssim(score=ssim_score, note=ssim_note))
-    monkeypatch.setattr(quality_mod.phash, "compare",
-                        lambda *_a, **_kw: _Phash(similarity=phash_sim))
 
 
 def _paths(tmp_path: Path) -> tuple[Path, Path]:
@@ -65,15 +53,15 @@ def test_vmaf_used_when_reliable(tmp_path: Path,
     assert res.note is None
 
 
-def test_vmaf_unreliable_falls_back_to_ssim(
+def test_low_vmaf_is_not_hidden_by_ssim_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch(monkeypatch, vmaf_score=0.1, ssim_score=0.95)
     a, b = _paths(tmp_path)
     res = quality_score(a, b)
-    assert res.metric == "ssim"
-    assert res.value == pytest.approx(95.0)
-    assert res.note and "VMAF" in res.note
+    assert res.metric == "vmaf"
+    assert res.value == pytest.approx(0.1)
+    assert res.note is None
 
 
 def test_no_vmaf_falls_back_to_ssim(tmp_path: Path,
@@ -86,17 +74,14 @@ def test_no_vmaf_falls_back_to_ssim(tmp_path: Path,
     assert res.value == pytest.approx(88.0)
 
 
-def test_no_vmaf_no_ssim_falls_back_to_phash(
+def test_no_vmaf_no_ssim_is_not_faked_with_phash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch(monkeypatch, vmaf_score=None, vmaf_note="vmaf missing",
-           ssim_score=None, ssim_note="ssim failed",
-           phash_sim=0.76)
+           ssim_score=None, ssim_note="ssim failed")
     a, b = _paths(tmp_path)
-    res = quality_score(a, b)
-    assert res.metric == "phash"
-    assert res.value == pytest.approx(76.0)
-    assert res.note and "pHash" in res.note
+    with pytest.raises(quality_mod.PipelineError, match="no comparable quality metric"):
+        quality_score(a, b)
 
 
 def test_identity_pair_high_score(tmp_path: Path,
@@ -105,3 +90,13 @@ def test_identity_pair_high_score(tmp_path: Path,
     _patch(monkeypatch, vmaf_score=100.0)
     a, b = _paths(tmp_path)
     assert quality_score(a, b).value == 100.0
+
+
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), -1.0, 101.0])
+def test_invalid_vmaf_is_an_error_not_a_fallback_score(
+    score: float, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch(monkeypatch, vmaf_score=score, ssim_score=0.99)
+    a, b = _paths(tmp_path)
+    with pytest.raises(quality_mod.PipelineError, match="invalid VMAF"):
+        quality_score(a, b)

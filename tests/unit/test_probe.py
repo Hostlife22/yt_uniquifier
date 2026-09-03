@@ -120,6 +120,36 @@ def test_parse_basic_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert a.dispositions == ("default", "original")
 
 
+def test_probe_keeps_first_video_timestamp_as_private_contract_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "shifted.mp4"
+    src.touch()
+    payload = _ffprobe_json(
+        video=[{
+            "index": 2,
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 320,
+            "height": 180,
+            "avg_frame_rate": "24/1",
+            "duration": "10.0",
+            "pix_fmt": "yuv420p",
+        }],
+        frames=[{
+            "media_type": "video",
+            "stream_index": 2,
+            "best_effort_timestamp_time": "1.021000",
+        }],
+    )
+    _mock_ffprobe(monkeypatch, payload)
+
+    meta = probe_mod.probe(src)
+
+    assert meta._first_video_pts_sec == pytest.approx(1.021)
+    assert "first_video_pts" not in meta.model_dump(mode="json")
+
+
 def test_vfr_video_uses_average_frame_rate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

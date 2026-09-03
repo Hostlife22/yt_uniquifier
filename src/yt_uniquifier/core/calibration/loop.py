@@ -1,7 +1,8 @@
-"""Iterative calibration: tune profile intensity to hit a self-match target.
+"""Iterative calibration against local quality and self-similarity diagnostics.
 
-For a given source + base profile, find an `intensity_factor` that drops
-predicted Content ID self-match below a threshold without crashing VMAF.
+For a given owned/licensed source and base profile, find an ``intensity_factor``
+that satisfies a local diagnostic target without violating perceptual quality.
+The similarity objective is not a prediction of an external rights system.
 
 To stay fast, each iteration encodes only the first `test_clip_sec` of the
 source (via stream-copy cut). The final tuned profile can then be applied
@@ -37,8 +38,8 @@ CalibrationMetric = Literal["chromaprint", "sscd"]
 
 # Public evaluator contract: given (source, candidate, cancel_token), return
 # a similarity score in [0, 1] where higher = more similar to the source
-# (i.e. higher CID-collision risk). Calibration drives this score DOWN
-# toward `target.max_self_match`.
+# (i.e. closer under this local metric). Calibration drives this diagnostic
+# toward ``target.max_self_match`` while enforcing quality independently.
 MetricEvaluator = Callable[[Path, Path, "CancelToken | None"], float]
 
 
@@ -104,12 +105,9 @@ def calibrate(
     this function had no cancel surface; clicking Cancel in the
     Calibrate screen would leave encodes running for minutes.
 
-    v0.8.0 R6: ``metric`` selects which similarity surrogate drives the
-    bisection. ``"chromaprint"`` (default) keeps the v0.5 behaviour —
-    audio-fingerprint-derived ``predict().match_probability_self``.
-    ``"sscd"`` swaps in the SSCD copy-detection embedding (Meta's
-    VSC2022 model).  Its mean cosine is already a similarity score where
-    higher means more similar, matching the evaluator contract directly.
+    v0.8.0 R6: ``metric`` selects the local similarity diagnostic.
+    ``"chromaprint"`` retains the legacy weighted field and ``"sscd"``
+    uses mean representation cosine. Neither predicts an external system.
 
     The ``evaluator`` kwarg is a test seam — pass a callable matching
     ``MetricEvaluator`` to bypass real model loading. In production
@@ -307,7 +305,7 @@ def _build_evaluator(metric: CalibrationMetric) -> MetricEvaluator:
 def _evaluate_chromaprint(
     source: Path, candidate: Path, cancel: CancelToken | None,
 ) -> float:
-    """Default v0.5 behaviour — predicted self-match from `cid_predict`."""
+    """Return the legacy weighted local self-similarity heuristic."""
     _ = cancel  # predict() is not cancel-aware; loop honours it between iters
     return predict(source, candidate).match_probability_self
 
@@ -318,9 +316,8 @@ def _evaluate_sscd(
     """Return SSCD mean cosine as the evaluator's direct similarity score.
 
     SSCD's mean cosine is 1.0 for identical content and trends to ~0 for
-    unrelated material.  Calibration drives this direct similarity below
-    ``target.max_self_match``.  The old ``1 - similarity`` mapping inverted
-    the objective and made an identical pair (risk 0.0) look converged.
+    unrelated material.  The old ``1 - similarity`` mapping inverted the
+    metric and made an identical pair look maximally different.
     """
     # Lazy import — torch is in the optional ``[ml]`` extra.
     from yt_uniquifier.core.qa.sscd import compute_sscd

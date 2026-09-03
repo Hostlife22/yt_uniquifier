@@ -13,7 +13,13 @@
     .verdict.green  { background: #e6f7e7; border: 1px solid #4caf50; }
     .verdict.yellow { background: #fff8e1; border: 1px solid #ffc107; }
     .verdict.red    { background: #fdecea; border: 1px solid #d32f2f; }
+    .verdict.invalid { background: #f4e8ff; border: 2px solid #7b1fa2; }
     .verdict ul { margin: 0.5em 0 0; padding-left: 1.5em; }
+    .axes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.75em; margin: 1em 0; }
+    .axis { border: 1px solid #ddd; border-radius: 6px; padding: 0.8em; }
+    .axis strong { display: block; margin-bottom: 0.25em; }
+    .axis p { margin: 0; color: #555; font-size: 0.9em; }
     table { width: 100%; border-collapse: collapse; margin: 1em 0; }
     th, td { padding: 0.5em 0.6em; text-align: left;
              border-bottom: 1px solid #eee; vertical-align: top; }
@@ -38,10 +44,25 @@
 <p class="sub">yt-uniquifier · pHash / VMAF / SSIM / audio fingerprint similarity</p>
 
 <div class="verdict {{ verdict_band }}">
-  <strong>Verdict: {{ verdict_band|upper }}</strong>
+  <strong>Overall output status: {{ verdict_band|upper }}</strong>
   <ul>
     {% for r in verdict_reasons %}<li>{{ r }}</li>{% endfor %}
   </ul>
+</div>
+
+<div class="axes">
+  <div class="axis">
+    <strong>Correctness: {{ assessment.correctness|upper }}</strong>
+    <p>Stream topology, duration, declared color contract and complete decode.</p>
+  </div>
+  <div class="axis">
+    <strong>Quality: {{ assessment.quality|upper }}</strong>
+    <p>VMAF/SSIM evidence, evaluated independently from similarity.</p>
+  </div>
+  <div class="axis">
+    <strong>Visual similarity: {{ assessment.visual_similarity|upper }}</strong>
+    <p>Sampled pHash diagnostic only; it is not an external-system prediction.</p>
+  </div>
 </div>
 
 <div class="section">
@@ -62,12 +83,13 @@
   <table>
     <tr>
       <th>pHash similarity <small>(1.0 = identical)</small></th>
-      <td>{{ "%.4f"|format(report.phash_similarity) }}
+      <td>{% if report.phash_samples > 0 %}{{ "%.4f"|format(report.phash_similarity) }}
         <small>(samples: {{ report.phash_samples }},
         distance min/mean/max:
         {{ report.phash_distance_min }} /
         {{ "%.2f"|format(report.phash_distance_mean) }} /
-        {{ report.phash_distance_max }})</small></td>
+        {{ report.phash_distance_max }})</small>
+        {% else %}<em>not available</em>{% endif %}</td>
     </tr>
     <tr>
       <th>Audio fingerprint similarity</th>
@@ -124,10 +146,10 @@
 
 {% if report.chunk_similarities %}
 <div class="section">
-  <h2>Content ID prediction (per 4-second chunk)</h2>
+  <h2>Legacy chunked similarity diagnostics</h2>
   <table>
     <tr>
-      <th>Predicted self-match probability</th>
+      <th>Weighted self-similarity heuristic</th>
       <td>
         {% if report.cid_predict_self is not none %}
           {{ "%.3f"|format(report.cid_predict_self) }}
@@ -135,7 +157,7 @@
       </td>
     </tr>
     <tr>
-      <th>Weakest chunk (closest to source)</th>
+      <th>Highest-similarity chunk</th>
       <td>
         {% if report.weakest_chunk_sec %}
           {{ "%.1f"|format(report.weakest_chunk_sec[0]) }}s –
@@ -157,21 +179,20 @@ audio: {{ '%.3f'|format(c.audio) }}"></span>
     <span class="swatch" style="background: {{ 0.0|heatmap_color }}"></span> low (different)
     <span class="swatch" style="background: {{ 0.5|heatmap_color }}"></span> mid
     <span class="swatch" style="background: {{ 1.0|heatmap_color }}"></span> high (similar)
-    <em style="margin-left: 1em;">informational — not a definitive Content ID prediction.</em>
+    <em style="margin-left: 1em;">informational regression signal only; not a probability or external-system prediction.</em>
   </div>
 </div>
 {% endif %}
 
 {% if report.sscd_mean is not none %}
 <div class="section">
-  <h2>SSCD (ML-grade copy detection)</h2>
+  <h2>SSCD representation similarity</h2>
   <p>
     Cosine similarity of SSCD embeddings between matched source and output
-    frames. SSCD is Meta's self-supervised copy-detection model
+    frames. SSCD is Meta's self-supervised representation model
     (<a href="https://github.com/facebookresearch/sscd-copy-detection">facebookresearch/sscd-copy-detection</a>);
-    it is the strongest available proxy for whether a CID-style system
-    will consider the output a derivative of the source. Bands derive
-    from the SSCD paper's precision-recall curves on the DISC21 set.
+    this score is retained as an internal regression diagnostic and does not
+    predict the decision of any external rights-management system.
   </p>
   <table>
     <tr>
@@ -179,11 +200,11 @@ audio: {{ '%.3f'|format(c.audio) }}"></span>
       <td>
         {{ "%.3f"|format(report.sscd_mean) }}
         {% if report.sscd_mean >= 0.85 %}
-          <span style="color:#e74c3c;font-weight:600;">high CID risk</span>
+          <span style="font-weight:600;">high similarity</span>
         {% elif report.sscd_mean >= 0.65 %}
-          <span style="color:#f1c40f;font-weight:600;">caution</span>
+          <span style="font-weight:600;">moderate similarity</span>
         {% else %}
-          <span style="color:#2ecc71;font-weight:600;">clean</span>
+          <span style="font-weight:600;">low similarity</span>
         {% endif %}
       </td>
     </tr>

@@ -137,12 +137,13 @@ segmenter.plan_segments() -> CheckpointStore
                                   v
                          atomic final output
 
-CLI / GUI only: output -> QA report -> JSON/HTML
-Web / distributed worker: QA is not automatic
+CLI / GUI only: output -> correctness-first QA report -> JSON/HTML
+Web / distributed worker: final media contract is mandatory; rich QA is not automatic
 ```
 
-Заданная пользователем схема соответствует коду до `Output`, но `QA` и
-`Validation` не являются обязательными pipeline stages.
+Заданная пользователем схема соответствует коду до `Output`. Final `Validation`
+теперь обязателен в общем orchestrator; богатый QA остаётся опциональным и не должен
+заменять media contract.
 
 ### Карта компонентов
 
@@ -159,7 +160,7 @@ Web / distributed worker: QA is not automatic
 | Resume | `core/checkpoint.py` | state, hashes, locks | segment state ↔ JSON | Atomic segment hashes сильны; identity/locking/final validation слабы |
 | Runner | `core/runner.py` | subprocess, progress, cancel, NVENC retry | argv → events/result | Process-tree cancel хорош; нет stall/wall timeout, logs держатся в RAM |
 | Metadata | `core/metadata.py`, `core/auxiliary_streams.py` | sanitize/reapply metadata and auxiliary policy | source metadata → args | Selected stream/chapter plus supported attachment/timecode/cover metadata preserved and validated |
-| QA | `core/qa/` | pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | Богатая диагностика; verdict неполон и метрики плохо сопоставлены |
+| QA | `core/qa/` | correctness, pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | `INVALID` и независимые UI axes реализованы; aligned quality/structured LUFS schema pending RFC |
 | Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | Математически неустойчива, SSCD objective ошибочен |
 | CLI | `cli/` | user orchestration | args → core APIs | Полное покрытие функций; `--encoder Force` фактически preference |
 | GUI | `gui/` | desktop orchestration/workers | UI → core APIs | Core не дублируется; реальные heavy e2e opt-in |
@@ -309,12 +310,23 @@ Segmented VFR, temporal jitter, hardware encoders и concat: **NOT VERIFIED**.
 JSON/HTML output, deterministic sampling, SQLite WAL corpus, explicit availability
 notes.
 
-Что создаёт ложную уверенность:
+Исправлено в Phase 5:
 
-- `report.py::verdict` не учитывает наличие/число audio/subtitles/chapters, audio
-  similarity, SSCD, loudness и true peak. Output без audio/chapters может быть GREEN.
-- `duration_match` с допуском 0.5 s проверяет container duration, поэтому не видит
-  content shift/tail truncation, замаскированные `-t`.
+- plan-aware QA переиспользует final media contract; standalone QA проверяет
+  безопасную общую topology. Нарушения дают `INVALID`, а не RED/GREEN.
+- first decoded video PTS проверяется отдельно, а primary video и все audio streams
+  декодируются до EOF с `-xerror -err_detect explode`, поэтому sampling не скрывает
+  повреждённый хвост.
+- CLI/HTML показывают correctness, VMAF/SSIM quality и pHash similarity независимо.
+- один `analyze_pair` заменил шесть запусков `fpcalc`; для >600 s используются пять
+  упорядоченных 120 s окон от начала до хвоста.
+- любой числовой VMAF, включая очень низкий, остаётся VMAF; SSIM используется только
+  при недоступном VMAF, pHash больше не подменяет quality.
+
+Что остаётся:
+
+- stable `QAReport` пока хранит correctness details в `notes[]`: structured LUFS,
+  true peak, decoded frame/sample/end deltas требуют отдельного additive schema RFC.
 - SSCD cosine: чем выше, тем изображения более похожи. Официальная реализация Meta
   прямо задаёт это направление и приводит `>0.75` как пример copy threshold:
   [SSCD official repository](https://github.com/facebookresearch/sscd-copy-detection).
@@ -325,8 +337,8 @@ notes.
 - pHash/VMAF/SSIM без geometric/temporal registration смешивают эффект намеренного
   crop/rotate с encode quality. В benchmark raw VMAF упал до 3.12. Для
   `target_vmaf` это теперь fail-fast; post-run aligned QA остаётся незавершённым.
-- Chromaprint ограничен первыми 600 s, затем его fingerprint искусственно делится по
-  всей длительности фильма. Jaccard через sets теряет временной порядок.
+- Legacy Jaccard через sets всё ещё теряет временной порядок внутри покрытых окон;
+  Hamming window sequence остаётся доступной отдельно.
 - SSCD default 32 pair вызывает отдельный FFmpeg process на каждый frame каждой
   стороны вместо одного extraction pass.
 - `cid_predict_self` — max эвристик, а не калиброванная вероятность. Его нельзя
@@ -338,17 +350,14 @@ notes.
 
 ## Calibration audit
 
-Текущий algorithm не является bisection: factor умножается на 1.5 или делится на
-1.3 без bracket и без проверки монотонности. У каждой итерации новый random seed,
-поэтому сравниваются одновременно intensity и иные random draws. Первый prefix clip
-не представляет фильм, а `work_dir/test_clip.mp4` переиспользуется для другого
-source только по наличию файла. Ошибка encode трактуется как `self_match=1` и ведёт к
-ещё большей aggressiveness. Если ни один candidate не проходит обе цели, `_better`
-выбирает наименьший similarity даже при разрушенном качестве.
+Текущий algorithm уже фиксирует common seed, хеширует source для test clip, abort-ит
+повторную infrastructure error и после обнаружения обеих границ переходит к midpoint.
+Phase 5 также исключил маскировку низкого VMAF и pHash-as-quality fallback.
 
-`quality_score` переключает VMAF → SSIM×100 → pHash×100 с одним числовым threshold,
-хотя шкалы не эквивалентны; VMAF ≤10 объявляется ненадёжным, что может скрыть реально
-сломанный output. `CalibrationStep.duration_sec` всегда равен 0.
+Остаются математические ограничения: используется только первый prefix clip,
+монотонность objective предполагается, scored trials не имеют durable cache,
+`CalibrationStep.duration_sec` всегда 0, а best-so-far не является полноценным
+feasibility/Pareto search для немонотонного transform stack.
 
 Production replacement должен остаться внутри существующего calibration engine:
 fixed seed/common random numbers, content-stratified clips, cached evaluations,

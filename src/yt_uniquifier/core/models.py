@@ -143,6 +143,9 @@ class SourceMeta(BaseModel):
     # Probe-only topology. PrivateAttr deliberately keeps the stable
     # SourceMeta JSON schema and serialized Plan contract unchanged.
     _auxiliary_streams: tuple[AuxiliaryStream, ...] = PrivateAttr(default=())
+    # First decoded timestamp of the primary video stream.  Probe-only and
+    # private for the same compatibility reason as auxiliary topology.
+    _first_video_pts_sec: float | None = PrivateAttr(default=None)
 
 
 class EncoderCandidate(BaseModel):
@@ -316,8 +319,8 @@ class QAReport(BaseModel):
     ssim_mean: float | None = None
     duration_match: bool
     notes: list[str] = Field(default_factory=list)
-    # v0.2 — Content ID prediction & corpus matches (optional; only populated
-    # when build_report is invoked with predict_cid=True / vs_corpus=True).
+    # v0.2 legacy chunked self-similarity heuristic and corpus matches.  The
+    # compatibility field names are not calibrated external-system predictions.
     cid_predict_self: float | None = None
     weakest_chunk_sec: tuple[float, float] | None = None
     chunk_similarities: list[dict[str, float]] = Field(default_factory=list)

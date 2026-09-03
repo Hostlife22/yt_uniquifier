@@ -125,6 +125,7 @@ def _process_one(
         try:
             report = build_report(
                 src, out,
+                plan=plan,
                 samples=60 if fast_qa else 120,
                 run_vmaf=not fast_qa,
             )

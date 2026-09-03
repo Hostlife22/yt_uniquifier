@@ -14,6 +14,14 @@ the last tag.
 
 ### Fixed
 
+- Make QA correctness-first: reuse the plan media contract, validate first video PTS,
+  decode primary video/all audio to EOF, and report covered failures as `INVALID`.
+- Separate CLI/HTML correctness, perceptual-quality and visual-similarity axes so a
+  fingerprint diagnostic cannot override output validity or quality.
+- Derive all audio fingerprint diagnostics from one extraction per file and sample
+  five ordered start/middle/tail windows for media longer than 600 seconds.
+- Preserve every numeric VMAF result, fall back to SSIM only when VMAF is unavailable,
+  and stop substituting pHash similarity for missing perceptual-quality evidence.
 - Make automatic encoder selection quality-first with explicit
   `quality|balanced|speed` policies; reject an unavailable `--encoder` instead of
   silently falling back, stop advertising the incomplete Vulkan AV1 path, and bump

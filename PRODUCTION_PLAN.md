@@ -338,6 +338,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** missing audio/chapters/subtitles, shifted PTS, corrupt tail, HDR tags.
 - **Risk:** report schema update requires contract/CHANGELOG/RFC.
 - **Expected result:** report answers correctness, quality and similarity separately.
+- **Status:** partial — CLI/HTML now expose `INVALID` correctness, independent
+  quality and pHash-similarity axes; plan-aware reports reuse the strict stream/HDR/
+  timestamp contract and every report decodes primary video/all audio to EOF through
+  the shared runner. The stable `QAReport` shape was deliberately not changed without
+  an approved schema RFC; structured LUFS/true-peak/frame/sample fields remain open.
 
 ### 5.2 Metric validity/performance
 
@@ -352,6 +357,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   official SSCD model opt-in.
 - **Risk:** thresholds corpus-dependent; ship as calibrated diagnostics.
 - **Expected result:** metrics correlate with an engineering decision.
+- **Status:** partial — one audio analysis now derives all fingerprint diagnostics
+  from one extraction per file and uses five start/middle/tail windows for >600 s
+  sources. Low VMAF is no longer hidden by SSIM and pHash can no longer substitute
+  for unavailable quality evidence. Spatial/temporal registration, shared video
+  extraction/cache and SSCD coverage confidence remain open.
 
 ### 5.3 Calibration v2 within current engine
 
@@ -367,6 +377,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   replacement, real corpus study.
 - **Risk:** more compute; parallel/cached clips offset cost.
 - **Expected result:** reproducible tuned profile with explicit confidence/limitations.
+- **Status:** partial — current engine already fixes the seed/common random draws,
+  hashes the source clip, retries then aborts infrastructure failures, and brackets
+  after observing both sides; Phase 5 removed invalid quality fallback. Stratified
+  clips, durable scored-trial cache, plateau/confidence and non-monotone Pareto search
+  remain for a dedicated calibration-v2 change.
 
 ## Phase 6 — Production hardening
 

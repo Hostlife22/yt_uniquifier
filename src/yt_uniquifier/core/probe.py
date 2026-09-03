@@ -136,6 +136,21 @@ def _parse(raw: dict[str, Any], path: Path) -> SourceMeta:
         result,
         _parse_auxiliary_streams(streams, has_chapters=bool(chapters_raw)),
     )
+    first_primary_video_index = video[0].index if video else None
+    first_primary_frame = next(
+        (
+            frame for frame in frames
+            if frame.get("media_type") == "video"
+            and frame.get("stream_index") == first_primary_video_index
+        ),
+        None,
+    )
+    if first_primary_frame is not None:
+        timestamp = first_primary_frame.get(
+            "best_effort_timestamp_time",
+            first_primary_frame.get("pts_time"),
+        )
+        result._first_video_pts_sec = _to_float_or_none(timestamp)
     return result
 
 
@@ -443,6 +458,13 @@ def _to_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _to_float_or_none(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _norm(value: Any, default: str) -> str:

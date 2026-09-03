@@ -182,12 +182,9 @@ def write_json(report: QAReport, dest: Path) -> None: ...
 Один-страничный HTML, инлайн CSS, без внешних зависимостей. Секции:
 
 1. **Header**: input/output пути, размеры, длительности, container/codec.
-2. **Similarity verdict**: цветной банер (green/yellow/red) на основе порогов:
-   - pHash similarity > 0.97 → red (мало уникализации)
-   - 0.85 < pHash similarity ≤ 0.97 → yellow (нормально)
-   - pHash similarity ≤ 0.85 → red (слишком много изменений)
-   - VMAF < 85 → yellow (заметная просадка)
-   - VMAF < 75 → red (сильная просадка)
+2. **Correctness-first assessment**: `INVALID` для media-contract/decode failure;
+   quality (`PASS/WARNING/FAIL/UNAVAILABLE`) и visual similarity
+   (`LOW/MODERATE/HIGH/UNAVAILABLE`) показываются независимо.
 3. **Metrics table**: все числа с tooltip-объяснениями.
 4. **Plan section**: какие transforms применены, с параметрами.
 5. **Notes**: warnings (например «libvmaf недоступен, метрика пропущена»).

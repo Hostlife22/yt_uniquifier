@@ -140,13 +140,16 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 10. QA and calibration
 
 - [x] Orchestrator enforces stream/duration/HDR correctness before success.
-- [x] Known QA topology correctness failures cannot receive GREEN.
+- [x] Known QA topology/timestamp/decode correctness failures produce `INVALID`.
 - [ ] Raw and spatial/temporal registered quality metrics both reported.
-- [ ] No silent substitution of VMAF with SSIM/pHash under one threshold.
-- [ ] Audio fingerprint covers stratified full duration and preserves temporal ordering.
+- [x] No low VMAF substitution and no pHash-as-quality fallback; SSIM is used only
+      when VMAF is unavailable and retains its metric identity.
+- [x] Audio fingerprint uses ordered start/middle/tail windows for >600 s media and
+      derives all fields from one extraction per file; natural-film corpus pending.
 - [x] SSCD direction verified: higher cosine means higher similarity.
 - [ ] SSCD frame extraction is batched and reports temporal coverage/confidence.
-- [ ] Similarity diagnostics clearly separated from image/audio quality.
+- [x] CLI/HTML similarity diagnostics are clearly separated from correctness/quality;
+      structured JSON axis fields await an approved stable-schema RFC.
 - [ ] Corpus IDs/content cache survive move and invalidate on content change.
 - [x] Calibration fixed seed/common random numbers reproduce trials.
 - [ ] Calibration clips cover opening/middle/end plus representative motion/audio.

@@ -1,9 +1,8 @@
 """Local fingerprint corpus — facade over :mod:`corpus_db`.
 
-A small index of files the user has already uploaded (or is about to),
-so they can be checked against new outputs before a fresh upload —
-answering "did I just produce something Content ID will match against my
-own previous variant?"
+A small local index of owned or licensed files and their derivatives.  It supports
+self-collision/regression diagnostics without claiming to predict the result of an
+external rights-management system.
 
 Storage moved from a single ``index.json`` to a per-row SQLite table in
 v0.8.0 (see :mod:`corpus_db` for the rationale + schema). This module

@@ -48,6 +48,7 @@ class QaWorker(WorkerBase):
                 corpus = Corpus()
             report = build_report(
                 self.input_path, self.output_path,
+                plan=self.plan,
                 samples=self.samples,
                 run_vmaf=self.run_vmaf,
                 run_ssim=self.run_ssim,

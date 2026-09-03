@@ -13,7 +13,7 @@ from yt_uniquifier.core.qa.report import build_report, render_html, verdict, wri
 
 console = Console()
 
-_COLOR = {"green": "green", "yellow": "yellow", "red": "red"}
+_COLOR = {"invalid": "magenta", "green": "green", "yellow": "yellow", "red": "red"}
 
 
 def qa_cmd(
@@ -35,7 +35,7 @@ def qa_cmd(
     ),
     no_cid_predict: bool = typer.Option(
         False, "--no-cid-predict",
-        help="Skip the per-chunk Content ID prediction.",
+        help="Skip the legacy per-chunk similarity heuristic.",
     ),
     vs_corpus: bool = typer.Option(
         False, "--vs-corpus",
@@ -49,7 +49,7 @@ def qa_cmd(
     sscd: bool = typer.Option(
         False, "--sscd",
         help=(
-            "Add SSCD ML-grade copy-detection metric. Requires the `[ml]` "
+            "Add SSCD representation-similarity diagnostics. Requires the `[ml]` "
             "extra (torch + torchvision) and downloads ~80 MB of weights "
             "on first use. Adds ~5-10 s per call on CPU."
         ),
@@ -90,10 +90,14 @@ def qa_cmd(
 
     v = verdict(report)
     colour = _COLOR.get(v.band, "white")
-    console.print(f"[{colour}]Verdict: {v.band.upper()}[/{colour}]")
+    console.print(f"[{colour}]Overall output status: {v.band.upper()}[/{colour}]")
+    console.print(f"  Correctness:       {v.correctness.upper()}")
+    console.print(f"  Quality:           {v.quality.upper()}")
+    console.print(f"  Visual similarity: {v.visual_similarity.upper()} (diagnostic)")
     for reason in v.reasons:
         console.print(f"  • {reason}")
-    console.print(f"  pHash similarity: {report.phash_similarity:.4f}")
+    if report.phash_samples > 0:
+        console.print(f"  pHash similarity: {report.phash_similarity:.4f}")
     if report.vmaf_mean is not None:
         console.print(f"  VMAF mean:        {report.vmaf_mean:.2f}")
     if report.ssim_mean is not None:
@@ -101,19 +105,23 @@ def qa_cmd(
     if report.audio_fp_similarity is not None:
         console.print(f"  Audio FP:         {report.audio_fp_similarity:.4f}")
     if report.cid_predict_self is not None:
-        console.print(f"  CID self-match:   {report.cid_predict_self:.4f}")
+        console.print(f"  Legacy weighted similarity: {report.cid_predict_self:.4f}")
     if report.sscd_mean is not None:
         from yt_uniquifier.core.qa.sscd import sscd_band
 
         band = sscd_band(report.sscd_mean)
-        band_color = {"high": "red", "caution": "yellow", "clean": "green"}[band]
+        band_label = {
+            "high": "high similarity",
+            "caution": "moderate similarity",
+            "clean": "low similarity",
+        }[band]
         console.print(
-            f"  SSCD mean:        {report.sscd_mean:.4f} "
-            f"[{band_color}]({band})[/{band_color}]  "
+            f"  SSCD similarity:  {report.sscd_mean:.4f} "
+            f"({band_label})  "
             f"min: {report.sscd_min:.4f}"
             if report.sscd_min is not None
             else f"  SSCD mean:        {report.sscd_mean:.4f} "
-                 f"[{band_color}]({band})[/{band_color}]"
+                 f"({band_label})"
         )
     if report.corpus_matches:
         console.print(

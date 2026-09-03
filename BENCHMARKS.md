@@ -21,6 +21,10 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | Auto encoder policy, H.264 | `quality` → libx264; `speed` → H.264 VideoToolbox | Default follows production quality priority; hardware requires explicit policy/override |
 | `soft`, 30.183 s, policy smoke | libx264: 17.86 s, 752 frames; VideoToolbox: 9.36 s, 752 frames; both A/V start 0 | Selection policy changes throughput without losing decoded frames on this Mac |
 | Benchmark RSS sampler, 10.01 s fixture | 497,832 KiB peak, `psutil_process_tree_sum_100ms` | New result includes simultaneous Python/FFmpeg RSS; single run, not a regression baseline |
+| Correctness-first QA, video-only candidate | real MP4 missing source audio → `INVALID`; full candidate decode passed | Sampled visual similarity cannot hide missing topology |
+| Chromaprint dependency repair | `fpcalc 1.6.1`; 12 s identity audio similarity 1.0/Hamming 0 | Optional audio diagnostics operational on this Mac |
+| Long-form fingerprint smoke, 620 s AAC | five ordered windows, 600 s total coverage, identity 1.0; 3.73 s wall | Start/middle/tail coverage replaces first-600-only report path |
+| Full local quality gate after Phase 5 | 1466 passed, 2 expected skipped; Ruff + strict mypy pass; 22:13 | QA changes did not regress the full Mac suite or stable contracts |
 
 Natural-content viewing/listening, NFS cross-host, NVENC/QSV/AMF и YouTube
 ingestion/transcode остаются `NOT VERIFIED`.
@@ -75,7 +79,8 @@ source
 
 - macOS 26.6.2 x86_64, 12 logical CPUs, 32 GiB RAM.
 - Homebrew FFmpeg-full 9.0.1 with `zscale`, `rubberband`, `libvmaf`, x264/x265,
-  SVT-AV1 and VideoToolbox; Python 3.12 `.venv`, package 1.4.0 candidate.
+  SVT-AV1 and VideoToolbox; Chromaprint/fpcalc 1.6.1; Python 3.12 `.venv`,
+  package 1.4.0 candidate.
 - Available locally: libx264, libx265, libsvtav1, libvmaf,
   H264/HEVC VideoToolbox.
 - Installed optional stacks: GUI/QtCharts, scene/OpenCV, Torch 2.2.2 + torchvision

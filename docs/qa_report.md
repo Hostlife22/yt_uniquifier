@@ -14,13 +14,13 @@ input/output pair without re-encoding.
 
 ## What's measured
 
-For one (input, output) pair the report aggregates seven independent
-metric families. Each one is optional and degrades gracefully if its
-backing binary is missing — the QA report just notes which ones it
-couldn't compute.
+For one (input, output) pair the report evaluates three independent axes:
+media correctness, perceptual quality and diagnostic similarity. Optional
+metric backends degrade gracefully, but a missing/corrupt media stream is a
+correctness failure and produces `INVALID`, never a normal metric verdict.
 
 > **New since v0.8.0**: optional SSCD semantic-similarity scores
-> (`yt-uniq run --metric sscd` or `yt-uniq qa --metric sscd`,
+> (`yt-uniq qa --sscd`,
 > requires `[ml]` extra) and target-VMAF bounded-retry events for
 > profiles that opt into `target_vmaf`. See the SSCD + target-VMAF
 > subsections below.
@@ -32,6 +32,13 @@ couldn't compute.
 | `input_md5`, `output_md5` | streaming md5 (4 MB chunks) | exact byte identity (different for any successful run — only matches on `--new-variant=false` resume of the exact same plan) |
 | `input_size_bytes`, `output_size_bytes` | filesystem | sanity check on bitrate budget |
 | `input_duration_sec`, `output_duration_sec` | ffprobe | should match within ±0.5 s; `duration_match` is the bool |
+
+Before hashes or sampled metrics, QA probes both files. Automatic run/batch/GUI
+reports also receive the existing `Plan` and reuse the final media contract for
+stream topology, timestamp and HDR/SDR checks. Standalone QA applies conservative
+pair checks. The candidate's primary video and all audio streams are then decoded
+to EOF with FFmpeg `-xerror -err_detect explode`, so a corrupt unsampled tail becomes
+`correctness: full output decode failed` in `notes[]` and the status is `INVALID`.
 
 ### Visual similarity
 
@@ -50,6 +57,11 @@ couldn't compute.
 | `audio_fp_similarity` | chromaprint Jaccard over uint32 sub-fingerprints | 0..1 | **strict set-equality** check; see warning below |
 | **`audio_fp_hamming_per_frame`** | chromaprint XOR + popcount, paired frames, mean | 0..32 bits | internal bit-level distance diagnostic |
 | **`audio_fp_match_confidence`** | `1 - hamming_per_frame / 32` | 0..1 | legacy normalized similarity heuristic; not calibrated confidence |
+
+All three fingerprint fields are derived from one fingerprint extraction per file,
+instead of six `fpcalc` processes per report. For sources longer than 600 seconds,
+five 120-second windows cover the start, middle and tail and are concatenated before
+fingerprinting; `notes[]` records that stratified coverage was used.
 
 > **About `audio_fp_similarity`.** This is Jaccard
 > (`|A ∩ B| / |A ∪ B|`) over the 32-bit chromaprint sub-fingerprint
@@ -76,8 +88,7 @@ them only relative to a pinned source/corpus and tool version:
 
 ### SSCD semantic similarity (v0.8.0 R4, opt-in)
 
-Populated only when `yt-uniq run --metric sscd` (or `yt-uniq qa
---metric sscd`) is passed. Requires the `[ml]` extra (torch +
+Populated only when `yt-uniq qa --sscd` is passed. Requires the `[ml]` extra (torch +
 transformers). The first run downloads ~200 MB of model weights to
 `~/.cache/yt_uniquifier/models/`; subsequent runs use the cache.
 Full background in [`docs/sscd.md`](./sscd.md).
@@ -130,25 +141,26 @@ It is a project-specific convex combination useful for regression comparisons an
 self-collision diagnostics on owned or licensed derivatives. Do not use it as a
 production pass/fail gate without corpus-specific validation.
 
-### Notes + verdict
+### Notes + assessment
 
 | Field | Meaning |
 |---|---|
 | `notes[]` | warnings for unavailable backends (e.g. "fpcalc not in PATH") |
 | `duration_match` | bool — input/output durations within ±0.5 s |
 
-The HTML report shows a banner colour-coded **green / yellow / red** based
-on a rule of thumb:
+The CLI and HTML show independent axes:
 
-- **green**: phash similarity in (0.50, 0.85] and VMAF ≥ 85 and SSIM ≥ 0.90
-- **yellow**: phash in (0.85, 0.97] or VMAF in (75, 85) or SSIM < 0.90
-- **red**: phash > 0.97 (barely unique) or phash < 0.50 (unrecognisable)
-       or VMAF < 75
+- **Correctness** — `VALID` or `INVALID`. Topology, duration, first video PTS,
+  declared color/HDR contract and complete decode take precedence.
+- **Quality** — `PASS`, `WARNING`, `FAIL` or `UNAVAILABLE`, based on VMAF/SSIM.
+- **Visual similarity** — `LOW`, `MODERATE`, `HIGH` or `UNAVAILABLE`, based on
+  sampled pHash and explicitly diagnostic.
 
-This is a legacy UI heuristic, not a production acceptance verdict: it mixes
-similarity and quality and uses raw, potentially unregistered metrics. The mandatory
-media contract remains authoritative; Phase 5 will separate the banner into
-correctness, registered quality and diagnostic similarity states.
+The overall output status is `INVALID` on a correctness failure, otherwise
+green/yellow/red follows quality evidence only. Similarity never compensates for bad
+quality and never turns a correct, high-quality output into a failure. The existing
+`QAReport` JSON schema remains additive-compatible; correctness details are carried
+in `notes[]` until a separately approved schema RFC adds a structured block.
 
 ## Acceptance targets
 

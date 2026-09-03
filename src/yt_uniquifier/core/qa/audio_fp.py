@@ -15,7 +15,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
 from .utils import _decode_chromaprint  # noqa: TID252
+
+_MAX_FINGERPRINT_SEC = 600.0
+_STRATIFIED_WINDOWS = 5
 
 
 @dataclass(frozen=True)
@@ -65,46 +70,101 @@ def _run_fpcalc(path: Path) -> dict[str, object] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def compare(input_path: Path, output_path: Path) -> AudioFPResult:
-    if not fpcalc_available():
-        return AudioFPResult(
-            available=False,
-            similarity=None,
-            note="fpcalc not in PATH (install chromaprint to enable)",
-        )
-    a = _run_fpcalc(input_path)
-    b = _run_fpcalc(output_path)
-    if a is None or b is None:
-        return AudioFPResult(
-            available=False,
-            similarity=None,
-            note="fpcalc invocation failed for one of the inputs",
-        )
-    try:
-        ai = _decode_chromaprint(str(a["fingerprint"]))
-        bi = _decode_chromaprint(str(b["fingerprint"]))
-    except (KeyError, ValueError):
-        return AudioFPResult(
-            available=False, similarity=None, note="malformed fpcalc output"
-        )
-    if not ai or not bi:
-        # An empty subfingerprint set is "no data", not "fully divergent".
-        # The previous return of similarity=0.0 with available=True caused
-        # the QA report to display a maximum-divergence reading even when
-        # fpcalc emitted an empty fingerprint (e.g. silent or unsupported
-        # audio).
-        return AudioFPResult(
-            available=False,
-            similarity=None,
-            note="fpcalc returned an empty fingerprint (silent / unsupported audio)",
-        )
+def _stratified_windows(
+    duration_sec: float,
+    *,
+    total_sec: float = _MAX_FINGERPRINT_SEC,
+    count: int = _STRATIFIED_WINDOWS,
+) -> list[tuple[float, float]]:
+    """Return evenly-spaced windows spanning start, middle and tail."""
+    if duration_sec <= 0:
+        return []
+    if duration_sec <= total_sec or count <= 1:
+        return [(0.0, duration_sec)]
+    window_sec = total_sec / count
+    last_start = duration_sec - window_sec
+    return [
+        (last_start * index / (count - 1), window_sec)
+        for index in range(count)
+    ]
 
-    set_a, set_b = set(ai), set(bi)
-    union = len(set_a | set_b)
-    if union == 0:
-        return AudioFPResult(available=True, similarity=0.0, note=None)
-    jaccard = len(set_a & set_b) / union
-    return AudioFPResult(available=True, similarity=jaccard, note=None)
+
+def _run_fpcalc_stratified(
+    path: Path,
+    duration_sec: float,
+) -> dict[str, object] | None:
+    """Fingerprint one concatenated PCM stream sampled across a long file."""
+    windows = _stratified_windows(duration_sec)
+    if len(windows) <= 1:
+        return _run_fpcalc(path)
+    chains = [
+        f"[0:a:0]atrim=start={start:.6f}:duration={length:.6f},"
+        f"asetpts=PTS-STARTPTS[a{index}]"
+        for index, (start, length) in enumerate(windows)
+    ]
+    inputs = "".join(f"[a{index}]" for index in range(len(windows)))
+    graph = ";".join([*chains, f"{inputs}concat=n={len(windows)}:v=0:a=1[out]"])
+    ffmpeg_cmd = [
+        ffmpeg_bin(),
+        "-hide_banner",
+        "-nostdin",
+        "-v", "error",
+        "-i", str(path),
+        "-filter_complex", graph,
+        "-map", "[out]",
+        "-ac", "2",
+        "-ar", "11025",
+        "-f", "s16le",
+        "pipe:1",
+    ]
+    fpcalc_cmd = [
+        shutil.which("fpcalc") or "fpcalc",
+        "-format", "s16le",
+        "-rate", "11025",
+        "-channels", "2",
+        "-json",
+        "-length", str(int(_MAX_FINGERPRINT_SEC)),
+        "-",
+    ]
+    ffmpeg_proc: subprocess.Popen[bytes] | None = None
+    try:
+        ffmpeg_proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            # Error details are intentionally collapsed into the caller's
+            # availability note.  A separate unread PIPE can deadlock if a
+            # damaged long input emits enough decoder diagnostics.
+            stderr=subprocess.DEVNULL,
+        )
+        if ffmpeg_proc.stdout is None:
+            ffmpeg_proc.kill()
+            ffmpeg_proc.wait()
+            return None
+        fpcalc_proc = subprocess.run(
+            fpcalc_cmd,
+            stdin=ffmpeg_proc.stdout,
+            capture_output=True,
+            timeout=180,
+            check=False,
+        )
+        ffmpeg_proc.stdout.close()
+        ffmpeg_rc = ffmpeg_proc.wait(timeout=180)
+    except (OSError, subprocess.TimeoutExpired):
+        if ffmpeg_proc is not None and ffmpeg_proc.poll() is None:
+            ffmpeg_proc.kill()
+            ffmpeg_proc.wait()
+        return None
+    if ffmpeg_rc != 0 or fpcalc_proc.returncode != 0:
+        return None
+    try:
+        parsed = json.loads(fpcalc_proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def compare(input_path: Path, output_path: Path) -> AudioFPResult:
+    return analyze_pair(input_path, output_path).similarity
 
 
 def _hamming_per_frame(a: list[int], b: list[int]) -> float:
@@ -137,6 +197,99 @@ class AudioFPVariance:
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class AudioFPPairAnalysis:
+    """All legacy fingerprint diagnostics derived from one extraction per file."""
+
+    similarity: AudioFPResult
+    hamming: AudioFPHamming
+    variance: AudioFPVariance
+    coverage_note: str | None = None
+
+
+def _unavailable_pair(note: str) -> AudioFPPairAnalysis:
+    return AudioFPPairAnalysis(
+        similarity=AudioFPResult(False, None, note),
+        hamming=AudioFPHamming(False, None, None, note),
+        variance=AudioFPVariance(False, None, None, note),
+    )
+
+
+def analyze_pair(
+    input_path: Path,
+    output_path: Path,
+    *,
+    n_windows: int = 5,
+    input_duration_sec: float | None = None,
+    output_duration_sec: float | None = None,
+) -> AudioFPPairAnalysis:
+    """Extract two fingerprints once, then derive every diagnostic in memory."""
+    if not fpcalc_available():
+        return _unavailable_pair("fpcalc not in PATH (install chromaprint to enable)")
+    input_is_long = (
+        input_duration_sec is not None and input_duration_sec > _MAX_FINGERPRINT_SEC
+    )
+    output_is_long = (
+        output_duration_sec is not None and output_duration_sec > _MAX_FINGERPRINT_SEC
+    )
+    a = (
+        _run_fpcalc_stratified(input_path, input_duration_sec)
+        if input_is_long and input_duration_sec is not None
+        else _run_fpcalc(input_path)
+    )
+    b = (
+        _run_fpcalc_stratified(output_path, output_duration_sec)
+        if output_is_long and output_duration_sec is not None
+        else _run_fpcalc(output_path)
+    )
+    if a is None or b is None:
+        return _unavailable_pair("fpcalc invocation failed for one of the inputs")
+    try:
+        ai = _decode_chromaprint(str(a["fingerprint"]))
+        bi = _decode_chromaprint(str(b["fingerprint"]))
+    except (KeyError, ValueError):
+        return _unavailable_pair("malformed fpcalc output")
+    if not ai or not bi:
+        return _unavailable_pair(
+            "fpcalc returned an empty fingerprint (silent / unsupported audio)"
+        )
+
+    set_a, set_b = set(ai), set(bi)
+    union = len(set_a | set_b)
+    similarity = len(set_a & set_b) / union if union else 0.0
+    mean_hamming = _hamming_per_frame(ai, bi)
+    hamming = AudioFPHamming(
+        available=True,
+        hamming_per_frame=mean_hamming,
+        match_confidence=max(0.0, min(1.0, 1.0 - mean_hamming / 32.0)),
+    )
+
+    n = min(len(ai), len(bi))
+    if n < n_windows or n_windows < 2:
+        means = [mean_hamming]
+    else:
+        window_size = n // n_windows
+        means = []
+        for window in range(n_windows):
+            start = window * window_size
+            end = (window + 1) * window_size if window < n_windows - 1 else n
+            means.append(_hamming_per_frame(ai[start:end], bi[start:end]))
+    mean_of_means = sum(means) / len(means)
+    variance = (
+        sum((value - mean_of_means) ** 2 for value in means) / len(means)
+    ) ** 0.5
+    return AudioFPPairAnalysis(
+        similarity=AudioFPResult(True, similarity, None),
+        hamming=hamming,
+        variance=AudioFPVariance(True, means, variance),
+        coverage_note=(
+            "stratified 600-second fingerprint coverage across the full timeline"
+            if input_is_long or output_is_long
+            else None
+        ),
+    )
+
+
 def compare_hamming_per_window(
     input_path: Path, output_path: Path, n_windows: int = 5,
 ) -> AudioFPVariance:
@@ -146,53 +299,11 @@ def compare_hamming_per_window(
     stdev across chunks. With windowed audio that varies across the
     timeline, stdev grows; with uniform audio it stays near 0.
     """
-    if not fpcalc_available():
-        return AudioFPVariance(
-            available=False, hamming_per_window=None,
-            variance_between_windows=None,
-            note="fpcalc not in PATH (install chromaprint to enable)",
-        )
-    a = _run_fpcalc(input_path)
-    b = _run_fpcalc(output_path)
-    if a is None or b is None:
-        return AudioFPVariance(
-            available=False, hamming_per_window=None,
-            variance_between_windows=None,
-            note="fpcalc invocation failed for one of the inputs",
-        )
-    try:
-        ai = _decode_chromaprint(str(a["fingerprint"]))
-        bi = _decode_chromaprint(str(b["fingerprint"]))
-    except (KeyError, ValueError):
-        return AudioFPVariance(
-            available=False, hamming_per_window=None,
-            variance_between_windows=None,
-            note="malformed fpcalc output",
-        )
-    n = min(len(ai), len(bi))
-    if n < n_windows or n_windows < 2:
-        return AudioFPVariance(
-            available=True, hamming_per_window=[0.0],
-            variance_between_windows=0.0,
-        )
-    window_size = n // n_windows
-    means: list[float] = []
-    for w in range(n_windows):
-        start = w * window_size
-        end = (w + 1) * window_size if w < n_windows - 1 else n
-        chunk_a = ai[start:end]
-        chunk_b = bi[start:end]
-        means.append(_hamming_per_frame(chunk_a, chunk_b))
-    # Population stdev — simple measure of spread.
-    mean_of_means = sum(means) / len(means)
-    variance = (
-        sum((m - mean_of_means) ** 2 for m in means) / len(means)
-    ) ** 0.5
-    return AudioFPVariance(
-        available=True,
-        hamming_per_window=means,
-        variance_between_windows=variance,
-    )
+    return analyze_pair(
+        input_path,
+        output_path,
+        n_windows=n_windows,
+    ).variance
 
 
 def compare_hamming(input_path: Path, output_path: Path) -> AudioFPHamming:
@@ -202,48 +313,4 @@ def compare_hamming(input_path: Path, output_path: Path) -> AudioFPHamming:
     `match_confidence` is `1 - mean_hamming / 32`, in [0, 1]: higher means
     closer to the input fingerprint, i.e. *worse* for CID divergence.
     """
-    if not fpcalc_available():
-        return AudioFPHamming(
-            available=False,
-            hamming_per_frame=None,
-            match_confidence=None,
-            note="fpcalc not in PATH (install chromaprint to enable)",
-        )
-    a = _run_fpcalc(input_path)
-    b = _run_fpcalc(output_path)
-    if a is None or b is None:
-        return AudioFPHamming(
-            available=False,
-            hamming_per_frame=None,
-            match_confidence=None,
-            note="fpcalc invocation failed for one of the inputs",
-        )
-    try:
-        ai = _decode_chromaprint(str(a["fingerprint"]))
-        bi = _decode_chromaprint(str(b["fingerprint"]))
-    except (KeyError, ValueError):
-        return AudioFPHamming(
-            available=False,
-            hamming_per_frame=None,
-            match_confidence=None,
-            note="malformed fpcalc output",
-        )
-    if not ai or not bi:
-        # Empty subfingerprint set = "no data", not "perfect match". The
-        # previous return of match_confidence=1.0 with available=True fed
-        # a spurious "audio fully preserved" signal into the calibration
-        # loop, which then scaled intensity in the wrong direction.
-        # Mirror the empty-fingerprint handling in `compare()`.
-        return AudioFPHamming(
-            available=False,
-            hamming_per_frame=None,
-            match_confidence=None,
-            note="fpcalc returned an empty fingerprint (silent / unsupported audio)",
-        )
-    mean = _hamming_per_frame(ai, bi)
-    return AudioFPHamming(
-        available=True,
-        hamming_per_frame=mean,
-        match_confidence=max(0.0, min(1.0, 1.0 - mean / 32.0)),
-        note=None,
-    )
+    return analyze_pair(input_path, output_path).hamming
