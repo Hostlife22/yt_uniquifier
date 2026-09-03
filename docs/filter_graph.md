@@ -18,7 +18,7 @@ pipeline can splice fragments together without coordination between transforms.
 Builders that opt into per-run variability take an optional `rng=random.Random`
 argument seeded from `Plan.run_seed`. Same seed → identical filter graph.
 
-## Registered transforms (18)
+## Registered transforms (21)
 
 | ID | Kind | Notes |
 |---|---|---|
@@ -31,6 +31,9 @@ argument seeded from `Plan.run_seed`. Same seed → identical filter graph.
 | `video.speed` | video | `setpts=PTS/rate` |
 | `video.temporal_jitter` | video | per-period blackout + drop on rng-randomized phase (Fojcik 2025) |
 | `video.tonemap_sdr` | video | zscale linearize → tonemap (hable/reinhard/mobius/aces) → SDR |
+| `video.fit_aspect` | video | crop/letterbox into a target aspect ratio and size |
+| `video.subpixel_sharpen` | video | mild luma-only unsharp masking |
+| `video.subtitles` | video | opt-in SRT burn-in with path/capability validation |
 | `audio.pitch_tempo` | audio | `rubberband` (formant-preserving) or `asetrate`+`atempo` cascade |
 | `audio.eq` | audio | parametric `equalizer` bands |
 | `audio.resample` | audio | `aresample` to and from an unusual intermediate SR |

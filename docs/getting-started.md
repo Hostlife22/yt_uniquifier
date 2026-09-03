@@ -83,7 +83,7 @@ starts.
         -v $PWD/input:/data/input:ro \
         -v $PWD/output:/data/output \
         -v $PWD/work:/data/work \
-        yt-uniquifier:0.9.0
+        yt-uniquifier:1.4.0
     ```
 
     Open http://127.0.0.1:8080 and fill in the form. Full guide

@@ -23,7 +23,10 @@ from yt_uniquifier.core.checkpoint import CheckpointStore
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.logging_config import get_logger
-from yt_uniquifier.core.media_validation import require_output_contract
+from yt_uniquifier.core.media_validation import (
+    allowed_output_suffixes,
+    require_output_contract,
+)
 from yt_uniquifier.core.metadata import build_metadata_args
 from yt_uniquifier.core.models import Plan, Profile, Segment
 from yt_uniquifier.core.notifications import (
@@ -372,11 +375,7 @@ def _run_full_impl(
     cancel_token: CancelToken | None,
     pause_token: PauseToken | None = None,
 ) -> RunSummary:
-    expected_suffixes = {
-        "mp4": {".mp4", ".m4v"},
-        "mov": {".mov"},
-        "mkv": {".mkv"},
-    }[plan.profile.output_container]
+    expected_suffixes = allowed_output_suffixes(plan.profile.output_container)
     if options.output.suffix.lower() not in expected_suffixes:
         expected = ", ".join(sorted(expected_suffixes))
         raise PipelineError(

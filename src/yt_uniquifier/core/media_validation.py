@@ -7,11 +7,22 @@ from pathlib import Path
 
 from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream, get_auxiliary_streams
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.models import Plan, SourceMeta
+from yt_uniquifier.core.models import Container, Plan, SourceMeta
 from yt_uniquifier.core.pipeline import expected_output_duration
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.transforms.hdr_wrap import is_tonemap_active
+
+_OUTPUT_SUFFIXES: dict[Container, frozenset[str]] = {
+    "mp4": frozenset({".mp4", ".m4v"}),
+    "mov": frozenset({".mov"}),
+    "mkv": frozenset({".mkv"}),
+}
+
+
+def allowed_output_suffixes(container: Container) -> frozenset[str]:
+    """Return filename suffixes compatible with a profile container."""
+    return _OUTPUT_SUFFIXES[container]
 
 
 @dataclass(frozen=True)

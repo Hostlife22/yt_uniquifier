@@ -43,7 +43,7 @@ Three layers, with the `Plan` (pydantic) as the contract between them.
 | `core/models.py` | All pydantic dataclasses: SourceMeta, Plan, Profile, Segment, QAReport |
 | `core/probe.py` | `probe(path) -> SourceMeta` via single ffprobe call |
 | `core/encoder.py` | `detect_encoders()` with real test-run + cache; `pick_encoder()`; per-candidate `max_parallel` cap |
-| `core/transforms/` | **19 built-in transforms** registered at import (10 video, 9 audio — `video_geom.py` registers `crop_resize`, `rotate`, `mirror`); third-party plugins discovered via `yt_uniquifier.transforms` entry-points (v0.8.0 R1, see [plugins.md](./plugins.md)); see [filter_graph.md](./filter_graph.md) |
+| `core/transforms/` | **21 built-in transforms** registered at import (12 video, 9 audio — `video_geom.py` registers `crop_resize`, `rotate`, `mirror`); third-party plugins discovered via `yt_uniquifier.transforms` entry-points (v0.8.0 R1, see [plugins.md](./plugins.md)); see [filter_graph.md](./filter_graph.md) |
 | `core/transforms/hdr_wrap.py` | zscale linear-light roundtrip for color transforms over HDR |
 | `core/pipeline.py` | `FilterGraph.build()` + `build_video_segment_command` (+ `_fused`) + `build_main_audio_command` + `compute_plan_hash`; v0.8.0 R5 adds `crf_override` to support per-segment target-VMAF retries |
 | `core/runner.py` | subprocess wrapper with `-progress pipe:1`, RunEvent stream, CancelToken; v0.8.0 R5 adds `target_vmaf` / `target_vmaf_failed` event kinds |

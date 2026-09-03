@@ -1,4 +1,4 @@
-# Web UI & Docker (F13 / v0.9.0 R4)
+# Web UI & Docker
 
 A headless FastAPI server that drives the same orchestrator the
 CLI and the desktop GUI use. The web layer is a thin shell —
@@ -28,7 +28,7 @@ CLI flags (env-var equivalents in parentheses):
 |------------------|--------------------------|-------------------------------|
 | `--host`         | `YT_UNIQ_WEB_HOST`       | `127.0.0.1`                   |
 | `--port`         | `YT_UNIQ_WEB_PORT`       | `8080`                        |
-| `--work-dir`     | `YT_UNIQ_WEB_WORK_DIR`   | `/tmp/yt-uniquifier-web`      |
+| `--work-dir`     | `YT_UNIQ_WEB_WORK_DIR`   | `~/.cache/yt_uniquifier/web`  |
 | `--output-dir`   | `YT_UNIQ_WEB_OUTPUT_DIR` | `./output`                    |
 | `--profile-dir`  | `YT_UNIQ_WEB_PROFILE_DIR`| per-user XDG config           |
 | `--input-root`   | `YT_UNIQ_WEB_INPUT_ROOT` | current working directory     |
@@ -55,7 +55,7 @@ The image deliberately does **not** install the `[ml]` extra
 container, bake your own:
 
 ```dockerfile
-FROM yt-uniquifier:0.9.0
+FROM yt-uniquifier:1.4.0
 USER root
 RUN pip install --no-cache-dir "yt-uniquifier[ml]"
 USER ytuniq
@@ -64,7 +64,7 @@ USER ytuniq
 ### Build
 
 ```bash
-docker build -t yt-uniquifier:0.9.0 .
+docker build -t yt-uniquifier:1.4.0 .
 ```
 
 ### Run (LAN trust)
@@ -74,7 +74,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
     -v $PWD/input:/data/input:ro \
     -v $PWD/output:/data/output \
     -v $PWD/work:/data/work \
-    yt-uniquifier:0.9.0
+    yt-uniquifier:1.4.0
 ```
 
 ### Run (with basic auth)
@@ -85,7 +85,7 @@ docker run --rm -p 0.0.0.0:8080:8080 \
     -e YT_UNIQ_WEB_PASS=hunter2 \
     -v $PWD/input:/data/input:ro \
     -v $PWD/output:/data/output \
-    yt-uniquifier:0.9.0
+    yt-uniquifier:1.4.0
 ```
 
 ### docker-compose
@@ -139,6 +139,21 @@ checkpoint data remains in its per-run work directory for operator inspection.
 Only run IDs, status, redacted error class, timestamps, and output basenames are
 persisted — source/profile paths and full exception messages are not written to
 this web registry.
+
+The default output filename uses the selected profile's container (`.mp4`, `.mkv`,
+or `.mov`). An explicit filename with an incompatible suffix is rejected before a
+background job starts. Active final outputs are reserved atomically in
+`<output-dir>/.yt_uniquifier-reservations/`, so separate server processes sharing a
+local filesystem return **409** instead of writing the same file. The exact owner
+releases its reservation at terminal state; a dead owner on the same host can be
+recovered. Foreign-host stale records fail closed because remote process liveness
+cannot be proven. Shared/NFS deployments must qualify atomic-create and recovery
+semantics for their filesystem; that matrix is currently **NOT VERIFIED**.
+
+`max_concurrent_runs` is enforced per server process. A deployment with multiple
+processes does not yet have process-global CPU/GPU/disk admission quotas; use one
+application process or enforce those quotas externally until a global scheduler is
+qualified.
 
 ## What's *not* on the web yet
 

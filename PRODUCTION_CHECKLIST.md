@@ -171,18 +171,20 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Global bounded job scheduler and CPU/GPU/disk quotas enabled; web admission and
       in-process CPU/vendor semaphores are complete, cross-process/device locks and
       disk reservation remain open.
-- [x] Duplicate active output reservation returns conflict within one web process.
+- [x] Duplicate active output reservation returns conflict across web processes sharing
+      a local filesystem; exact-owner release and dead same-host recovery are tested.
 - [x] Run state persists across restart and completed records have TTL/count pruning.
 - [x] SSE full queue cannot block processing finalizer.
 - [ ] Web and distributed worker run the same mandatory final QA/correctness gates.
 - [x] Two worker processes on one host receive independent host+PID+nonce liveness IDs.
 - [ ] Reaped job retains stable work/resume identity on another host.
-- [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap.
+- [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap and
+      final-output reservation; foreign-host stale owners intentionally fail closed.
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass; CI coverage gate pending
-      for the post-v1.4.0 commit.
+- [x] Ruff, strict mypy and full local test gate pass (`1497 passed`, `2 skipped`);
+      CI coverage gate remains required for the new commit.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
@@ -199,7 +201,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1488 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1497 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -211,12 +213,12 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1488 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1497 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
-- [x] Strict mypy: passed (156 source files).
+- [x] Strict mypy: passed (157 source files).
 - [x] All 16 shipped profiles load.
 - [x] Real Calibration v2 CLI: stratified probe, 3 encode/quality/similarity trials,
       strict media contract, tuned YAML and second-run scored-cache reuse passed.

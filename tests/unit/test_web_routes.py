@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -295,6 +296,159 @@ def test_run_lifecycle_streams_events_and_completes(
     r2 = client.get(f"/api/run/{run_id}/status")
     assert r2.status_code == 200
     assert r2.json()["status"] in {"completed", "running"}
+
+
+def test_two_app_instances_cannot_reserve_the_same_output(
+    web_dirs: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The output reservation must be shared across web processes."""
+    work, output, profiles = web_dirs
+    source_path = tmp_path / "shared-input.mp4"
+    source_path.touch()
+    profile_path = profiles / "shared.yaml"
+    profile_path.write_text("name: shared\ntransforms: []\n", encoding="utf-8")
+
+    from yt_uniquifier.core.models import (
+        EncoderCandidate,
+        HDRInfo,
+        Plan,
+        Profile,
+        SourceMeta,
+        VideoStream,
+    )
+    from yt_uniquifier.core.orchestrator import RunSummary
+    from yt_uniquifier.web.routes import run as run_routes
+
+    profile = Profile(name="shared", transforms=[])
+    source = SourceMeta(
+        path=source_path,
+        container="mp4",
+        duration_sec=1.0,
+        size_bytes=1,
+        video=[VideoStream(
+            index=0,
+            codec="h264",
+            width=64,
+            height=64,
+            fps=24.0,
+            duration_sec=1.0,
+            pix_fmt="yuv420p",
+            color=HDRInfo(is_hdr=False),
+        )],
+        audio=[],
+        subtitle=[],
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        ),
+        plan_hash="shared-output-plan",
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run_full(plan, options, **kwargs):  # type: ignore[no-untyped-def]
+        del kwargs
+        started.set()
+        release.wait(timeout=5)
+        return RunSummary(
+            output=options.output,
+            plan=plan,
+            segments_done=0,
+            preflight_findings=[],
+        )
+
+    monkeypatch.setattr(run_routes, "load_profile", lambda path: profile)
+    monkeypatch.setattr(run_routes, "build_plan", lambda *args: plan)
+    monkeypatch.setattr(run_routes, "run_full", blocking_run_full)
+
+    first = TestClient(build_app(WebConfig(
+        work_dir=work / "instance-a",
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+    )))
+    second = TestClient(build_app(WebConfig(
+        work_dir=work / "instance-b",
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+    )))
+    payload = {
+        "input_path": str(source_path),
+        "profile_path": str(profile_path),
+        "output_name": "shared.mp4",
+    }
+
+    try:
+        first_response = first.post("/api/run", json=payload)
+        assert first_response.status_code == 200
+        first_run_id = first_response.json()["run_id"]
+        assert started.wait(timeout=2)
+
+        second_response = second.post("/api/run", json=payload)
+        assert second_response.status_code == 409
+        assert "reserved" in second_response.json()["detail"]
+    finally:
+        release.set()
+
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = first.get(f"/api/run/{first_run_id}/status").json()["status"]
+        if status == "completed":
+            break
+        time.sleep(0.01)
+    assert status == "completed"
+    retry_response = second.post("/api/run", json=payload)
+    assert retry_response.status_code == 200
+
+
+def test_run_uses_profile_container_and_rejects_conflicting_suffix(
+    web_dirs: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    work, output, profiles = web_dirs
+    source_path = tmp_path / "movie.mp4"
+    source_path.touch()
+    profile_path = profiles / "mkv.yaml"
+    profile_path.write_text(
+        "name: archive\noutput_container: mkv\ntransforms: []\n",
+        encoding="utf-8",
+    )
+
+    from yt_uniquifier.core.models import Profile
+    from yt_uniquifier.web.routes import run as run_routes
+
+    profile = Profile(name="archive", output_container="mkv", transforms=[])
+    monkeypatch.setattr(run_routes, "load_profile", lambda path: profile)
+    monkeypatch.setattr(run_routes, "build_plan", lambda *args: object())
+    monkeypatch.setattr(run_routes, "run_full", lambda *args, **kwargs: None)
+    client = TestClient(build_app(WebConfig(
+        work_dir=work,
+        output_dir=output,
+        profile_dir=profiles,
+        input_root=tmp_path,
+    )))
+    base_payload = {
+        "input_path": str(source_path),
+        "profile_path": str(profile_path),
+    }
+
+    default_response = client.post("/api/run", json=base_payload)
+    assert default_response.status_code == 200
+    assert default_response.json()["output_basename"] == "movie__archive.mkv"
+
+    wrong_response = client.post(
+        "/api/run",
+        json={**base_payload, "output_name": "wrong.mp4"},
+    )
+    assert wrong_response.status_code == 400
+    assert "container" in wrong_response.json()["detail"]
 
 
 def test_run_rejects_missing_input(client: TestClient, tmp_path: Path) -> None:

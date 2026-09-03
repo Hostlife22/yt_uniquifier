@@ -411,16 +411,25 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 ### 6.2 Web/distributed lifecycle
 
 - **Files:** web state/routes/security, queue leasing, worker.
-- **Current behavior:** in-memory unbounded web jobs; per-host queue heartbeat.
-- **Problem:** races/leaks/weak failover.
-- **Proposed behavior:** persistent job store, unique output reservation, worker UUID
-  leases/fencing, same QA gates in every frontend.
-- **Implementation:** SQLite job metadata, TTL cleanup, global scheduler, job content ID,
-  per-job heartbeat, stable work path.
+- **Current behavior:** web terminal state is persisted in a bounded atomic JSON store;
+  each final output has an owner-only atomic reservation shared by processes using the
+  same filesystem. Queue workers use process-unique leases and fenced staged output.
+- **Problem:** process-global admission/device/disk quotas, NFS qualification,
+  recoverable distributed publication and cross-frontend QA parity remain open.
+- **Proposed behavior:** preserve the current stores and reservation boundary; add a
+  global scheduler only when deployment requirements prove one is needed, qualify
+  shared-filesystem semantics, and use the same QA gates in every frontend.
+- **Implementation:** existing TTL/count pruning plus `O_CREAT|O_EXCL` owner records;
+  next add per-device/disk quotas, recoverable commit journal and explicit shared-FS
+  deployment checks. Do not introduce a duplicate job store without migration need.
 - **Tests:** restart, duplicate name, two workers same host, stale/recovered lease,
   NFS qualification.
 - **Risk:** migration of queue layout; version it and retain reader compatibility.
 - **Expected result:** deterministic multi-user/multi-worker behavior.
+- **Status:** in progress — restart/pruning, two independent app instances, a real
+  subprocess conflict, owner-only release, dead same-host recovery and fail-closed
+  foreign-host ownership pass locally. Global quota scheduling, NFS/network-partition
+  qualification, distributed commit journal and mandatory QA parity are open.
 
 ### 6.3 Supply chain/release
 

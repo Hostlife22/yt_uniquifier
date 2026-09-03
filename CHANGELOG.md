@@ -14,6 +14,10 @@ the last tag.
 
 ### Fixed
 
+- Reserve final web outputs atomically across processes sharing an output filesystem,
+  release only the exact owner, and conservatively recover dead same-host owners.
+- Derive the web output suffix from the selected profile container and reject an
+  explicitly incompatible suffix before starting the background run.
 - Acquire the checkpoint work-directory lock before `--new-variant` archives state,
   and release it immediately when checkpoint initialization or pause-observer startup
   fails.

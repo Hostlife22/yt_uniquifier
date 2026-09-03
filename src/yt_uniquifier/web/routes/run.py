@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from yt_uniquifier.core.media_validation import allowed_output_suffixes
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
+from yt_uniquifier.core.output_reservation import (
+    OutputReservation,
+    OutputReservationConflict,
+    OutputReservationError,
+)
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.runner import CancelToken, RunEvent
 
@@ -111,7 +117,9 @@ def register(  # noqa: PLR0913
                 status_code=400, detail="profile is invalid",
             ) from exc
 
-        out_name = req.output_name or f"{input_path.stem}__{profile.name}.mp4"
+        out_name = req.output_name or (
+            f"{input_path.stem}__{profile.name}.{profile.output_container}"
+        )
         if (
             out_name in {"", ".", ".."}
             or "/" in out_name
@@ -131,6 +139,16 @@ def register(  # noqa: PLR0913
         # trusted-root check. This ordering is both the actual security
         # boundary and the pattern understood by static path-injection checks.
         output_path = Path(output_path_text)
+        expected_suffixes = allowed_output_suffixes(profile.output_container)
+        if output_path.suffix.lower() not in expected_suffixes:
+            expected = ", ".join(sorted(expected_suffixes))
+            raise http_exception(
+                status_code=400,
+                detail=(
+                    f"output_name conflicts with profile container "
+                    f"{profile.output_container!r}; expected {expected}"
+                ),
+            )
 
         try:
             plan = build_plan(input_path, profile, req.encoder_override)
@@ -204,8 +222,13 @@ def register(  # noqa: PLR0913
                     "phase": "runner", "message": record.error,
                 }))
             finally:
-                if persist_runs is not None:
-                    persist_runs()
+                try:
+                    if persist_runs is not None:
+                        persist_runs()
+                except Exception:  # pragma: no cover - production callback is best-effort
+                    _log.exception("could not persist terminal web run state")
+                finally:
+                    output_reservation.release()
                 # Never let a disconnected client's full queue strand this
                 # worker thread while it tries to publish the terminal marker.
                 try:
@@ -219,6 +242,7 @@ def register(  # noqa: PLR0913
             target=_runner, name=f"run-{run_id}", daemon=True,
         )
         record.thread = thread
+        output_reservation: OutputReservation
         with runs_lock:
             active = [
                 existing for existing in runs.values()
@@ -237,10 +261,31 @@ def register(  # noqa: PLR0913
                     status_code=429,
                     detail="maximum concurrent runs reached; retry later",
                 )
+            try:
+                output_reservation = OutputReservation.acquire(output_path, run_id)
+            except OutputReservationConflict as exc:
+                raise http_exception(
+                    status_code=409,
+                    detail="output_name is already reserved by another web process",
+                ) from exc
+            except OutputReservationError as exc:
+                raise http_exception(
+                    status_code=503,
+                    detail="output reservation storage is unavailable",
+                ) from exc
             runs[run_id] = record
-        if persist_runs is not None:
-            persist_runs()
-        thread.start()
+        try:
+            if persist_runs is not None:
+                persist_runs()
+            thread.start()
+        except BaseException:
+            output_reservation.release()
+            with runs_lock:
+                runs.pop(run_id, None)
+            if persist_runs is not None:
+                with contextlib.suppress(Exception):
+                    persist_runs()
+            raise
         # v1.1.0 Task 16: audit only AFTER the run is actually queued
         # so we don't record requests that bounced earlier in the
         # validation chain (they're surfaced as 4xx, not as audit

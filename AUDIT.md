@@ -259,7 +259,11 @@ Profiles с одинаковыми transform shapes следует остави�
 
 ## FFmpeg и stream correctness
 
-### Подтверждённые дефекты
+### Первоначально подтверждённые дефекты
+
+Следующие дефекты были воспроизведены реальными smoke-тестами в начале аудита и
+исправлены в текущей ветке; актуальный статус и regression evidence перечислены в
+`RISK_REGISTER.md`.
 
 - `pipeline.py:653-656` использует `-avoid_negative_ts make_zero` на сегменте, где
   copied AAC начинается с `-1.021315`. Это сдвигает video с 0 до 1.021 s.
@@ -373,20 +377,20 @@ lowest normalized violation с явным non-converged result. Ограниче
   wall timeout; optional wall timeout остаётся настраиваемым через environment.
 - **Исправлено:** первый parallel failure всегда отменяет соседние FFmpeg через
   internal token, даже если caller не передал собственный.
-- Checkpoint lock реализован check-then-replace, а не exclusive create: два процесса
-  могут одновременно решить, что lock свободен. Cross-host lock сразу reclaim.
-- `CheckpointStore.close()` предусмотрен, но `run_full` его не вызывает; daemon
-  освобождает lock только при exit.
-- `main_audio.m4a` resume проверяется лишь по существованию path, без hash/probe.
-- Scene segmentation игнорирует `target_size_sec` как upper bound: static фильм может
-  стать одним гигантским segment, fast-cut — множеством малых.
-- **Исправлено process-locally:** web имеет admission limit/retention/persisted state,
-  одинаковый output reservation и неблокирующий terminal marker; overlapping jobs
-  делят CPU/vendor semaphore. Cross-process/device locking и disk reservation открыты.
-- Distributed heartbeat per hostname не различает два worker process на host;
-  живой sibling маскирует погибший job. При lease на другой host меняется input path
-  и plan hash, поэтому resume не переносится. Distributed worker отключает
-  `target_vmaf` и не запускает QA.
+- **Исправлено:** checkpoint ownership использует exclusive create, локальный dead-PID
+  recovery и fail-closed cross-host policy; `run_full` освобождает lock на всех путях.
+- **Исправлено:** cached `main_audio.m4a` имеет SHA-256/integrity validation и
+  публикуется атомарно.
+- **Исправлено:** scene segmentation ограничивает gaps через `target_size_sec` и
+  отбрасывает tiny edge cuts.
+- **Исправлено на общей локальной FS:** web имеет admission limit/retention/persisted
+  state, атомарную межпроцессную final-output reservation с owner-only release и
+  неблокирующий terminal marker; overlapping jobs делят CPU/vendor semaphore.
+  Global admission/device/disk quotas и NFS qualification остаются открыты.
+- **Частично исправлено:** distributed workers используют process-unique
+  host+PID+nonce leases, content/plan-stable work paths и fenced staged publication.
+  Recoverable cross-host commit journal, mandatory QA parity и NFS qualification
+  остаются открыты.
 
 ## Encoder audit
 
@@ -424,7 +428,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
   notification webhook is an operator-configured destination and remains a
   deployment trust-boundary concern.
 - Web может быть поднят на `0.0.0.0` без auth; rate limiting не заменяет auth/TLS.
-- Unbounded run concurrency — denial-of-service для CPU/RAM/disk/GPU.
+- Multi-process web deployment не имеет global admission/device/disk quotas;
+  process-local cap и общие in-process encoder semaphores не закрывают этот риск.
 - Plugin import происходит до CLI `--no-plugins`; только environment switch даёт
   pre-import disable, что честно указано в help.
 - Shared queue доверяет общему filesystem и basename identity; multi-tenant deployment
@@ -432,11 +437,13 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 ## Documentation drift
 
-- README обещает сохранение soft subtitles/chapters, что опровергнуто smoke tests.
+- **Исправлено:** declared subtitle/chapter policy теперь подтверждена smoke-тестами,
+  а неподдерживаемые topology/container combinations отклоняются до encode.
 - `CLAUDE.md` описывает legacy extract→encode, основной path fused.
-- Docs указывают 19 transforms; registry содержит 20.
+- **Исправлено:** transform docs синхронизированы с 21 built-in registry ID.
 - `docs/bug-triage-2026-05-31.md` упоминается кодом, но файла нет.
-- Web reports version `0.9.0`, package — `1.3.0`.
+- **Исправлено:** FastAPI metadata получает версию из installed package metadata;
+  старые `v0.9.0 R*` в module comments обозначают происхождение feature, не runtime.
 - Python policy «две последние версии» расходится с CI 3.11/3.12 и unbounded
   `requires-python >=3.11`.
 - Profile descriptions заявляют ожидаемый VMAF без воспроизводимого benchmark.
@@ -445,9 +452,9 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1488 passed, 2 skipped на fully provisioned macOS environment |
+| Full `make check` | 1497 passed, 2 skipped на fully provisioned macOS environment |
 | Ruff | Passed |
-| Strict mypy (`155` source files) | Passed |
+| Strict mypy (`157` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
 | macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
 | 16 profile loads | Passed |
