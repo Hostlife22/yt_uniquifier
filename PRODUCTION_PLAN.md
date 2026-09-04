@@ -387,13 +387,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   official SSCD model opt-in.
 - **Risk:** thresholds corpus-dependent; ship as calibrated diagnostics.
 - **Expected result:** metrics correlate with an engineering decision.
-- **Status:** partial — one audio analysis now derives all fingerprint diagnostics
-  from one extraction per file and uses five start/middle/tail windows for >600 s
-  sources. SSCD midpoint random-access is batched into one cancellable runner process
-  per file. Low VMAF is no longer hidden by SSIM and pHash can no longer substitute
-  for unavailable quality evidence. Spatial/temporal registration, shared video
-  feature cache and SSCD coverage confidence описаны в RFC #12
-  (`specs/27-registered-qa-metrics-rfc.md`) и ожидают обязательного согласования.
+- **Status:** implemented on the pending RFC #12 branch — existing raw metrics and
+  verdicts remain stable; plan-aware FFV1 replay, local PTS reset, bounded audio/SSCD
+  alignment, content/tool/plan/seed-keyed SSCD cache and explicit coverage/confidence
+  are locally verified. Merge still awaits the mandatory RFC acceptance window;
+  licensed natural-content thresholds remain deliberately unverified.
 
 ### 5.3 Calibration v2 within current engine
 

@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.qa import ssim, vmaf
+from yt_uniquifier.core.runner import CancelToken
 
 
 @pytest.fixture(autouse=True)
@@ -111,3 +113,52 @@ def test_ssim_missing_score(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     res = ssim.compute(a, b)
     assert res.score is None
     assert res.note is not None and "not found" in res.note
+
+
+@pytest.mark.parametrize("metric", [vmaf, ssim])
+def test_registered_metric_resets_both_input_timelines(
+    metric: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    captured: dict[str, list[str]] = {}
+    if metric is vmaf:
+        monkeypatch.setattr(vmaf, "vmaf_available", lambda: True)
+
+    def fake_run(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
+        captured["cmd"] = cmd
+        stderr = "VMAF score: 99.0" if metric is vmaf else "SSIM All:0.999"
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(metric.subprocess, "run", fake_run)
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "output.mp4"
+    source.touch()
+    output.touch()
+
+    metric.compute(source, output, reset_pts=True)
+
+    graph = captured["cmd"][captured["cmd"].index("-lavfi") + 1]
+    assert graph.count("setpts=PTS-STARTPTS") == 2
+
+
+@pytest.mark.parametrize("metric", [vmaf, ssim])
+def test_registered_metric_propagates_cancellation(
+    metric: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from yt_uniquifier.core import runner as runner_mod
+
+    if metric is vmaf:
+        monkeypatch.setattr(vmaf, "vmaf_available", lambda: True)
+    token = CancelToken()
+
+    def cancel_run(*_args: Any, **_kwargs: Any) -> None:
+        token.cancel()
+        raise PipelineError("cancelled by user")
+
+    monkeypatch.setattr(runner_mod, "run", cancel_run)
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "output.mp4"
+    source.touch()
+    output.touch()
+
+    with pytest.raises(PipelineError, match="cancelled"):
+        metric.compute(source, output, reset_pts=True, cancel_token=token)

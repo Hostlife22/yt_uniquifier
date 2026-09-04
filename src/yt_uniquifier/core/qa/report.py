@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,10 +20,17 @@ from yt_uniquifier.core.media_validation import (
     inspect_output_contract,
     inspect_output_decode,
 )
-from yt_uniquifier.core.models import Plan, QAReport, SourceMeta
+from yt_uniquifier.core.models import (
+    Plan,
+    QARegistration,
+    QARegistrationDetail,
+    QAReport,
+    SourceMeta,
+)
 from yt_uniquifier.core.probe import probe as probe_file
 from yt_uniquifier.core.qa import audio_fp, cid_predict, hashes, phash, ssim, vmaf
 from yt_uniquifier.core.qa.corpus import Corpus
+from yt_uniquifier.core.transforms.hdr_wrap import is_tonemap_active
 
 ProgressFn = Callable[[str, float], None]  # phase name, fraction in [0..1]
 
@@ -209,6 +217,8 @@ def build_report(
     compute_sscd: bool = False,
     sscd_frame_count: int = 32,
     verify_decode: bool = True,
+    run_registered: bool = False,
+    registration_target_segment_sec: float = 600.0,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order.
 
@@ -294,6 +304,7 @@ def build_report(
     af_confidence: float | None = None
     af_per_window: list[float] | None = None
     af_variance: float | None = None
+    registered_audio: audio_fp.RegisteredAudioFP | None = None
     if run_audio_fp:
         _check_cancel("audio_fp")
         p("audio_fp", 0.0)
@@ -319,6 +330,7 @@ def build_report(
             af_variance = afv.variance_between_windows
         if fingerprint_analysis.coverage_note:
             notes.append(f"audio_fp: {fingerprint_analysis.coverage_note}")
+        registered_audio = getattr(fingerprint_analysis, "registered", None)
         # If afh/afv.available is False, af.compare() above already produced
         # an equivalent note about fpcalc missing/failing — no second log.
         p("audio_fp", 1.0)
@@ -381,6 +393,157 @@ def build_report(
             sscd_min = sres.min_similarity
             sscd_per_frame = list(sres.per_frame)
         p("sscd", 1.0)
+
+    vmaf_registered_mean: float | None = None
+    ssim_registered_mean: float | None = None
+    sscd_registered_mean: float | None = None
+    audio_registered_hamming: float | None = None
+    video_registration: QARegistrationDetail | None = None
+    audio_registration: QARegistrationDetail | None = None
+    if run_registered and plan is None:
+        notes.append("registration: exact Plan provenance is required")
+    elif run_registered and plan is not None:
+        if registered_audio is not None:
+            frame_sec = 4096.0 / 11025.0
+            offset_sec = (
+                registered_audio.offset_frames * frame_sec
+                if registered_audio.offset_frames is not None
+                else None
+            )
+            drift_per_hour: float | None = None
+            if registered_audio.drift_frames is not None:
+                covered_sec = max(
+                    min(src_meta.duration_sec, out_meta.duration_sec, 600.0),
+                    frame_sec,
+                )
+                drift_per_hour = max(-3600.0, min(
+                    3600.0,
+                    registered_audio.drift_frames * frame_sec * 3600.0 / covered_sec,
+                ))
+            audio_registered_hamming = registered_audio.hamming_per_frame
+            audio_registration = QARegistrationDetail(
+                offset_sec=offset_sec,
+                drift_sec_per_hour=drift_per_hour,
+                compared_samples=registered_audio.compared_frames,
+                coverage_ratio=registered_audio.coverage_ratio,
+                confidence=registered_audio.confidence,
+                note=registered_audio.note,
+            )
+
+        if plan.source.video and (run_vmaf or run_ssim or compute_sscd):
+            _check_cancel("registration")
+            p("registration", 0.0)
+            from yt_uniquifier.core.qa.registration import build_transformed_reference
+
+            try:
+                with tempfile.TemporaryDirectory(prefix="qa_registered_") as tmp:
+                    reference = build_transformed_reference(
+                        plan,
+                        Path(tmp) / "transformed-reference.mkv",
+                        target_segment_sec=registration_target_segment_sec,
+                        cancel_token=cancel_token,
+                        progress=lambda fraction: p("registration", fraction * 0.70),
+                    )
+                    preserved_hdr = (
+                        plan.source.video[0].color.is_hdr
+                        and plan.profile.keep_hdr
+                        and not is_tonemap_active(plan.profile.transforms)
+                    )
+                    if run_vmaf and preserved_hdr:
+                        notes.append(
+                            "registered_vmaf: unavailable for preserved HDR until "
+                            "a corpus-validated HDR scoring domain is configured"
+                        )
+                    elif run_vmaf:
+                        result = vmaf.compute(
+                            reference.path,
+                            output_path,
+                            reset_pts=True,
+                            cancel_token=cancel_token,
+                        )
+                        if result.score is not None:
+                            vmaf_registered_mean = result.score
+                        elif result.note:
+                            notes.append(f"registered_vmaf: {result.note}")
+                    p("registration", 0.80)
+                    if run_ssim:
+                        result_ssim = ssim.compute(
+                            reference.path,
+                            output_path,
+                            reset_pts=True,
+                            cancel_token=cancel_token,
+                        )
+                        if result_ssim.score is not None:
+                            ssim_registered_mean = result_ssim.score
+                        elif result_ssim.note:
+                            notes.append(f"registered_ssim: {result_ssim.note}")
+                    p("registration", 0.90)
+                    if compute_sscd:
+                        from yt_uniquifier.core.qa import sscd as _sscd
+
+                        registered_sscd = _sscd.compute_sscd_registered(
+                            reference.path,
+                            output_path,
+                            frame_count=sscd_frame_count,
+                            cancel_token=cancel_token,
+                            reference_cache_key=reference.cache_key,
+                        )
+                        sscd_registered_mean = registered_sscd.mean_similarity
+                        video_registration = QARegistrationDetail(
+                            offset_sec=registered_sscd.mean_offset_sec,
+                            drift_sec_per_hour=None,
+                            compared_samples=registered_sscd.compared_frames,
+                            coverage_ratio=registered_sscd.coverage_ratio,
+                            confidence=registered_sscd.confidence,
+                            note=registered_sscd.note,
+                        )
+                        p("registration", 0.98)
+                    else:
+                        compared = round(
+                            min(src_meta.duration_sec, out_meta.duration_sec)
+                            * max(plan.source.video[0].fps, 0.0)
+                        )
+                        coverage = min(
+                            src_meta.duration_sec, out_meta.duration_sec
+                        ) / max(src_meta.duration_sec, out_meta.duration_sec, 0.001)
+                        video_registration = QARegistrationDetail(
+                            offset_sec=0.0,
+                            drift_sec_per_hour=0.0,
+                            compared_samples=compared,
+                            coverage_ratio=coverage,
+                            confidence=coverage,
+                            note=(
+                                f"transformed FFV1 reference replayed across "
+                                f"{reference.segments} segment(s); no SSCD alignment requested"
+                            ),
+                        )
+            except Exception as exc:  # noqa: BLE001 - additive metric degrades to note
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    raise
+                unavailable_note = f"registered video metrics unavailable: {exc}"
+                notes.append(f"registration: {exc}")
+                video_registration = QARegistrationDetail(
+                    offset_sec=None,
+                    drift_sec_per_hour=None,
+                    compared_samples=0,
+                    coverage_ratio=0.0,
+                    confidence=0.0,
+                    note=unavailable_note,
+                )
+            p("registration", 1.0)
+
+    registration = (
+        QARegistration(
+            reference_mode="plan_transformed",
+            plan_hash=plan.plan_hash,
+            run_seed=plan.run_seed,
+            video=video_registration,
+            audio=audio_registration,
+        )
+        if run_registered and plan is not None
+        and (video_registration is not None or audio_registration is not None)
+        else None
+    )
 
     cid_self: float | None = None
     weakest_window: tuple[float, float] | None = None
@@ -446,6 +609,11 @@ def build_report(
         sscd_mean=sscd_mean,
         sscd_min=sscd_min,
         sscd_per_frame=sscd_per_frame,
+        vmaf_registered_mean=vmaf_registered_mean,
+        ssim_registered_mean=ssim_registered_mean,
+        sscd_registered_mean=sscd_registered_mean,
+        audio_fp_registered_hamming_per_frame=audio_registered_hamming,
+        registration=registration,
     )
 
 

@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
+if TYPE_CHECKING:
+    from yt_uniquifier.core.runner import CancelToken
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,8 @@ def compute(
     threads: int = 4,
     subsample: int = 1,
     hdr_aware: bool = False,
+    reset_pts: bool = False,
+    cancel_token: CancelToken | None = None,
 ) -> VMAFResult:
     """Run libvmaf comparing output (distorted) to input (reference).
 
@@ -97,27 +105,57 @@ def compute(
     # filter (LOW item from 2026-05-30 test report). The reference frame is
     # auto-resized to the distorted's dimensions; libvmaf needs them identical
     # and the encoder side may have shaved 2px via micro-crop.
+    distorted = (
+        "[0:v]setpts=PTS-STARTPTS,setsar=1,split=2[d][dims]"
+        if reset_pts
+        else "[0:v]setsar=1[d]"
+    )
+    reference = (
+        "[1:v]setpts=PTS-STARTPTS[rpts];[rpts][dims]scale=rw:rh:flags=lanczos[r0]"
+        if reset_pts
+        else "[1:v][0:v]scale=rw:rh:flags=lanczos[r0]"
+    )
     cmd = [
         ffmpeg_bin(),
         "-hide_banner", "-nostats",
         "-i", str(output_path),
         "-i", str(input_path),
         "-lavfi",
-        "[0:v]setsar=1[d];"
-        "[1:v][0:v]scale=rw:rh:flags=lanczos[r0];"
-        "[r0]setsar=1[r];"
-        f"[d][r]{libvmaf_args}",
+        f"{distorted};{reference};[r0]setsar=1[r];[d][r]{libvmaf_args}",
         "-f", "null",
         "-",
     ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    except subprocess.TimeoutExpired:
-        return VMAFResult(available=True, score=None, note="vmaf timed out")
-    if proc.returncode != 0:
-        tail = proc.stderr.strip().splitlines()[-1] if proc.stderr else "unknown"
-        return VMAFResult(available=True, score=None, note=f"vmaf failed: {tail}")
-    m = _SCORE_RE.search(proc.stderr)
+    metric_log: str
+    if cancel_token is None:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        except subprocess.TimeoutExpired:
+            return VMAFResult(available=True, score=None, note="vmaf timed out")
+        if proc.returncode != 0:
+            tail = proc.stderr.strip().splitlines()[-1] if proc.stderr else "unknown"
+            return VMAFResult(available=True, score=None, note=f"vmaf failed: {tail}")
+        metric_log = proc.stderr
+    else:
+        from yt_uniquifier.core.pipeline import BuiltCommand
+        from yt_uniquifier.core.runner import run as run_ffmpeg
+
+        with tempfile.TemporaryDirectory(prefix="vmaf_registered_") as tmp:
+            log_path = Path(tmp) / "vmaf.log"
+            try:
+                run_ffmpeg(
+                    BuiltCommand(args=cmd),
+                    output=Path("-"),
+                    cancel_token=cancel_token,
+                    log_path=log_path,
+                    progress_via_stdout=False,
+                    wall_timeout_sec=3600.0,
+                )
+            except PipelineError as exc:
+                if cancel_token.is_cancelled():
+                    raise
+                return VMAFResult(available=True, score=None, note=f"vmaf failed: {exc}")
+            metric_log = log_path.read_text(encoding="utf-8", errors="replace")
+    m = _SCORE_RE.search(metric_log)
     if not m:
         return VMAFResult(available=True, score=None, note="vmaf score not found in output")
     score = float(m.group(1))

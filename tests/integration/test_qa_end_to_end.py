@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import needs_ffmpeg
+from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.core.qa import vmaf
 from yt_uniquifier.core.qa.report import build_report, verdict
 
 PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
@@ -60,6 +62,81 @@ def test_after_uniquification_metrics_in_range(
     assert report.phash_similarity > 0.7
     # Output duration ≈ input duration.
     assert report.duration_match
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("case", "transforms"),
+    [
+        ("mirror", [TransformConfig(id="video.mirror")]),
+        (
+            "crop",
+            [TransformConfig(id="video.crop_resize", params={"max_strength": 0.08})],
+        ),
+        ("speed", [TransformConfig(id="video.speed", params={"rate": 1.02})]),
+        (
+            "frame-drop",
+            [
+                TransformConfig(
+                    id="video.temporal_jitter",
+                    params={
+                        "blackout_prob": 0.0,
+                        "drop_prob": 0.10,
+                        "blackout_blur": False,
+                    },
+                )
+            ],
+        ),
+    ],
+    ids=["mirror", "crop", "speed", "frame-drop"],
+)
+def test_plan_registered_ssim_uses_transformed_reference(
+    tiny_clip: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    case: str,
+    transforms: list[TransformConfig],
+) -> None:
+    output = tmp_path / f"{case}.mp4"
+    profile = Profile(
+        name=f"registered-{case}",
+        transforms=transforms,
+    )
+    plan = build_plan(tiny_clip, profile, encoder_override="libx264")
+    summary = run_full(
+        plan,
+        RunOptions(
+            work_dir=tmp_path / "work" / plan.plan_hash,
+            output=output,
+            target_segment_sec=600.0,
+            enforce_preflight=False,
+        ),
+    )
+
+    report = build_report(
+        tiny_clip,
+        output,
+        plan=summary.plan,
+        samples=8,
+        run_vmaf=case == "mirror",
+        run_audio_fp=False,
+        run_ssim=True,
+        predict_cid=False,
+        verify_decode=False,
+        run_registered=True,
+    )
+
+    assert report.ssim_mean is not None
+    assert report.ssim_registered_mean is not None
+    assert report.ssim_registered_mean > 0.97
+    assert report.ssim_registered_mean >= report.ssim_mean - 0.002
+    if case == "mirror" and vmaf.vmaf_available():
+        assert report.vmaf_registered_mean is not None
+        assert report.vmaf_registered_mean > 95.0
+    assert report.registration is not None
+    assert report.registration.plan_hash == summary.plan.plan_hash
+    assert report.registration.run_seed == summary.plan.run_seed
 
 
 @needs_ffmpeg

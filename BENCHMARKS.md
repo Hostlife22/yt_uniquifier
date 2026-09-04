@@ -58,12 +58,24 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1639 passed, 47 expected hardware/optional skips; Ruff + strict mypy (161 files) pass; 13:35 | Current production-hardening changes do not regress the complete Mac suite; additional skips are unrequested hardware qualification cells |
-| CI-equivalent coverage | 1472 passed, 1 expected skipped, 146 deselected; 82.35% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
+| Full local quality gate | 1667 passed, 47 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:02 | RFC #12 implementation and production-hardening changes do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
+| CI-equivalent coverage | 1515 passed, 1 expected skipped, 198 deselected; 81.96% branch-aware core coverage | Required 80% gate passes; v1.5.0 wheel and sdist build successfully on the RFC #12 branch |
 
 The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
-and #12. Their production code is intentionally not implemented before the mandatory
-comment window and maintainer decision.
+and #12. Implementations are isolated on pending branches and cannot land before the
+mandatory comment window and maintainer decision.
+
+RFC #12 implementation-branch synthetic qualification on the current Intel Mac:
+
+| Case | Result | Decision enabled |
+|---|---|---|
+| Mirror, crop, 1.02× speed, deterministic 10% frame drop | 4/4 real-FFmpeg cases passed; registered SSIM > 0.97 | Exact Plan/segment-seed replay follows spatial and temporal transforms |
+| Mirrored H.264 output with local libvmaf | Registered VMAF > 95 | Registered scorer command, local PTS reset and FFV1 reference are operational |
+| Audio fixed offset + bounded linear drift | Exact synthetic alignment recovered; low 25% overlap rejected | Offset/drift diagnostic cannot win on a short matching excerpt |
+| SSCD monotonic alignment/cache | Identity/adversarial/no-reuse, corrupt-cache recovery and one-hour sparse-grid time bound passed | No output-frame reuse; cache corruption and long-form offset bounds fail safely |
+
+These are deterministic synthetic regressions, not natural-content thresholds. Licensed
+speech/music/HDR viewing and listening remains `NOT VERIFIED`.
 
 ## Какие решения принимает каждая метрика
 

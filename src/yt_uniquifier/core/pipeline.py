@@ -700,6 +700,7 @@ def build_video_segment_command_fused(
     segment_output: Path,
     *,
     crf_override: int | None = None,
+    _video_encoder_args_override: list[str] | None = None,
 ) -> BuiltCommand:
     """B3 (v0.6.0): fused single-fork variant of build_video_segment_command.
 
@@ -768,7 +769,11 @@ def build_video_segment_command_fused(
     args += ["-map", f"[{v_out}]"]
     args += ["-an", "-sn"]
     args += ["-map_chapters", "-1"]
-    args += _encoder_args_for(plan, crf_override=crf_override)
+    args += (
+        _video_encoder_args_override
+        if _video_encoder_args_override is not None
+        else _encoder_args_for(plan, crf_override=crf_override)
+    )
     args += _video_cadence_args()
     args += _color_output_args(plan)
     args += ["-map_metadata", "-1"]

@@ -78,8 +78,9 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
 - Generic `libaom-av1` discovery больше не даёт false timeout: probe-only speed args
   сократили локальный smoke с 15.63 s до 1.5–1.9 s. Реальный pipeline test также
   выявил и исправил несовместимое сочетание `-b:v 0` с VBV options в production argv.
-- No-upscale и registered QA contract changes вынесены в RFC #11/#12; их код не
-  вносится до обязательного comment window и maintainer decision.
+- No-upscale changes remain isolated in the RFC #11 branch. Registered QA from RFC
+  #12 is implemented on its pending branch with unchanged raw metrics/verdicts; both
+  implementations remain unmergeable until the comment window and maintainer decision.
 
 Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
 corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube

@@ -204,7 +204,112 @@ class AudioFPPairAnalysis:
     similarity: AudioFPResult
     hamming: AudioFPHamming
     variance: AudioFPVariance
+    registered: RegisteredAudioFP | None = None
     coverage_note: str | None = None
+
+
+@dataclass(frozen=True)
+class RegisteredAudioFP:
+    """Bounded offset/drift alignment over ordered Chromaprint frames."""
+
+    available: bool
+    hamming_per_frame: float | None
+    offset_frames: int | None
+    drift_frames: int | None
+    compared_frames: int
+    coverage_ratio: float
+    confidence: float
+    note: str | None = None
+    hamming_per_window: tuple[float, ...] = ()
+
+
+def align_fingerprints(
+    reference: list[int],
+    candidate: list[int],
+    *,
+    max_offset_frames: int = 27,
+    max_drift_frames: int = 5,
+    min_coverage: float = 0.60,
+    n_windows: int = 5,
+) -> RegisteredAudioFP:
+    """Find a bounded linear alignment without frame reuse.
+
+    The fixed bounds keep runtime O(N) for each of at most 605 candidate
+    offset/drift pairs at the defaults. Candidates below ``min_coverage`` are
+    rejected so a tiny matching excerpt cannot produce high confidence.
+    """
+    if not reference or not candidate:
+        return RegisteredAudioFP(
+            False, None, None, None, 0, 0.0, 0.0,
+            "empty fingerprint cannot be registered",
+        )
+    if max_offset_frames < 0 or max_drift_frames < 0:
+        raise ValueError("audio registration bounds must be non-negative")
+    if not 0.0 < min_coverage <= 1.0:
+        raise ValueError("audio registration min_coverage must be in (0, 1]")
+    if n_windows < 1:
+        raise ValueError("audio registration n_windows must be positive")
+
+    denominator = max(len(reference), len(candidate))
+    offset_bound = min(max_offset_frames, max(len(reference), len(candidate)) - 1)
+    drift_bound = min(max_drift_frames, max(len(reference), len(candidate)) - 1)
+    best: tuple[float, float, int, int, int] | None = None
+    reference_span = max(len(reference) - 1, 1)
+    for drift in range(-drift_bound, drift_bound + 1):
+        for offset in range(-offset_bound, offset_bound + 1):
+            total = 0
+            compared = 0
+            previous_candidate = -1
+            for index, value in enumerate(reference):
+                mapped = round(index + offset + drift * index / reference_span)
+                if mapped < 0 or mapped >= len(candidate) or mapped <= previous_candidate:
+                    continue
+                previous_candidate = mapped
+                total += int(value ^ candidate[mapped]).bit_count()
+                compared += 1
+            coverage = compared / denominator
+            if compared == 0 or coverage < min_coverage:
+                continue
+            mean = total / compared
+            rank = (mean, -coverage, abs(offset) + abs(drift), abs(drift), abs(offset))
+            if best is None or rank < (
+                best[0], -best[1], abs(best[2]) + abs(best[3]),
+                abs(best[3]), abs(best[2]),
+            ):
+                best = (mean, coverage, offset, drift, compared)
+
+    if best is None:
+        return RegisteredAudioFP(
+            False, None, None, None, 0, 0.0, 0.0,
+            f"no alignment met minimum coverage {min_coverage:.2f}",
+        )
+    mean, coverage, offset, drift, compared = best
+    totals = [0] * n_windows
+    counts = [0] * n_windows
+    previous_candidate = -1
+    for index, value in enumerate(reference):
+        mapped = round(index + offset + drift * index / reference_span)
+        if mapped < 0 or mapped >= len(candidate) or mapped <= previous_candidate:
+            continue
+        previous_candidate = mapped
+        window = min(n_windows - 1, index * n_windows // len(reference))
+        totals[window] += int(value ^ candidate[mapped]).bit_count()
+        counts[window] += 1
+    per_window = tuple(
+        total / count for total, count in zip(totals, counts, strict=True) if count
+    )
+    confidence = coverage * max(0.0, min(1.0, 1.0 - mean / 32.0))
+    return RegisteredAudioFP(
+        True,
+        mean,
+        offset,
+        drift,
+        compared,
+        coverage,
+        confidence,
+        note=f"bounded offset/drift; {len(per_window)} ordered window(s)",
+        hamming_per_window=per_window,
+    )
 
 
 def _unavailable_pair(note: str) -> AudioFPPairAnalysis:
@@ -282,6 +387,7 @@ def analyze_pair(
         similarity=AudioFPResult(True, similarity, None),
         hamming=hamming,
         variance=AudioFPVariance(True, means, variance),
+        registered=align_fingerprints(ai, bi, n_windows=n_windows),
         coverage_note=(
             "stratified 600-second fingerprint coverage across the full timeline"
             if input_is_long or output_is_long

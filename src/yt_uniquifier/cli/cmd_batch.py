@@ -117,7 +117,7 @@ def _process_one(
         enforce_preflight=True,
     )
     try:
-        run_full(plan, options, on_event=lambda _e: None)
+        summary = run_full(plan, options, on_event=lambda _e: None)
     except YtUniquifierError as exc:
         return _BatchResult(input=src, output=None, ok=False, note=str(exc))
 
@@ -125,14 +125,16 @@ def _process_one(
         try:
             report = build_report(
                 src, out,
-                plan=plan,
+                plan=summary.plan,
                 samples=60 if fast_qa else 120,
                 run_vmaf=not fast_qa,
+                run_registered=True,
+                registration_target_segment_sec=options.target_segment_sec,
                 # run_full already performed the mandatory complete A/V decode.
                 verify_decode=False,
             )
             write_json(report, out.with_suffix(out.suffix + ".qa.json"))
-            render_html(report, plan, out.with_suffix(out.suffix + ".qa.html"))
+            render_html(report, summary.plan, out.with_suffix(out.suffix + ".qa.html"))
         except Exception as exc:  # noqa: BLE001 - QA must never break the batch
             return _BatchResult(input=src, output=out, ok=True,
                                 note=f"qa failed: {exc}")

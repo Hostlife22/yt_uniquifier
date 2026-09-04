@@ -28,6 +28,7 @@ class QaWorker(WorkerBase):
         predict_cid: bool = True,
         vs_corpus: bool = False,
         samples: int = 120,
+        registration_target_segment_sec: float | None = None,
     ) -> None:
         super().__init__()
         self.input_path = input_path
@@ -39,6 +40,7 @@ class QaWorker(WorkerBase):
         self.predict_cid = predict_cid
         self.vs_corpus = vs_corpus
         self.samples = samples
+        self.registration_target_segment_sec = registration_target_segment_sec
 
     def run(self) -> None:
         try:
@@ -61,6 +63,15 @@ class QaWorker(WorkerBase):
                 # A6 (v0.5.5): honour the worker's cancel token at each
                 # QA phase boundary (md5 / phash / audio_fp / vmaf / ssim).
                 cancel_token=self.cancel_token,
+                run_registered=(
+                    self.plan is not None
+                    and self.registration_target_segment_sec is not None
+                ),
+                registration_target_segment_sec=(
+                    self.registration_target_segment_sec
+                    if self.registration_target_segment_sec is not None
+                    else 600.0
+                ),
             )
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")

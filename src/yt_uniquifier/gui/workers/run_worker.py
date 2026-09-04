@@ -276,14 +276,16 @@ class RunWorker(WorkerBase):
         report = build_report(
             self.plan.source.path,
             summary.output,
-            plan=self.plan,
+            plan=summary.plan,
             samples=60 if self.fast_qa else 120,
             run_vmaf=not self.fast_qa,
+            run_registered=True,
+            registration_target_segment_sec=self.options.target_segment_sec,
             # run_full already performed the mandatory complete A/V decode.
             verify_decode=False,
         )
         json_path = summary.output.with_suffix(summary.output.suffix + ".qa.json")
         html_path = summary.output.with_suffix(summary.output.suffix + ".qa.html")
         write_json(report, json_path)
-        render_html(report, self.plan, html_path)
+        render_html(report, summary.plan, html_path)
         return html_path

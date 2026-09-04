@@ -118,7 +118,9 @@ def run_cmd(
             return
 
         if no_progress:
-            run_full(plan, options, on_event=lambda _e: None, cancel_token=cancel)
+            summary = run_full(
+                plan, options, on_event=lambda _e: None, cancel_token=cancel
+            )
         else:
             with make_run_progress(console) as progress:
                 task_id = progress.add_task("encoding", total=total_us)
@@ -135,11 +137,18 @@ def run_cmd(
                     total = sum(seg_offsets.values())
                     progress.update(task_id, completed=min(total, total_us))
 
-                run_full(plan, options, on_event=on_event, cancel_token=cancel)
+                summary = run_full(
+                    plan, options, on_event=on_event, cancel_token=cancel
+                )
 
         console.print(f"[green]Done:[/green] {output}")
         if not no_qa:
-            _run_qa(plan, output, fast=fast_qa)
+            _run_qa(
+                summary.plan,
+                output,
+                fast=fast_qa,
+                target_segment_sec=target_segment_sec,
+            )
     except KeyboardInterrupt:
         # POSIX convention: 128 + SIGINT(2) = 130. Ctrl+C must leave
         # state.json intact so the user can re-run and resume from the
@@ -293,7 +302,13 @@ def _print_dry_run_report(
     console.print("[dim]dry-run: no ffmpeg processes spawned[/dim]")
 
 
-def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
+def _run_qa(
+    plan: Plan,
+    output: Path,
+    *,
+    fast: bool,
+    target_segment_sec: float,
+) -> None:
     console.print("[dim]Building QA report…[/dim]")
     report = build_report(
         plan.source.path,
@@ -301,6 +316,8 @@ def _run_qa(plan: Plan, output: Path, *, fast: bool) -> None:
         plan=plan,
         samples=60 if fast else 120,
         run_vmaf=not fast,
+        run_registered=True,
+        registration_target_segment_sec=target_segment_sec,
         # run_full already performed the mandatory complete A/V decode.
         verify_decode=False,
     )

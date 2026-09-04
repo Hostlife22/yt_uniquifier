@@ -91,6 +91,42 @@ them only relative to a pinned source/corpus and tool version:
 | middle value | result needs listening and timeline/alignment checks |
 | higher value | paired codes differ more; this says nothing about audibility or an external system |
 
+### Plan-registered metrics (v1.5, RFC #12)
+
+Raw source/output metrics above intentionally retain their historical meaning. When
+automatic run/batch QA has the exact completed `Plan`, it additionally replays the
+existing video filter graph with the restored run seed and per-segment seeds into a
+temporary lossless FFV1 reference. The registered VMAF/SSIM comparison resets both
+timelines locally before scoring, so an intentional crop, mirror, retiming or
+deterministic frame drop is part of the reference rather than misclassified as encode
+damage.
+
+| Field | Range | Engineering meaning |
+|---|---:|---|
+| `vmaf_registered_mean` | 0..100 or null | Encode/generational quality against the transformed reference |
+| `ssim_registered_mean` | -1..1 or null | Structural quality against the transformed reference |
+| `sscd_registered_mean` | -1..1 or null | Bounded monotonic representation similarity; output frames cannot be reused |
+| `audio_fp_registered_hamming_per_frame` | 0..32 or null | Ordered Chromaprint distance after bounded global offset and linear drift alignment |
+| `registration.reference_mode` | `plan_transformed` | Declares that the reference came from exact Plan replay |
+| `registration.plan_hash`, `run_seed` | provenance | Binds the report to the completed plan and stochastic realization |
+| `registration.video`, `.audio` | object or null | Offset/drift, compared samples, coverage, confidence and availability note |
+
+These fields remain diagnostics: the verdict continues to use correctness and the
+unchanged raw-quality policy until a licensed natural-content corpus establishes
+registered thresholds. Low-overlap audio/SSCD alignment is rejected instead of
+returning a deceptively good value. Registered VMAF fails closed for preserved HDR
+instead of interpreting PQ/HLG code values with an SDR model; HDR→SDR output can be
+scored after the explicit tonemap because both registered inputs are then SDR.
+
+Reference generation is cancellable and guarded by both free space and
+`YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES` (40 GiB by default). If the conservative
+FFV1 estimate exceeds that budget, registered video metrics become unavailable with
+an explicit `notes[]` entry; raw QA continues. Provision more temporary space and set
+the variable deliberately for long-form runs. SSCD reference embeddings are cached
+under `YT_UNIQ_QA_CACHE_DIR` or the per-user QA cache using source content, canonical
+profile, plan/seed, FFmpeg/tool/model version, sampling grid and encoded-reference
+digest; corrupt entries are rebuilt atomically.
+
 ### SSCD semantic similarity (v0.8.0 R4, opt-in)
 
 Populated only when `yt-uniq qa --sscd` is passed. Requires the `[ml]` extra (torch +
@@ -203,6 +239,22 @@ yt-uniq qa /path/to/master.mp4 /path/to/candidate.mp4 --vs-corpus
 
 `--vs-corpus` adds the `corpus_matches` section so you can verify the
 candidate isn't too similar to a previously-uploaded variant.
+
+Standalone QA never guesses transforms, seeds or segmentation. To request registered
+metrics, serialize the exact completed `RunSummary.plan` and supply the same segment
+target that produced the output:
+
+```python
+Path("completed-plan.json").write_text(summary.plan.model_dump_json(indent=2))
+```
+
+```bash
+yt-uniq qa master.mp4 candidate.mp4 \
+  --plan-json completed-plan.json \
+  --registration-segment-sec 600
+```
+
+Without `--plan-json`, all registered fields remain null and raw metrics are unchanged.
 
 ## Fast QA
 
