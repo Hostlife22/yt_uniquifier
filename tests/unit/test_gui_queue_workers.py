@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from unittest.mock import Mock, patch
 
 from yt_uniquifier.core.models import Profile, TransformConfig
@@ -107,9 +107,14 @@ def test_queue_worker_heartbeats_during_encode(tmp_path: Path) -> None:
 
     def delayed_run(_plan, opts, **_kwargs) -> None:
         alive = next((tmp_path / "in_progress").glob("*.alive"))
-        observed_mtimes.append(alive.stat().st_mtime_ns)
-        sleep(0.05)
-        observed_mtimes.append(alive.stat().st_mtime_ns)
+        initial_mtime = alive.stat().st_mtime_ns
+        observed_mtimes.append(initial_mtime)
+        deadline = monotonic() + 2.0
+        refreshed_mtime = initial_mtime
+        while refreshed_mtime <= initial_mtime and monotonic() < deadline:
+            sleep(0.01)
+            refreshed_mtime = alive.stat().st_mtime_ns
+        observed_mtimes.append(refreshed_mtime)
         opts.output.write_bytes(b"output")
 
     with (
