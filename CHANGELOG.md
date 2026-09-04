@@ -12,6 +12,12 @@ the last tag.
 
 ## [Unreleased]
 
+### Changed
+
+- Make custom `video.fit_aspect` profiles source-aware and no-upscale by default;
+  fixed-resolution shipped profiles retain their existing canvas through an explicit
+  `allow_upscale: true` migration ([RFC #11](https://github.com/Hostlife22/yt_uniquifier/issues/11)).
+
 ### Added
 
 - Add a central HDR/audio/temporal/container compatibility graph, preflight

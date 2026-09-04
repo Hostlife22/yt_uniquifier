@@ -397,6 +397,40 @@ def test_explicit_upscale_is_reported_but_not_rejected(tmp_path: Path) -> None:
     assert not has_fail(findings)
 
 
+@pytest.mark.parametrize("mode", ["pad_black", "pad_blur"])
+def test_no_upscale_padding_reports_foreground_not_canvas_scale(
+    tmp_path: Path, mode: str,
+) -> None:
+    src = _source(tmp_path, width=640, height=480)
+    plan = _plan(src, [TransformConfig(
+        id="video.fit_aspect",
+        params={"target_aspect": "16:9", "mode": mode},
+    )])
+
+    findings = preflight(src, plan, plan.encoder)
+    resolved = next(
+        item for item in findings if item.code == "quality.fit_aspect.resolved_canvas"
+    )
+
+    assert "864x486 canvas" in resolved.message
+    assert "foreground scale 1.00x" in resolved.message
+    assert "quality.upscale.explicit" not in _codes(findings)
+
+
+def test_allow_upscale_participates_in_plan_hash(tmp_path: Path) -> None:
+    src = _source(tmp_path, width=640, height=360)
+    disabled = _plan(src, [TransformConfig(
+        id="video.fit_aspect",
+        params={"target_aspect": "16:9", "allow_upscale": False},
+    )])
+    enabled = _plan(src, [TransformConfig(
+        id="video.fit_aspect",
+        params={"target_aspect": "16:9", "allow_upscale": True},
+    )])
+
+    assert disabled.plan_hash != enabled.plan_hash
+
+
 def test_audio_sr_44k_warns(tmp_path: Path) -> None:
     """44.1k is in the allowed set, so no warning."""
     src = _source(tmp_path, audio_sr=44100)

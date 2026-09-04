@@ -93,9 +93,18 @@ def test_explicit_upscale_preserves_configured_canvas() -> None:
     assert _resolve_dims_for_source(params, 640, 360) == (1920, 1080)
 
 
+@pytest.mark.parametrize("source", [(1, 1080), (1920, 1), (16, 9)])
+def test_no_upscale_rejects_source_without_even_aspect_canvas(
+    source: tuple[int, int],
+) -> None:
+    params = FitAspectParams(target_aspect="16:9", mode="crop")
+    with pytest.raises(ValueError, match="cannot produce|at least two"):
+        _resolve_dims_for_source(params, *source)
+
+
 # ---- crop mode ----
 def test_crop_mode_vertical(spec) -> None:
-    p = FitAspectParams(target_aspect="9:16", mode="crop")
+    p = FitAspectParams(target_aspect="9:16", mode="crop", allow_upscale=True)
     c = spec.build(p, LabelAllocator(), "v0")
     assert c.in_label == "v0"
     assert c.out_label == "v1"
@@ -107,7 +116,7 @@ def test_crop_mode_vertical(spec) -> None:
 
 
 def test_crop_mode_square(spec) -> None:
-    p = FitAspectParams(target_aspect="1:1", mode="crop")
+    p = FitAspectParams(target_aspect="1:1", mode="crop", allow_upscale=True)
     c = spec.build(p, LabelAllocator(), "v0")
     assert c.filter_str == (
         "scale=1080:1080:force_original_aspect_ratio=increase:flags=lanczos,"
@@ -118,7 +127,7 @@ def test_crop_mode_square(spec) -> None:
 def test_crop_mode_widescreen_4k(spec) -> None:
     p = FitAspectParams(
         target_aspect="16:9", mode="crop",
-        target_width=3840, target_height=2160,
+        target_width=3840, target_height=2160, allow_upscale=True,
     )
     c = spec.build(p, LabelAllocator(), "v0")
     assert "scale=3840:2160:force_original_aspect_ratio=increase" in c.filter_str

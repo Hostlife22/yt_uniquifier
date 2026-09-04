@@ -219,6 +219,10 @@ def _check_quality_risks(plan: Plan) -> list[PreflightFinding]:
                 scale_factor = min(width_ratio, height_ratio)
                 if params.mode == "crop":
                     scale_factor = max(width_ratio, height_ratio)
+                elif not params.allow_upscale:
+                    # Pad canvas pixels are not source-detail pixels. The
+                    # foreground builder caps both axes at their input size.
+                    scale_factor = min(scale_factor, 1.0)
                 findings.append(PreflightFinding(
                     code="quality.fit_aspect.resolved_canvas",
                     severity="info",

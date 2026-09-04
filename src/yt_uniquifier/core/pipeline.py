@@ -164,6 +164,22 @@ def _measure_before_loudnorm(
     )
 
 
+def _resolved_fit_aspect_params(plan: Plan, transform: TransformConfig) -> FitAspectParams:
+    """Resolve the transform canvas against decoded source geometry once."""
+    spec = get(transform.id)
+    params = FitAspectParams.model_validate({**spec.defaults, **transform.params})
+    if not plan.source.video:
+        raise PipelineError("video.fit_aspect requires a video stream")
+    source_video = plan.source.video[0]
+    try:
+        width, height = _resolve_dims_for_source(
+            params, source_video.width, source_video.height
+        )
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+    return params.model_copy(update={"target_width": width, "target_height": height})
+
+
 def _video_tail_scale(plan: Plan) -> str:
     """Return the final canvas guard for the plan.
 
@@ -175,13 +191,8 @@ def _video_tail_scale(plan: Plan) -> str:
     """
     for transform in reversed(plan.profile.transforms):
         if transform.enabled and transform.id == "video.fit_aspect":
-            spec = get(transform.id)
-            params = FitAspectParams.model_validate({**spec.defaults, **transform.params})
-            source_video = plan.source.video[0]
-            width, height = _resolve_dims_for_source(
-                params, source_video.width, source_video.height
-            )
-            return f"scale={width}:{height}"
+            params = _resolved_fit_aspect_params(plan, transform)
+            return f"scale={params.target_width}:{params.target_height}"
     return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
 
@@ -338,19 +349,7 @@ def _build_video_chain(
                 spec = get(tc.id)
                 params = spec.schema.model_validate({**spec.defaults, **tc.params})
                 if tc.id == "video.fit_aspect":
-                    fit_params = FitAspectParams.model_validate(params.model_dump())
-                    if not plan.source.video:
-                        raise PipelineError("video.fit_aspect requires a video stream")
-                    source_video = plan.source.video[0]
-                    try:
-                        width, height = _resolve_dims_for_source(
-                            fit_params, source_video.width, source_video.height
-                        )
-                    except ValueError as exc:
-                        raise PipelineError(str(exc)) from exc
-                    params = fit_params.model_copy(
-                        update={"target_width": width, "target_height": height}
-                    )
+                    params = _resolved_fit_aspect_params(plan, tc)
                 chain = call_build(spec, params, alloc, v_label, rng=rng)
                 filter_str = chain.filter_str
                 # Swap rotate's SDR black fill for an HDR-safe near-black

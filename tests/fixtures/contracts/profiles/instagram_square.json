@@ -22,6 +22,7 @@
       "enabled": true,
       "id": "video.fit_aspect",
       "params": {
+        "allow_upscale": true,
         "blur_sigma": 22.0,
         "mode": "pad_blur",
         "target_aspect": "1:1"
