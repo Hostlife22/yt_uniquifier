@@ -20,6 +20,25 @@ upload encoding settings before the run, and against HDR sanity.
 | `loudnorm.ok` / `loudnorm.missing` | ok / warn | Profile lacks `audio.loudnorm` — output won't hit -14 LUFS |
 | `bitrate.over` | warn | Projected output bitrate > YouTube ceiling for the resolution |
 
+## H.264 output structure
+
+The qualified `libx264` path explicitly emits YouTube's documented upload structure:
+
+- progressive 4:2:0 output from the existing video pipeline;
+- High Profile and CABAC entropy coding;
+- at most two consecutive B-frames;
+- closed GOP with a maximum size of half the native frame rate (`12` frames at
+  23.976/24 FPS, `13` at 25 FPS, `15` at 29.97/30 FPS and `30` at 59.94/60 FPS).
+
+The actual bitstream regression checks profile, B-frame runs, IDR cadence and CABAC.
+Changing this internal encoder policy increments the plan-hash policy revision, so
+resume cannot combine segments encoded under different GOP rules.
+
+NVENC, QSV, AMF and H.264 VideoToolbox remain **NOT VERIFIED** for this exact
+structure. Accepting `-g`/`-bf` arguments is insufficient: a backend must prove the
+resulting bitstream. AV1/HEVC keep their encoder-native GOP policy because the cited
+YouTube recommendation is specifically for H.264.
+
 ## Bitrate ceilings (h264)
 
 | Max height | Ceiling |

@@ -207,6 +207,66 @@ def test_libx264_writes_sdr_color_vui(tmp_path: Path) -> None:
     assert "range=limited" in params
 
 
+@pytest.mark.parametrize(
+    ("fps", "expected_gop"),
+    [(23.976, "12"), (25.0, "13"), (29.97, "15"), (60.0, "30")],
+)
+def test_libx264_uses_explicit_youtube_upload_structure(
+    tmp_path: Path,
+    fps: float,
+    expected_gop: str,
+) -> None:
+    source = _src(tmp_path)
+    source = source.model_copy(update={
+        "video": [source.video[0].model_copy(update={"fps": fps})],
+    })
+    plan = _plan(source, [])
+
+    args = pipeline_mod._encoder_args_for(plan)
+
+    assert args[args.index("-profile:v") + 1] == "high"
+    assert args[args.index("-coder") + 1] == "cabac"
+    assert args[args.index("-bf") + 1] == "2"
+    assert args[args.index("-g") + 1] == expected_gop
+    assert args[args.index("-flags") + 1] == "+cgop"
+
+
+def test_hardware_h264_does_not_claim_unqualified_upload_structure(
+    tmp_path: Path,
+) -> None:
+    source = _src(tmp_path)
+    profile = Profile(name="hardware", target_codec="h264")
+    encoder = EncoderCandidate(
+        name="h264_videotoolbox", vendor="videotoolbox", codec="h264", works=True,
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = pipeline_mod._encoder_args_for(plan)
+
+    assert "-profile:v" not in args
+    assert "-bf" not in args
+    assert "-g" not in args
+
+
+def test_encode_policy_revision_invalidates_resume_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _src(tmp_path)
+    profile = Profile(name="resume-policy")
+    encoder = EncoderCandidate(name="libx264", vendor="x264", codec="h264", works=True)
+    original = compute_plan_hash(source, profile, encoder)
+
+    monkeypatch.setattr(pipeline_mod, "_ENCODE_POLICY_REVISION", "next-policy")
+
+    assert compute_plan_hash(source, profile, encoder) != original
+
+
 def test_video_only_chain(tmp_path: Path) -> None:
     src = _src(tmp_path)
     plan = _plan(src, [

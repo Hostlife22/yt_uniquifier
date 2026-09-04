@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import re
 from collections.abc import Callable
@@ -63,6 +64,9 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 LOUDNORM_ID = "audio.loudnorm"
 BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
+# Increment whenever an internal encode policy changes in a way that makes existing
+# completed segments unsafe to reuse under the same package development version.
+_ENCODE_POLICY_REVISION = "youtube-h264-structure-v1"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:
@@ -1140,11 +1144,35 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
         "-c:v", name, "-preset", "medium", "-crf", str(crf),
         "-maxrate", str(mb), "-bufsize", str(mb * 2),
     ]
+    if enc.vendor == "x264" and enc.codec == "h264":
+        result += _libx264_upload_structure_args(plan)
     if enc.vendor in {"x264", "x265"}:
         color_params = _x26x_color_params(plan, include_static_hdr=enc.vendor == "x265")
         if color_params:
             result += [f"-{enc.vendor}-params", ":".join(color_params)]
     return result
+
+
+def _libx264_upload_structure_args(plan: Plan) -> list[str]:
+    """Return the explicit H.264 structure recommended for YouTube uploads.
+
+    YouTube documents High Profile, CABAC, two consecutive B-frames and a closed
+    GOP containing half the frame rate.  ``-g`` is a frame count, so fractional
+    rates are rounded to the nearest whole frame while retaining native cadence.
+    Hardware encoders are deliberately excluded until each backend proves that it
+    actually honours the requested structure rather than merely accepting argv.
+    """
+    fps = plan.source.video[0].fps if plan.source.video else 0.0
+    if not math.isfinite(fps) or fps <= 0:
+        fps = 30.0
+    gop_frames = max(1, math.floor(fps / 2 + 0.5))
+    return [
+        "-profile:v", "high",
+        "-coder", "cabac",
+        "-bf", "2",
+        "-g", str(gop_frames),
+        "-flags", "+cgop",
+    ]
 
 
 def _x26x_color_params(plan: Plan, *, include_static_hdr: bool) -> list[str]:
@@ -1267,6 +1295,7 @@ def compute_plan_hash(
         "profile": profile.model_dump(mode="json"),
         "encoder": encoder.name,
         "tool_version": __version__,
+        "encode_policy_revision": _ENCODE_POLICY_REVISION,
     }
     auxiliary_streams = get_auxiliary_streams(source)
     if auxiliary_streams:

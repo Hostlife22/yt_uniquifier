@@ -23,6 +23,11 @@ the last tag.
   failure so the next run reopens the encoder during preflight.
 - Verify that SDR full/limited range, AAC+Opus container policy and persisted-seed
   resume semantics survive real segment/concat processing on the qualified Mac.
+- Verify synthetic audio events before, on and after successive divergent-window
+  crossfades are neither dropped nor repeated and do not accumulate timing drift.
+- Make libx264 emit the documented H.264 upload structure (High Profile, CABAC,
+  maximum two B-frames and a closed half-frame-rate GOP), with a plan-hash policy
+  revision that prevents reuse of segments encoded under the old defaults.
 - Make encoder discovery probe `libaom-av1` with fast probe-only settings so a
   working reference encoder is not hidden by the generic 15-second timeout.
 - Compare concat seam windows against the matching source interval with bounded

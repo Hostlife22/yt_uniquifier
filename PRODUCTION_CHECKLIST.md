@@ -79,7 +79,9 @@ release blockers, поэтому checklist намеренно не отмече�
       fallbacks have distinct explicit reasons.
 - [x] Haas rejects non-stereo; reverb/compand/noise/pitch plus EQ/smear/resample
       preserve mono, stereo and 5.1 channel counts in the real FFmpeg matrix.
-- [ ] Boundary impulse/listening tests find no click, gap, repeat or accumulated shift.
+- [x] Synthetic impulses before/on/after two window crossfades retain exactly one
+      event each within 30 ms, with no repeat/drop or accumulated duration shift.
+- [ ] Natural speech/music listening tests find no click or audible tonal transition.
 
 ## 6. Profiles and transforms
 
@@ -110,7 +112,11 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
       H.264 + HEVC VideoToolbox verified on this Intel Mac, other vendors unavailable.
 - [ ] Per-device concurrency measured; jobs routed to a device, not only counted.
-- [ ] GOP/keyframe/B-frame/profile/level policy documented per target.
+- [x] libx264 H.264 policy is explicit and bitstream-tested: High Profile, CABAC,
+      max two B-frames and closed half-frame-rate GOP; plan hash invalidates old
+      resume artifacts when the policy changes.
+- [ ] NVENC/QSV/AMF/VideoToolbox and AV1/HEVC GOP/profile/level behavior is
+      bitstream-qualified per advertised target.
 - [x] Hardware-first is not implicit in quality-first mode; `quality` is default and
       `balanced|speed` require an explicit environment policy.
 
@@ -202,8 +208,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1593 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `82.32%` (`1456 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1601 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `82.36%` (`1462 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -226,7 +232,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1593 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1601 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -240,9 +246,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1593 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1601 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 82.32% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 82.36% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

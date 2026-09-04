@@ -301,7 +301,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   default; explicit override is strict; job-resolution/pixfmt/rate-control probe and
   NVIDIA-aware cache key are active; a later segment runtime failure invalidates the
   exact-job success so the next preflight reprobes it; unverified `av1_vulkan` is
-  disabled. Per-GPU routing and the external NVENC/QSV/AMF matrix remain open.
+  disabled. The libx264 H.264 path now has a bitstream-tested High/CABAC/max-2-B/
+  closed half-FPS GOP policy and increments an internal plan-hash revision to prevent
+  mixed-policy resume. Per-GPU routing and hardware/AV1/HEVC structure qualification
+  remain open.
 
 ### 4.2 Resource-aware scheduling
 

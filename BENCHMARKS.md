@@ -41,6 +41,8 @@ ingestion/transcode остаются `NOT VERIFIED`.
 |---|---:|---|
 | Registered seam diagnostic | Clean FFV1 source/output passes; black boundary defect fails; 8 focused tests | Tool compares source/output with reset PTS and ±frame registration instead of output/self motion |
 | Audio layout/rate matrix | 24 real-FFmpeg cases: 7 effects × mono/stereo/5.1 plus 44.1/48/96 kHz | Tested effects preserve channel count; Haas stays stereo-only fail-closed; final rate is 48 kHz |
+| Windowed audio boundary events | Six pulse markers before/on/after the 60 s and 120 s crossfades retained exactly once within 30 ms; 180 s duration stayed within one AAC-frame budget | Crossfade assembly does not drop, repeat or accumulate timing error on the synthetic divergent-EQ fixture |
+| libx264 H.264 upload structure | 24 FPS output: High Profile, CABAC, max B-run 2, four IDR GOP starts across 48 frames with max interval 12 | Software H.264 no longer relies on library GOP/B-frame defaults; hardware/AV1/HEVC remain separately unqualified |
 | Multi-audio codec/container matrix | AAC main + Opus secondary across MP4/MOV/MKV | MP4/MOV transcode unsupported passthrough to AAC; MKV preserves Opus and stream metadata |
 | Loudnorm mode observability | 44.1 kHz transformed fixture requested linear; FFmpeg reported dynamic; output remained -14.0 LUFS | Runtime mode and fallback reason are now retained instead of assuming measured input guarantees linear processing |
 | Seed/resume reproducibility | Fresh invocation seed differs, persisted seed is restored; retained segment/audio mtimes+hashes and decoded A/V SHA-256 remain equal | Resume does not reroll stochastic transforms or reprocess completed media |
@@ -50,8 +52,8 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1593 passed, 2 expected skipped; Ruff + strict mypy pass; 10:42 | Current Phase 6 changes do not regress the complete Mac suite |
-| CI-equivalent coverage | 1456 passed, 1 expected skipped, 138 deselected; 82.32% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
+| Full local quality gate | 1601 passed, 2 expected skipped; Ruff + strict mypy pass; 10:54 | Current Phase 6 changes do not regress the complete Mac suite |
+| CI-equivalent coverage | 1462 passed, 1 expected skipped, 140 deselected; 82.36% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
 
 The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
 and #12. Their production code is intentionally not implemented before the mandatory

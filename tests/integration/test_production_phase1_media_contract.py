@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
+from array import array
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,57 @@ def _audio_duration(path: Path) -> float:
         check=True, capture_output=True, text=True, timeout=30,
     ).stdout.strip()
     return float(value)
+
+
+def _decoded_mono_samples(path: Path, *, sample_rate: int = 48_000) -> array[float]:
+    payload = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path),
+            "-map", "0:a:0", "-ac", "1", "-ar", str(sample_rate),
+            "-f", "f32le", "-",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    ).stdout
+    samples = array("f")
+    samples.frombytes(payload)
+    return samples
+
+
+def _loud_event_times(
+    samples: array[float],
+    *,
+    sample_rate: int = 48_000,
+    bin_duration_sec: float = 0.005,
+    rms_threshold: float = 0.12,
+) -> list[float]:
+    """Return peak times of separated high-energy regions in decoded PCM."""
+    bin_size = round(sample_rate * bin_duration_sec)
+    loud_bins: list[int] = []
+    for bin_index, start in enumerate(range(0, len(samples), bin_size)):
+        chunk = samples[start:start + bin_size]
+        rms = math.sqrt(sum(value * value for value in chunk) / len(chunk))
+        if rms >= rms_threshold:
+            loud_bins.append(bin_index)
+
+    clusters: list[tuple[int, int]] = []
+    for bin_index in loud_bins:
+        if not clusters or bin_index > clusters[-1][1] + 1:
+            clusters.append((bin_index, bin_index))
+        else:
+            clusters[-1] = (clusters[-1][0], bin_index)
+
+    peaks: list[float] = []
+    for first_bin, last_bin in clusters:
+        first_sample = first_bin * bin_size
+        last_sample = min(len(samples), (last_bin + 1) * bin_size)
+        peak_sample = max(
+            range(first_sample, last_sample),
+            key=lambda index: abs(samples[index]),
+        )
+        peaks.append(peak_sample / sample_rate)
+    return peaks
 
 
 def _audio_packet_bounds(path: Path) -> tuple[float, float]:
@@ -556,3 +609,57 @@ def test_windowed_audio_does_not_accumulate_crossfade_duration(
     # AAC uses 1024-sample frames: permit one encoded frame plus ffprobe
     # rounding, but no 0.1 s accumulation per window boundary.
     assert abs(_audio_duration(output) - 125.0) <= 0.03
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_windowed_audio_preserves_events_around_crossfade_boundaries(
+    tmp_path: Path, isolated_cache: Path,
+) -> None:
+    """Crossfades must not drop, repeat or shift content at later windows."""
+    source = tmp_path / "boundary-events.mkv"
+    duration_sec = 180.0
+    expected_events = (59.75, 60.0, 60.25, 119.75, 120.0, 120.25)
+    pulse_expression = "+".join(
+        f"if(between(t\\,{timestamp:.3f}\\,{timestamp + 0.02:.3f})\\,"
+        "0.75*sin(2*PI*3000*t)\\,0)"
+        for timestamp in expected_events
+    )
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", f"color=s=160x90:r=1:d={duration_sec}",
+            "-f", "lavfi", "-i",
+            (
+                "aevalsrc=0.02*sin(2*PI*(220*t+2*t*t))+"
+                f"{pulse_expression}:s=48000:d={duration_sec}"
+            ),
+            "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    profile = Profile(
+        name="window-boundary-contract",
+        seed=17,
+        seed_strategy="divergent",
+        transforms=[TransformConfig(
+            id="audio.eq",
+            params={"randomize_bands": True, "jitter_db": 1.5},
+        )],
+    )
+    plan = build_plan(source, profile, encoder_override="libx264")
+    output = tmp_path / "boundary-events.m4a"
+
+    command, _ = build_main_audio_command_windowed(plan, output)
+    subprocess.run(command.args, check=True, capture_output=True, timeout=60)
+
+    actual_events = _loud_event_times(_decoded_mono_samples(output))
+    assert len(actual_events) == len(expected_events), (
+        f"expected one decoded event per marker, got {actual_events}"
+    )
+    for actual, expected in zip(actual_events, expected_events, strict=True):
+        assert actual == pytest.approx(expected, abs=0.03)
+    assert abs(_audio_duration(output) - duration_sec) <= 0.03

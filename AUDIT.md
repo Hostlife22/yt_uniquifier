@@ -19,8 +19,8 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-04):
 
 - Ruff и strict mypy: passed (`158` source files).
-- Canonical `make check`: `1593 passed, 2 skipped` на полностью установленном
-  optional environment (`10:42`, current Phase 6 hardening повтор).
+- Canonical `make check`: `1601 passed, 2 skipped` на полностью установленном
+  optional environment (`10:54`, current Phase 6 hardening повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -44,6 +44,9 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   frames; 3 h no-op resume сохранил output SHA и занял `4.24 s`.
 - Fresh resume invocation восстанавливает persisted seed: готовые video/audio
   artifacts сохраняют mtime+hash, а decoded video/audio SHA-256 совпадают точно.
+- libx264 H.264 output at 24 FPS подтверждает High Profile, CABAC, max two
+  consecutive B-frames and closed 12-frame GOP; hardware/AV1/HEVC structure remains
+  `NOT VERIFIED`.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
 - Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
@@ -122,7 +125,7 @@ Chromaprint и SSCD полезны только как внутренние diag
 | `src/yt_uniquifier/core` | 77 Python files |
 | GUI | 47 files |
 | Web | 14 files |
-| Tests | 225 files |
+| Tests | 226 files |
 | Docs | 30 documents, около 4.9k строк |
 | Specs | 37 documents, около 14.3k строк |
 | Shipped profiles | 16 YAML |
@@ -486,8 +489,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1593 passed, 2 skipped на fully provisioned macOS environment |
-| Branch coverage gate | 82.32% (`1456 passed`, required 80%) |
+| Full `make check` | 1601 passed, 2 skipped на fully provisioned macOS environment |
+| Branch coverage gate | 82.36% (`1462 passed`, required 80%) |
 | Ruff | Passed |
 | Strict mypy (`158` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
