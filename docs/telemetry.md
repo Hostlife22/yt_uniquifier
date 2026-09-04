@@ -37,6 +37,15 @@ content, file hashes, audio fingerprints, profile YAML body,
 durations, resolutions, error tracebacks past the first 200
 chars, or anything that would identify the source artifact.
 
+The same bounded recursive redactor is installed before structured log sinks,
+audit JSONL writers, and telemetry serialization. Sensitive key names
+(`authorization`, cookies, passwords, secrets, API/access/private keys and tokens),
+inline bearer/basic credentials, common GitHub/OpenAI token forms and token-bearing
+query parameters are replaced with `<REDACTED>`. Public audit fields redact every
+absolute path to `<PATH>/<basename>`; structured logs retain only that safe basename.
+Prometheus uses fixed state and encoder label vocabularies and never stores paths,
+tokens, run IDs, plan IDs, job IDs, or segment IDs as labels.
+
 ## What does *not* go into the event
 
 * Full paths. The default config has `redact_paths=True` which

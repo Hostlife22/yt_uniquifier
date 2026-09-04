@@ -231,11 +231,12 @@ def test_run_lifecycle_streams_events_and_completes(
 
     # Stub orchestrator + build_plan + load_profile so we don't need
     # a real source / ffmpeg / encoder probe.
+    from yt_uniquifier.web import metrics
     from yt_uniquifier.web.routes import run as run_routes
 
     fake_run_full = _stub_run_full_factory([
         ("log", {"phase": "preflight", "message": "ok"}),
-        ("segment_done", {"idx": 0}),
+        ("segment_done", {"segment": 0, "status": "done"}),
         ("completed", {"output": "out.mp4"}),
     ])
     monkeypatch.setattr(run_routes, "run_full", fake_run_full)
@@ -272,6 +273,11 @@ def test_run_lifecycle_streams_events_and_completes(
     src_path = tmp_path / "in.mp4"
     src_path.touch()
 
+    state_before = {
+        state: metrics.RUN_STATE_EVENTS_TOTAL.labels(state=state)._value.get()
+        for state in ("queued", "active", "completed")
+    }
+
     r = client.post("/api/run", json={
         "input_path": str(src_path),
         "profile_path": str(prof_path),
@@ -291,11 +297,19 @@ def test_run_lifecycle_streams_events_and_completes(
     assert "preflight" in body
     assert "segment_done" in body
     assert "event: end" in body
+    assert '"plan_id": "deadbeef"' in body
+    assert '"job_id":' in body
+    assert '"segment_id":' in body
 
     # Status endpoint reflects the terminal state.
     r2 = client.get(f"/api/run/{run_id}/status")
     assert r2.status_code == 200
     assert r2.json()["status"] in {"completed", "running"}
+    for state in ("queued", "active", "completed"):
+        assert (
+            metrics.RUN_STATE_EVENTS_TOTAL.labels(state=state)._value.get()
+            == state_before[state] + 1
+        )
 
 
 def test_two_app_instances_cannot_reserve_the_same_output(
@@ -938,7 +952,7 @@ def test_audit_log_records_run_start_and_cancel(
     assert "api.run.cancel" in events
     start = next(ln for ln in lines if ln["event"] == "api.run.start")
     assert start["payload"]["run_id"] == run_id
-    assert start["payload"]["input"] == str(src_path)
+    assert start["payload"]["input"] == "<PATH>/x.mp4"
 
 
 def test_audit_is_noop_when_path_unset(

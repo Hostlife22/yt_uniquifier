@@ -22,6 +22,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from yt_uniquifier.core.redaction import redact_mapping
+
 _log = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 
@@ -49,7 +51,8 @@ def audit(
         "principal": principal,
         "payload": payload or {},
     }
-    line = json.dumps(record, default=str, ensure_ascii=False) + "\n"
+    safe_record = redact_mapping(record, all_absolute_paths=True)
+    line = json.dumps(safe_record, default=str, ensure_ascii=False) + "\n"
     try:
         with _LOCK:
             audit_log_path.parent.mkdir(parents=True, exist_ok=True)

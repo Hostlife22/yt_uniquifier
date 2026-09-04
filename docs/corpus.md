@@ -20,9 +20,9 @@ compatible.
 
 ```
 <corpus-dir>/
-├── corpus.db                  # SQLite (WAL mode)
-├── corpus.db-wal              # WAL journal (auto)
-├── corpus.db-shm              # shared-memory index (auto)
+├── index.sqlite               # SQLite (WAL mode)
+├── index.sqlite-wal           # WAL journal (auto)
+├── index.sqlite-shm           # shared-memory index (auto)
 └── index.json.migrated.<ts>   # one-shot backup of pre-v0.8.0 store
 ```
 
@@ -84,9 +84,13 @@ from yt_uniquifier.core.qa.corpus_db import CorpusDB, CorpusEntry
 with CorpusDB(Path("/var/yt-uniq/corpus")) as db:
     db.add_entry(CorpusEntry(
         id="2026-canonical-001",
-        name="Source A",
-        chromaprint=(...),
-        phash=(...),
+        path=Path("/media/Source A.mkv"),
+        added_at=1772755200.0,
+        duration_sec=3600.0,
+        phash_frames=(...),
+        audio_fingerprint=(...),
+        sample_count=60,
+        content_sha256="...full SHA-256...",
     ))
     print(len(db))
     for e in db.iter_entries():
@@ -103,14 +107,26 @@ contract as the v0.5 `CheckpointStore`).
 
 ```
 CorpusEntry(
-    id: str,                       # caller-assigned, unique
-    name: str,                     # display label
-    chromaprint: tuple[int, ...],  # uint32 frames from fpcalc
-    phash: tuple[int, ...],        # uint64 frames from pHash extractor
-    duration_sec: float = 0.0,
-    added_at: str = "",            # ISO-8601; auto-filled when omitted
+    id: str,                              # stable content SHA-256 prefix
+    path: Path,                           # current resolved location
+    added_at: float,                      # Unix timestamp
+    duration_sec: float,
+    phash_frames: tuple[int, ...],        # uint64 perceptual hashes
+    audio_fingerprint: tuple[int, ...],   # chromaprint frames
+    sample_count: int,
+    content_sha256: str | None = None,    # full digest; None for legacy rows
+    stat_size: int | None = None,
+    stat_mtime_ns: int | None = None,
 )
 ```
+
+Schema v2 identifies media by streamed SHA-256 content rather than by pathname.
+Moving or renaming identical bytes therefore keeps the corpus ID and updates the
+stored location. Replacing bytes at the same location creates a new ID and removes
+the stale path row in the same transaction, so old fingerprints cannot match the
+replacement. The size/mtime fields are diagnostics only; identity never relies on
+filesystem timestamps. Existing schema-v1 rows are upgraded in place and receive
+content metadata the next time they are ingested.
 
 ## Concurrency
 
@@ -144,9 +160,9 @@ that's a separate optimisation (see `core/qa/cid_predict.py`).
   same error explicitly.
 * **SQLite file is read-only.** `Corpus.add` raises `PipelineError`
   with the underlying `OperationalError` chained — no silent swallow.
-* **Schema drift.** `_init_schema()` runs at every connection open;
-  adding a column in a future version means a `CREATE TABLE IF NOT
-  EXISTS` plus an `ALTER TABLE` guarded by `PRAGMA user_version`.
+* **Schema drift.** `_init_schema()` runs at every connection open and adds missing
+  v2 columns after inspecting `PRAGMA table_info(entries)`; `schema_info` records the
+  active version.
 
 ## See also
 

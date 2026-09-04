@@ -41,6 +41,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.redaction import redact_mapping
 
 _log = logging.getLogger(__name__)
 
@@ -167,18 +168,8 @@ def redact_event(event: dict[str, Any]) -> dict[str, Any]:
     deliberately do NOT recurse arbitrarily so a malicious event can't
     burn CPU here by nesting 1000 levels deep.
     """
-    out: dict[str, Any] = {}
-    for k, v in event.items():
-        if isinstance(v, str):
-            out[k] = redact_path(v)
-        elif isinstance(v, dict):
-            out[k] = {
-                kk: (redact_path(vv) if isinstance(vv, str) else vv)
-                for kk, vv in v.items()
-            }
-        else:
-            out[k] = v
-    return out
+    redacted = redact_mapping(event)
+    return redacted if isinstance(redacted, dict) else {}
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
 from yt_uniquifier.core.checkpoint import CheckpointStore
+from yt_uniquifier.core.correlation import CorrelationIds
 from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.logging_config import get_logger
@@ -190,6 +191,7 @@ def run_full(
     options = _ensure_run_id(options)
     run_id = options.run_id
     assert run_id is not None  # _ensure_run_id post-condition
+    correlation = CorrelationIds.for_run(run_id, plan.plan_hash)
 
     # v1.1.0 Task 13: bind run_id + plan_hash so every structured log
     # line emitted from the orchestrator and its callees carries the
@@ -198,22 +200,18 @@ def run_full(
         "yt_uniquifier.orchestrator",
         run_id=run_id,
         plan_hash=plan.plan_hash,
+        plan_id=correlation.plan_id,
+        job_id=correlation.job_id,
     )
 
     raw_emit = on_event or (lambda _e: None)
 
     def emit(event: RunEvent) -> None:
-        # v1.1.0 Task 14: weave run_id into every payload so downstream
-        # subscribers (web /api/run response, GUI run history,
-        # /metrics counters) can correlate without a separate hook.
-        if "run_id" not in event.payload:
-            event = RunEvent(
-                kind=event.kind,
-                payload={**event.payload, "run_id": run_id},
-            )
-        raw_emit(event)
+        # Additive payload fields preserve the stable RunEvent dataclass while
+        # exposing the complete run → plan → job → segment hierarchy.
+        raw_emit(correlation.enrich(event))
 
-    log.info("run.started", input=str(plan.source.path), encoder=plan.encoder.name)
+    log.info("run.started", input_path=str(plan.source.path), encoder=plan.encoder.name)
     start_ts = time.time()
     import datetime as _dt
     started_at_dt = _dt.datetime.now(tz=_dt.UTC)
@@ -541,8 +539,12 @@ def _run_full_body(
                 "message": "restored run_seed from state.json",
                 "run_seed": stored_seed,
             }))
-    emit(RunEvent(kind="log", payload={"phase": "plan",
-                                       "segments": len(segments)}))
+    resumed = any(segment.status != "pending" for segment in segments)
+    emit(RunEvent(kind="log", payload={
+        "phase": "plan",
+        "segments": len(segments),
+        "resumed": resumed,
+    }))
 
     # Process pending video segments — sequentially (workers <= 1) or in
     # parallel up to the detected encoder capacity. The segmenter applies both
@@ -593,6 +595,11 @@ def _run_full_body(
             except OSError:
                 seg_sha256 = None
             store.mark(idx, "done", src_path=src, out_path=out, sha256=seg_sha256)
+            emit(RunEvent(kind="log", payload={
+                "phase": "segment",
+                "segment": idx,
+                "status": "done",
+            }))
             _maybe_emit_divergence(idx, out, seg_by_idx, options, plan, emit)
 
         try:

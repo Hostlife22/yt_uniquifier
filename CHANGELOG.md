@@ -14,12 +14,25 @@ the last tag.
 
 ### Added
 
+- Add a central HDR/audio/temporal/container compatibility graph, preflight
+  enforcement for generic order/pair conflicts, and an operator reference covering
+  the purpose, order, quality, speed, HDR and VFR behavior of all built-in transforms.
+- Add deterministic run → plan → job → segment correlation fields to structured
+  events/logs and bounded Prometheus lifecycle counters for queued, active, failed,
+  cancelled, resumed and completed work.
+- Add real amd64/arm64 Docker build, clip-processing, startup and health smoke gates;
+  reuse their per-architecture BuildKit caches in the signed multi-arch publish job.
 - Add an opt-in, manual self-hosted hardware qualification workflow for
   NVENC/QSV/AMF/VideoToolbox, with strict requested-encoder bitstream contracts and
   retained JUnit, encoded-media, FFprobe, FFmpeg and GPU-inventory evidence.
 
 ### Fixed
 
+- Base corpus identity on content SHA-256 so moves retain IDs and in-place content
+  replacement atomically invalidates stale fingerprints; upgrade schema-v1 stores.
+- Recursively redact sensitive paths and credentials from structured logs, audit and
+  telemetry records, and remove unbounded/sensitive correlation data from metrics.
+- Pre-create and own Docker data-volume directories for the non-root runtime user.
 - Keep `libaom-av1` in valid constant-quality mode by no longer combining
   `-b:v 0` with incompatible VBV `maxrate`/`bufsize` options.
 - Make HEVC/AV1 random access predictable with a two-second maximum GOP, closed

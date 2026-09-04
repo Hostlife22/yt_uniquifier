@@ -51,7 +51,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg libssl3 ca-certificates curl tini && \
     rm -rf /var/lib/apt/lists/* && \
-    useradd --create-home --shell /usr/sbin/nologin --uid 1000 ytuniq
+    useradd --create-home --shell /usr/sbin/nologin --uid 1000 ytuniq && \
+    mkdir -p /data/input /data/output /data/work /data/profiles && \
+    chown -R ytuniq:ytuniq /data
 
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels 'yt-uniquifier[web]' && \

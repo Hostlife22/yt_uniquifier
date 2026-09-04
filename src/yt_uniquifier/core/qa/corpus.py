@@ -74,7 +74,38 @@ class Corpus:
         """
         if not path.exists():
             raise FileNotFoundError(path)
-        entry_id = _hash_path(path)
+        resolved_path = path.resolve()
+        stat = resolved_path.stat()
+        content_sha256 = _hash_file(resolved_path)
+        entry_id = content_sha256[:16]
+        existing = self._db.lookup_by_id(entry_id)
+        if existing is not None and existing.content_sha256 not in {
+            None, content_sha256,
+        }:
+            # A 64-bit prefix collision is extremely unlikely, but never let it
+            # silently alias two licensed assets. Expand only the colliding ID.
+            entry_id = content_sha256[:32]
+            existing = self._db.lookup_by_id(entry_id)
+        if (
+            existing is not None
+            and existing.content_sha256 == content_sha256
+            and existing.sample_count == samples
+        ):
+            moved = CorpusEntry(
+                id=existing.id,
+                path=resolved_path,
+                added_at=existing.added_at,
+                duration_sec=existing.duration_sec,
+                phash_frames=existing.phash_frames,
+                audio_fingerprint=existing.audio_fingerprint,
+                sample_count=existing.sample_count,
+                content_sha256=content_sha256,
+                stat_size=stat.st_size,
+                stat_mtime_ns=stat.st_mtime_ns,
+            )
+            self._db.add_entry(moved)
+            return moved
+
         duration = phash._probe_duration(path)
         frames = phash.sample_frames(path, n=samples)
         phash_ints = tuple(int(str(imagehash.phash(f)), 16) for f in frames)
@@ -90,12 +121,15 @@ class Corpus:
 
         entry = CorpusEntry(
             id=entry_id,
-            path=path.absolute(),
+            path=resolved_path,
             added_at=time.time(),
             duration_sec=duration,
             phash_frames=phash_ints,
             audio_fingerprint=audio_ints,
             sample_count=len(phash_ints),
+            content_sha256=content_sha256,
+            stat_size=stat.st_size,
+            stat_mtime_ns=stat.st_mtime_ns,
         )
         self._db.add_entry(entry)
         return entry
@@ -168,7 +202,17 @@ class Corpus:
 
 
 def _hash_path(path: Path) -> str:
+    """Legacy path-derived ID helper retained for old tests/importers."""
     return hashlib.sha256(str(path.absolute()).encode("utf-8")).hexdigest()[:16]
+
+
+def _hash_file(path: Path) -> str:
+    """Return a streaming content identity without loading large media in RAM."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _phash_similarity(a: tuple[int, ...] | list[int], b: list[int]) -> float:

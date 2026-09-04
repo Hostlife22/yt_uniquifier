@@ -48,9 +48,9 @@ on the same host.
 ## Docker
 
 The shipped `Dockerfile` is a two-stage build: a Python wheel
-builder and a runtime stage that copies `ffmpeg` and `ffprobe`
-out of `jrottenberg/ffmpeg:7-alpine` into a `python:3.12-slim`
-base. The runtime user is non-root (`uid 1000 ytuniq`); `tini`
+builder and a `python:3.12-slim-bookworm` runtime that installs Debian's
+architecture-matched `ffmpeg` and `ffprobe`. The runtime user is non-root
+(`uid 1000 ytuniq`); writable data-volume mount points are pre-created and `tini`
 reaps zombie ffmpeg subprocesses if the container is killed
 mid-encode.
 
@@ -70,6 +70,20 @@ USER ytuniq
 ```bash
 docker build -t yt-uniquifier:1.4.0 .
 ```
+
+The release workflow publishes one manifest for `linux/amd64` and `linux/arm64`.
+Before publishing, each architecture must build, generate an H.264/AAC fixture,
+process it through `yt-uniq`, verify the output bitstream, start the web service and
+pass `/healthz`:
+
+```bash
+tools/docker_multiarch_smoke.sh linux/amd64 yt-uniquifier:smoke-amd64
+tools/docker_multiarch_smoke.sh linux/arm64 yt-uniquifier:smoke-arm64
+```
+
+Running the non-native architecture uses QEMU and can be several times slower than
+a native build. GitHub Actions stores separate per-architecture BuildKit caches and
+reuses both in the final signed multi-arch build.
 
 ### Run (LAN trust)
 

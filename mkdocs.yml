@@ -61,6 +61,7 @@ nav:
   - Web UI & Docker: web.md
   - Profiles:
       - Schema & transforms: profiles.md
+      - Transform reference: transform_reference.md
       - Community marketplace: marketplace.md
       - Plugin transforms: plugins.md
   - Pipeline:

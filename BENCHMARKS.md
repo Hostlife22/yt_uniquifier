@@ -56,7 +56,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1617 passed, 2 expected skipped; Ruff + strict mypy pass; 12:20 | Current Phase 6 changes do not regress the complete Mac suite |
+| Full local quality gate | 1627 passed, 15 expected hardware/optional skips; Ruff + strict mypy (161 files) pass; 12:59 | Current production-hardening changes do not regress the complete Mac suite |
 | CI-equivalent coverage | 1472 passed, 1 expected skipped, 146 deselected; 82.35% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
 
 The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
@@ -322,8 +322,33 @@ branch-aware coverage. Wheel v1.4.0 собран.
 
 Это concurrency/correctness smoke, не throughput benchmark. Natural 4K/1–3 h
 bitrate-estimate accuracy, hard disk quotas, mixed GPU visibility, container encode,
-multi-arch image, containers без общего registry и NFS/network partitions остаются
+containers без общего registry и NFS/network partitions остаются
 `NOT VERIFIED`.
+
+## Docker multi-arch correctness smoke — 2026-09-04
+
+На Intel macOS/Docker Desktop с Buildx пройден одинаковый executable smoke для
+`linux/amd64` и QEMU-emulated `linux/arm64`. Каждый leg:
+
+1. собрал architecture-native Debian/Python/FFmpeg image;
+2. создал 1 s 160×90, 24 FPS H.264/AAC input внутри контейнера;
+3. выполнил `yt-uniq run` с `libx264`, реальным segment/concat/final-decode gate;
+4. подтвердил H.264 output через `ffprobe`;
+5. запустил non-root web runtime и прошёл `/healthz` при Docker health
+   state `starting|healthy`.
+
+| Platform | Build | CLI process + bitstream | Web start/health | Result |
+|---|---:|---:|---:|---|
+| `linux/amd64` | native | PASS | PASS | PASS |
+| `linux/arm64` | QEMU on Intel Mac | PASS | PASS | PASS |
+
+On the final snapshot, the changed ARM64 builder and runtime-install layers took
+about 243 s and 246 s respectively under QEMU; an unchanged cached rebuild took
+3.2 s. Final clip processing took about 3.1 s on amd64 and 17.2 s under ARM64 QEMU.
+These are diagnostic timings, not throughput claims. CI now isolates BuildKit caches
+per architecture and feeds both into the final manifest build. Native arm64 runner
+performance and the published GHCR manifest/attestations remain release-workflow
+verification items.
 
 ## Production benchmark protocol
 

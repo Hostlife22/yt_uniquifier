@@ -90,12 +90,12 @@ release blockers, поэтому checklist намеренно не отмече�
       actual command or are removed through approved migration.
 - [x] Total crop semantics match documented maximum.
 - [ ] No-upscale default enforced unless user explicitly requests upscale.
-- [ ] Transform compatibility graph rejects invalid HDR/audio/time/container combos.
+- [x] Transform compatibility graph rejects invalid HDR/audio/time/container combos.
 - [x] Invalid `target_vmaf` feedback rejects unregistered geometry/time/overlay/
       tonemap paths before encoding, including direct segmenter calls.
 - [x] Preflight surfaces implicit/explicit upscale, multiple resampling,
       noise+sharpen, temporal jitter and compound audio-effect quality risks.
-- [ ] Each transform has purpose, quality/size/time data and expected ordering.
+- [x] Each transform has purpose, quality/size/time data and expected ordering.
 - [ ] Quality-first profile has corpus-backed VMAF/SSIM/PSNR/LUFS/size/time bands.
 - [x] Aggressive/destructive profiles are opt-in by explicit profile selection and
       visibly marked experimental; corpus-backed safe operating bounds remain pending.
@@ -160,9 +160,10 @@ release blockers, поэтому checklist намеренно не отмече�
       shell-grandchild and watchdog paths pass on this Mac, remote Linux/Windows
       runner qualification remains `NOT VERIFIED`.
 - [x] Parallel first failure cancels sibling work even without external token.
-- [ ] Run/plan/job/segment correlation IDs appear in structured logs/events.
-- [ ] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
-- [ ] Sensitive paths/tokens are not exposed in public logs/metrics.
+- [x] Run/plan/job/segment correlation IDs appear in structured logs/events.
+- [x] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
+- [x] Sensitive paths/tokens are not exposed in public logs/metrics; metric labels
+      use bounded state/encoder vocabularies and never correlation/path labels.
 
 ## 10. QA and calibration
 
@@ -179,7 +180,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] SSCD reports temporal coverage/confidence and supports registered comparison.
 - [x] CLI/HTML similarity diagnostics are clearly separated from correctness/quality;
       structured JSON axis fields await an approved stable-schema RFC.
-- [ ] Corpus IDs/content cache survive move and invalidate on content change.
+- [x] Corpus IDs/content cache survive move and invalidate on content change; legacy
+      schema-v1 SQLite stores upgrade in place.
 - [x] Calibration fixed seed/common random numbers reproduce trials.
 - [x] Calibration's fixed time budget covers opening/middle/end with video/audio;
       natural-content representativeness remains a release qualification item.
@@ -214,7 +216,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1617 passed`, `2 skipped`);
+- [x] Ruff, strict mypy and full local test gate pass (`1627 passed`, `15 skipped`);
       local CI-equivalent core branch coverage is `82.35%` (`1472 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
@@ -238,7 +240,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1617 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1627 passed,
+      15 expected hardware/optional skips)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -246,19 +249,21 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
 - [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
       and `/readyz` pass, shared resource-registry path is writable.
-- [ ] Docker multi-arch build/start/health/process smoke
+- [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and
+      QEMU-emulated `linux/arm64` on Docker Desktop/macOS; native Linux CI remains
+      the release gate.
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1617 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1627 passed, 15 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
 - [x] CI-equivalent non-integration branch coverage gate: 82.35% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
-- [x] Strict mypy: passed (158 source files).
+- [x] Strict mypy: passed (161 source files).
 - [x] All 16 shipped profiles load.
 - [x] Real Calibration v2 CLI: stratified probe, 3 encode/quality/similarity trials,
       strict media contract, tuned YAML and second-run scored-cache reuse passed.

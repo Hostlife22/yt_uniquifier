@@ -18,6 +18,7 @@ from yt_uniquifier.core.auxiliary_streams import (
 from yt_uniquifier.core.models import EncoderCandidate, Plan, SourceMeta
 from yt_uniquifier.core.resource_budget import estimate_work_bytes
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
+from yt_uniquifier.core.transform_compatibility import evaluate_transform_compatibility
 
 _log = _logging.getLogger(__name__)
 
@@ -93,12 +94,26 @@ def preflight(
     findings.extend(_check_subtitle_burnin(plan))
     findings.extend(_check_timeline_rate(plan))
     findings.extend(_check_audio_channel_layout(plan))
+    findings.extend(_check_transform_compatibility(plan))
     findings.extend(_check_target_vmaf_reference(plan))
     findings.extend(_check_quality_risks(plan))
     findings.extend(_check_container_metadata_loss(plan))
     if verify_encoder_capability and source.video:
         findings.extend(_check_encoder_capability(plan))
     return findings
+
+
+def _check_transform_compatibility(plan: Plan) -> list[PreflightFinding]:
+    """Convert declarative graph violations to the stable preflight model."""
+    return [
+        PreflightFinding(
+            code=issue.code,
+            severity=issue.severity,
+            message=issue.message,
+            suggestion=issue.suggestion,
+        )
+        for issue in evaluate_transform_compatibility(plan)
+    ]
 
 
 _TARGET_VMAF_NEEDS_REGISTERED_REFERENCE = {

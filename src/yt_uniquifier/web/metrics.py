@@ -34,6 +34,39 @@ RUNS_TOTAL = Counter(
     labelnames=("result",),
 )
 
+RUN_STATE_EVENTS_TOTAL = Counter(
+    "yt_uniq_run_state_events_total",
+    "Run lifecycle transitions. Labels are a fixed bounded state vocabulary.",
+    labelnames=("state",),
+)
+
+RUN_STATES = (
+    "queued",
+    "active",
+    "failed",
+    "cancelled",
+    "resumed",
+    "completed",
+)
+
+_ENCODER_LABELS = {
+    "libx264",
+    "libx265",
+    "libaom-av1",
+    "h264_nvenc",
+    "hevc_nvenc",
+    "av1_nvenc",
+    "h264_qsv",
+    "hevc_qsv",
+    "av1_qsv",
+    "h264_amf",
+    "hevc_amf",
+    "av1_amf",
+    "h264_videotoolbox",
+    "hevc_videotoolbox",
+    "unknown",
+}
+
 # Histograms ------------------------------------------------------------
 
 SEGMENT_DURATION_SECONDS = Histogram(
@@ -62,8 +95,12 @@ ACTIVE_RUNS = Gauge(
 PHASH_DIVERGENCE_LAST = Gauge(
     "yt_uniq_phash_divergence_last",
     "Last observed pHash divergence sample (0..64; higher = more diverged).",
-    labelnames=("run_id",),
 )
+
+# Materialise every bounded state at import time so a fresh /metrics scrape is
+# operationally useful before the first run reaches that state.
+for _state in RUN_STATES:
+    RUN_STATE_EVENTS_TOTAL.labels(state=_state)
 
 
 def update_from_event(event: Any) -> None:
@@ -79,27 +116,54 @@ def update_from_event(event: Any) -> None:
     if not isinstance(payload, dict):
         return
 
-    if kind == "segment_done":
+    if kind == "segment_done" or (
+        kind == "log"
+        and payload.get("phase") == "segment"
+        and payload.get("status") == "done"
+    ):
         status = str(payload.get("status", "done"))
         SEGMENTS_TOTAL.labels(status=status).inc()
         duration = payload.get("duration_sec")
         if isinstance(duration, (int, float)) and duration >= 0:
             SEGMENT_DURATION_SECONDS.observe(float(duration))
     elif kind == "error":
-        encoder = str(payload.get("encoder") or "unknown")
-        FFMPEG_FAILURES_TOTAL.labels(encoder=encoder).inc()
-        SEGMENTS_TOTAL.labels(status="failed").inc()
+        candidate = str(payload.get("encoder") or "unknown")
+        # Labels are public and cardinality-sensitive. Never copy arbitrary
+        # event/path/token data into the Prometheus label set.
+        encoder = candidate if candidate in _ENCODER_LABELS else "unknown"
+        if "encoder" in payload:
+            FFMPEG_FAILURES_TOTAL.labels(encoder=encoder).inc()
+        segment = payload.get("segment")
+        if isinstance(segment, int) and not isinstance(segment, bool):
+            SEGMENTS_TOTAL.labels(status="failed").inc()
     elif kind == "divergence_sample":
-        rid = str(payload.get("run_id") or "unknown")
         val = payload.get("phash_distance")
         if isinstance(val, (int, float)):
-            PHASH_DIVERGENCE_LAST.labels(run_id=rid).set(float(val))
+            # Never label metrics by run/job/path/token: those values are
+            # unbounded and may be sensitive. Correlation stays in events/logs.
+            PHASH_DIVERGENCE_LAST.set(float(val))
+    elif (
+        kind == "log"
+        and payload.get("phase") == "plan"
+        and payload.get("resumed") is True
+    ):
+        observe_run_state("resumed")
+
+
+def observe_run_state(state: str) -> None:
+    """Increment one bounded lifecycle transition counter."""
+    if state not in RUN_STATES:
+        raise ValueError(f"unsupported run state: {state!r}")
+    RUN_STATE_EVENTS_TOTAL.labels(state=state).inc()
 
 
 def observe_run_terminal(result: str, wall_clock_sec: float) -> None:
     """Record run-level outcome + wall-clock. Called once per run by
     the web layer's worker thread on success / cancel / failure.
     """
+    if result not in {"completed", "failed", "cancelled"}:
+        raise ValueError(f"unsupported terminal result: {result!r}")
+    observe_run_state(result)
     RUNS_TOTAL.labels(result=result).inc()
     if wall_clock_sec >= 0:
         RUN_DURATION_SECONDS.observe(wall_clock_sec)

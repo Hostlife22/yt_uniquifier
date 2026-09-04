@@ -43,7 +43,7 @@ from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SQLITE_FILENAME = "index.sqlite"
 LEGACY_JSON_FILENAME = "index.json"
 
@@ -59,7 +59,10 @@ CREATE TABLE IF NOT EXISTS entries (
     duration_sec REAL NOT NULL,
     sample_count INTEGER NOT NULL,
     phash_frames BLOB NOT NULL,
-    audio_fp BLOB NOT NULL
+    audio_fp BLOB NOT NULL,
+    content_sha256 TEXT,
+    stat_size INTEGER,
+    stat_mtime_ns INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_added_at ON entries(added_at);
@@ -75,13 +78,17 @@ class CorpusEntry:
     high-level facade. ``corpus.py`` re-exports for backward compat.
     """
 
-    id: str                              # first 16 hex of sha256(absolute path)
+    id: str                              # stable prefix of the content SHA-256
     path: Path
     added_at: float                      # unix timestamp
     duration_sec: float
     phash_frames: tuple[int, ...]        # 64-bit perceptual hashes
     audio_fingerprint: tuple[int, ...]   # chromaprint subfingerprints (or empty)
     sample_count: int                    # len(phash_frames)
+    # Added in schema v2. None denotes a migrated legacy path-keyed row.
+    content_sha256: str | None = None
+    stat_size: int | None = None
+    stat_mtime_ns: int | None = None
 
 
 def _pack_ints(seq: tuple[int, ...]) -> bytes:
@@ -117,6 +124,13 @@ def _row_to_entry(row: sqlite3.Row) -> CorpusEntry:
         phash_frames=_unpack_ints(bytes(row["phash_frames"])),
         audio_fingerprint=_unpack_ints(bytes(row["audio_fp"])),
         sample_count=int(row["sample_count"]),
+        content_sha256=(
+            str(row["content_sha256"]) if row["content_sha256"] is not None else None
+        ),
+        stat_size=int(row["stat_size"]) if row["stat_size"] is not None else None,
+        stat_mtime_ns=(
+            int(row["stat_mtime_ns"]) if row["stat_mtime_ns"] is not None else None
+        ),
     )
 
 
@@ -172,8 +186,21 @@ class CorpusDB:
         cur = self._conn.cursor()
         try:
             cur.executescript(_SCHEMA_SQL)
+            columns = {
+                str(row[1]) for row in cur.execute("PRAGMA table_info(entries)")
+            }
+            for name, sql_type in (
+                ("content_sha256", "TEXT"),
+                ("stat_size", "INTEGER"),
+                ("stat_mtime_ns", "INTEGER"),
+            ):
+                if name not in columns:
+                    cur.execute(f"ALTER TABLE entries ADD COLUMN {name} {sql_type}")
+            # Older releases inserted the version as the primary-key value.
+            # Replace it atomically rather than accumulating one row per version.
+            cur.execute("DELETE FROM schema_info")
             cur.execute(
-                "INSERT OR IGNORE INTO schema_info (version) VALUES (?)",
+                "INSERT INTO schema_info (version) VALUES (?)",
                 (SCHEMA_VERSION,),
             )
         finally:
@@ -211,12 +238,20 @@ class CorpusDB:
         [new]`).
         """
         with self._lock, self._tx() as cur:
+            # One physical path represents one current content version. A file
+            # replaced in place therefore cannot leave its stale fingerprints
+            # searchable under the old content ID.
+            cur.execute(
+                "DELETE FROM entries WHERE path = ? AND id != ?",
+                (str(entry.path), entry.id),
+            )
             cur.execute(
                 """
                 INSERT OR REPLACE INTO entries (
                     id, path, added_at, duration_sec,
-                    sample_count, phash_frames, audio_fp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    sample_count, phash_frames, audio_fp,
+                    content_sha256, stat_size, stat_mtime_ns
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.id,
@@ -226,8 +261,21 @@ class CorpusDB:
                     entry.sample_count,
                     _pack_ints(entry.phash_frames),
                     _pack_ints(entry.audio_fingerprint),
+                    entry.content_sha256,
+                    entry.stat_size,
+                    entry.stat_mtime_ns,
                 ),
             )
+
+    def lookup_by_path(self, path: Path) -> CorpusEntry | None:
+        """Return the row currently associated with an absolute path."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM entries WHERE path = ?", (str(path),)
+            )
+            row = cur.fetchone()
+            cur.close()
+        return _row_to_entry(row) if row else None
 
     def lookup_by_id(self, entry_id: str) -> CorpusEntry | None:
         with self._lock:

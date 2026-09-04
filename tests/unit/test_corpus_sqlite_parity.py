@@ -13,6 +13,7 @@ silently drift.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -134,6 +135,39 @@ def test_corpus_db_context_manager_closes(tmp_path: Path) -> None:
         assert len(db2) == 1
     finally:
         db2.close()
+
+
+def test_schema_v1_is_upgraded_in_place(tmp_path: Path) -> None:
+    db_path = tmp_path / SQLITE_FILENAME
+    connection = sqlite3.connect(db_path)
+    connection.executescript("""
+        CREATE TABLE schema_info (version INTEGER PRIMARY KEY);
+        INSERT INTO schema_info (version) VALUES (1);
+        CREATE TABLE entries (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            added_at REAL NOT NULL,
+            duration_sec REAL NOT NULL,
+            sample_count INTEGER NOT NULL,
+            phash_frames BLOB NOT NULL,
+            audio_fp BLOB NOT NULL
+        );
+    """)
+    connection.close()
+
+    with CorpusDB(tmp_path) as db:
+        db.add_entry(_sample_entry("legacy-row"))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(entries)")
+        }
+        version = connection.execute("SELECT version FROM schema_info").fetchone()[0]
+    finally:
+        connection.close()
+    assert {"content_sha256", "stat_size", "stat_mtime_ns"} <= columns
+    assert version == 2
 
 
 # ---------------------------------------------------------------------------

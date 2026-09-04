@@ -43,6 +43,37 @@ def test_add_same_path_replaces_entry(tmp_path: Path,
     assert len(c.list_all()) == 1
 
 
+def test_move_preserves_content_id(tmp_path: Path,
+                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_phash_and_audio(monkeypatch)
+    original = tmp_path / "original.mp4"
+    moved = tmp_path / "moved.mp4"
+    original.write_bytes(b"licensed-content")
+    corpus = Corpus(tmp_path / "corpus")
+    first = corpus.add(original)
+    original.rename(moved)
+    second = corpus.add(moved)
+
+    assert second.id == first.id
+    assert second.path == moved.resolve()
+    assert len(corpus.list_all()) == 1
+
+
+def test_replaced_content_invalidates_old_id(tmp_path: Path,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_phash_and_audio(monkeypatch)
+    source = tmp_path / "movie.mp4"
+    source.write_bytes(b"version-one")
+    corpus = Corpus(tmp_path / "corpus")
+    first = corpus.add(source)
+    source.write_bytes(b"version-two-with-different-bytes")
+    second = corpus.add(source)
+
+    assert second.id != first.id
+    assert corpus._db.lookup_by_id(first.id) is None
+    assert [entry.id for entry in corpus.list_all()] == [second.id]
+
+
 def test_remove(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_phash_and_audio(monkeypatch)
     src = tmp_path / "movie.mp4"

@@ -13,11 +13,13 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   watchdog/bounded logs; persistent bounded web lifecycle; filesystem-wide web
   run-count admission; local cross-process encoder/disk admission; per-process queue
   IDs; explicit HDR output-policy/tonemap-order gate; loudnorm runtime-mode
-  observability; exact-job encoder-cache invalidation after runtime failure.
-- **PARTIAL:** 2.1, 2.3, 3.1–3.3 — безопасные локальные fixes выполнены, profile
+  observability; exact-job encoder-cache invalidation after runtime failure; full
+  declared compatibility graph; hierarchical correlation IDs; bounded run-state
+  metrics; shared observability redaction; content-addressed corpus cache.
+- **PARTIAL:** 2.1, 2.3, 3.1–3.2 — безопасные локальные fixes выполнены, profile
   claims исправлены, destructive stacks помечены experimental, а invalid
   `target_vmaf` feedback и основные compound-quality risks выявляются preflight;
-  licensed natural corpus и полный compatibility graph ещё не готовы.
+  licensed natural corpus ещё не готов.
 - **PARTIAL 2.4:** software CFR 23.976–60 и multi-segment VFR сохраняют decoded
   frames/cadence; non-zero input start PTS normalized; synthetic sparse long-GOP
   seams, A/V impulses and PTS-based temporal jitter verified; hardware cadence и
@@ -278,10 +280,13 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** pairwise known conflicts and property tests.
 - **Risk:** third-party plugin compatibility; unknown capability means conservative warn.
 - **Expected result:** bad graph rejected before expensive encode.
-- **Status:** partial — preflight сообщает implicit/explicit upscale, duplicate
-  resampling, noise+sharpen, temporal jitter и compound audio effects. Invalid
-  target-VMAF feedback для geometry/timeline/overlay/tonemap отклоняется также
-  внутри segmenter, даже если orchestration preflight отключён.
+- **Status:** complete for declared runtime policy —
+  `core/transform_compatibility.py::COMPATIBILITY_GRAPH` inventories HDR, audio,
+  temporal, container and registered-quality edges; generic pair/order conflicts
+  and third-party `incompatible_with` metadata are evaluated centrally, while
+  source/encoder/container-dependent edges delegate to the existing specialised
+  preflight probes. The operator reference documents all 21 built-ins. Natural-
+  content quality qualification remains separate from graph correctness.
 
 ## Phase 4 — Performance
 

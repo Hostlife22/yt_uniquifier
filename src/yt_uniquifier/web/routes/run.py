@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from yt_uniquifier.core.correlation import CorrelationIds
 from yt_uniquifier.core.media_validation import allowed_output_suffixes
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.output_reservation import (
@@ -161,6 +162,11 @@ def register(  # noqa: PLR0913
             ) from exc
 
         run_id = uuid.uuid4().hex
+        # `build_plan` returns Plan in production. The fallback keeps lightweight
+        # embedders/test doubles that implement only the historical run_full call
+        # contract compatible while still correlating their wrapper events.
+        plan_hash = str(getattr(plan, "plan_hash", "unavailable"))
+        correlation = CorrelationIds.for_run(run_id, plan_hash)
         cancel_token = CancelToken()
         events_q: queue.Queue[RunEvent | None] = queue.Queue(maxsize=10_000)
 
@@ -177,6 +183,7 @@ def register(  # noqa: PLR0913
             # v1.1.0 Task 15: feed the same RunEvent stream into the
             # Prometheus counters before the SSE queue so the queue's
             # back-pressure-drop path doesn't lose metric updates.
+            ev = correlation.enrich(ev)
             try:
                 from yt_uniquifier.web.metrics import update_from_event
                 update_from_event(ev)
@@ -193,9 +200,15 @@ def register(  # noqa: PLR0913
                     events_q.put_nowait(ev)
 
         def _runner() -> None:
+            started_monotonic = time.monotonic()
             with runs_lock:
                 record.status = "running"
                 record.updated_at = time.time()
+            try:
+                from yt_uniquifier.web.metrics import observe_run_state
+                observe_run_state("active")
+            except Exception:  # pragma: no cover - metrics are best-effort
+                pass
             if persist_runs is not None:
                 persist_runs()
             try:
@@ -218,13 +231,27 @@ def register(  # noqa: PLR0913
                     record.updated_at = time.time()
             except BaseException as exc:  # noqa: BLE001 — capture everything
                 with runs_lock:
-                    record.status = "failed"
+                    record.status = (
+                        "cancelled" if cancel_token.is_cancelled() else "failed"
+                    )
                     record.error = f"{type(exc).__name__}: {exc}"
                     record.updated_at = time.time()
                 _on_event(RunEvent(kind="error", payload={
                     "phase": "runner", "message": record.error,
                 }))
             finally:
+                try:
+                    from yt_uniquifier.web.metrics import (
+                        ACTIVE_RUNS,
+                        observe_run_terminal,
+                    )
+                    observe_run_terminal(
+                        record.status,
+                        time.monotonic() - started_monotonic,
+                    )
+                    ACTIVE_RUNS.dec()
+                except Exception:  # pragma: no cover - metrics are best-effort
+                    pass
                 try:
                     if persist_runs is not None:
                         persist_runs()
@@ -298,10 +325,21 @@ def register(  # noqa: PLR0913
                 ) from exc
             runs[run_id] = record
         try:
+            from yt_uniquifier.web.metrics import ACTIVE_RUNS, observe_run_state
+            observe_run_state("queued")
+            ACTIVE_RUNS.inc()
+        except Exception:  # pragma: no cover - metrics are best-effort
+            pass
+        try:
             if persist_runs is not None:
                 persist_runs()
             thread.start()
         except BaseException:
+            try:
+                from yt_uniquifier.web.metrics import ACTIVE_RUNS
+                ACTIVE_RUNS.dec()
+            except Exception:  # pragma: no cover - metrics are best-effort
+                pass
             output_reservation.release()
             run_admission.release()
             with runs_lock:
