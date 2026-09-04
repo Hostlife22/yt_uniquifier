@@ -94,7 +94,7 @@ def test_runner_reuses_existing_benchmark_and_qa_pipelines(
 
     assert natural_corpus.run_manifest(manifest, results, with_sscd=True) == 0
     assert len(commands) == 2
-    assert "tools/benchmark.py" in commands[0][1]
+    assert Path(commands[0][1]).name == "benchmark.py"
     assert "--accept-watermark-risk" in commands[0]
     assert any(value.endswith("output.mp4") for value in commands[0])
     assert commands[1][1] == "qa"

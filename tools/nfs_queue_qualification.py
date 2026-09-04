@@ -95,7 +95,11 @@ def _partition_worker(args: argparse.Namespace) -> int:
     staged = queue.staged_output_path(output)
     staged.write_bytes(b"stale worker output must not publish\n")
     _write_json(args.ready, {"worker": args.worker, "leased": leased.name})
-    time.sleep(args.delay)
+    deadline = time.monotonic() + args.resume_timeout
+    while not args.resume.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"resume marker was not created: {args.resume}")
+        time.sleep(0.1)
     rejected = False
     try:
         queue.commit_output(leased, staged, output)
@@ -196,7 +200,8 @@ def _parser() -> argparse.ArgumentParser:
     partition.add_argument("root", type=_path)
     partition.add_argument("--output", type=_path, required=True)
     partition.add_argument("--worker", default="partitioned-worker")
-    partition.add_argument("--delay", type=float, default=8.0)
+    partition.add_argument("--resume", type=_path, required=True)
+    partition.add_argument("--resume-timeout", type=float, default=30.0)
     partition.add_argument("--ready", type=_path, required=True)
     partition.add_argument("--result", type=_path, required=True)
     partition.set_defaults(handler=_partition_worker)

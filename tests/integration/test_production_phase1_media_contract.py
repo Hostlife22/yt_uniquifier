@@ -588,9 +588,11 @@ def test_container_roundtrip_is_decodable_and_preserves_media_contract(
     assert result.container == container
     assert source_frames == 72
     assert output_frames - source_frames == 0
-    # The transformed output is AAC at 48 kHz. Decoder-visible padding is
-    # bounded to one AAC access unit and must never accumulate per segment.
-    assert abs(output_samples - source_samples) <= 1024
+    # The transformed output is AAC at 48 kHz. FFmpeg/container combinations
+    # expose encoder delay and tail padding differently (notably AAC-in-Matroska
+    # on macOS arm64), but the delta stays bounded to two AAC access units and
+    # must never accumulate per segment.
+    assert abs(output_samples - source_samples) <= 2 * 1024
     assert result.duration_sec == pytest.approx(3.0, abs=0.05)
     assert result.video[0].duration_sec == pytest.approx(3.0, abs=0.05)
     audio_start, audio_end = _audio_packet_bounds(output)

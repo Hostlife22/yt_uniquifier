@@ -73,7 +73,7 @@ docker exec "${client_b}" "${tool[@]}" init /shared/queue-partition
 docker exec "${client_b}" "${tool[@]}" seed /shared/queue-partition \
   --count 1 --prefix partition
 docker exec "${client_a}" "${tool[@]}" partition-worker /shared/queue-partition \
-  --output /shared/output-partition --delay 9 \
+  --output /shared/output-partition --resume /tmp/partition-resume \
   --ready /shared/lab-results/partition-ready.json \
   --result /shared/lab-results/partition.json &
 partition_pid=$!
@@ -89,6 +89,14 @@ sleep 3
 docker exec "${client_b}" "${tool[@]}" reap /shared/queue-partition \
   --stale-sec 1 --expected 1 --result /shared/lab-results/reap.json
 docker network connect "${network_name}" "${client_a}"
+for _attempt in $(seq 1 30); do
+  if docker exec "${client_a}" test -d /shared/queue-partition 2>/dev/null; then
+    break
+  fi
+  sleep 0.2
+done
+docker exec "${client_a}" test -d /shared/queue-partition
+docker exec "${client_a}" touch /tmp/partition-resume
 wait "${partition_pid}"
 
 docker exec "${client_b}" "${tool[@]}" init /shared/queue-crash
