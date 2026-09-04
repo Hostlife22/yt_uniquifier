@@ -35,7 +35,9 @@ def test_ssim_pair_compares_two_inputs_and_resets_pts(
     assert "9.500000" in captured
     assert "10.000000" in captured
     graph = captured[captured.index("-filter_complex") + 1]
+    assert "scale2ref=w=iw:h=ih:flags=lanczos[ref0][dist0]" in graph
     assert graph.count("setpts=PTS-STARTPTS") == 2
+    assert "[dist0]setsar=1" in graph
     assert "[dist][ref]ssim" in graph
 
 

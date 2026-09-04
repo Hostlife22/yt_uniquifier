@@ -69,9 +69,9 @@ def _ssim_pair(
         "-ss", f"{source_start_sec:.6f}", "-i", str(source_path),
         "-ss", f"{output_start_sec:.6f}", "-i", str(output_path),
         "-filter_complex",
-        "[0:v][1:v]scale=rw:rh:flags=lanczos[ref0];"
+        "[0:v][1:v]scale2ref=w=iw:h=ih:flags=lanczos[ref0][dist0];"
         "[ref0]setsar=1,setpts=PTS-STARTPTS[ref];"
-        "[1:v]setsar=1,setpts=PTS-STARTPTS[dist];"
+        "[dist0]setsar=1,setpts=PTS-STARTPTS[dist];"
         "[dist][ref]ssim[cmp]",
         "-map", "[cmp]", "-frames:v", str(frames), "-an", "-sn", "-f", "null", "-",
     ]

@@ -14,6 +14,8 @@ the last tag.
 
 ### Fixed
 
+- Restore concat-seam diagnostics on the Ubuntu CI FFmpeg by using the compatible
+  two-output `scale2ref` filter instead of the newer two-input `scale=rw:rh` form.
 - Reject HDR input before encoding when neither a verified HDR-preserve policy nor an
   explicit first-video-stage SDR tonemap is selected.
 - Record requested and FFmpeg-reported loudnorm modes and make the dynamic fallback
