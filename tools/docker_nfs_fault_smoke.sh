@@ -74,6 +74,7 @@ docker exec "${client_b}" "${tool[@]}" seed /shared/queue-partition \
   --count 1 --prefix partition
 docker exec "${client_a}" "${tool[@]}" partition-worker /shared/queue-partition \
   --output /shared/output-partition --resume /tmp/partition-resume \
+  --resume-timeout 120 \
   --ready /shared/lab-results/partition-ready.json \
   --result /shared/lab-results/partition.json &
 partition_pid=$!
@@ -84,11 +85,22 @@ for _attempt in $(seq 1 30); do
   sleep 0.2
 done
 docker exec "${client_b}" test -f /shared/lab-results/partition-ready.json
-docker network disconnect --force "${network_name}" "${client_a}"
+server_ip="$(docker inspect --format \
+  "{{(index .NetworkSettings.Networks \"${network_name}\").IPAddress}}" \
+  "${server_name}")"
+test -n "${server_ip}"
+# Isolate only NFS traffic. Disconnecting a container with an active kernel NFS
+# mount can block Docker's own control plane, preventing the reconnect command
+# from running and invalidating the fault test itself.
+docker exec "${client_a}" iptables -I OUTPUT -d "${server_ip}" \
+  -p tcp --dport 2049 -j REJECT
+docker exec "${client_a}" iptables -C OUTPUT -d "${server_ip}" \
+  -p tcp --dport 2049 -j REJECT
 sleep 3
 docker exec "${client_b}" "${tool[@]}" reap /shared/queue-partition \
   --stale-sec 1 --expected 1 --result /shared/lab-results/reap.json
-docker network connect "${network_name}" "${client_a}"
+docker exec "${client_a}" iptables -D OUTPUT -d "${server_ip}" \
+  -p tcp --dport 2049 -j REJECT
 for _attempt in $(seq 1 30); do
   if docker exec "${client_a}" test -d /shared/queue-partition 2>/dev/null; then
     break
