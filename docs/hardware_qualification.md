@@ -25,6 +25,10 @@ required to exist and complete; it cannot turn into a skip. The output checks co
 - fail-closed rejection of static HDR10 metadata on hardware paths that have not been
   explicitly verified to retain ST2086/MaxCLL/MaxFALL;
 - two concurrent jobs when the encoder declares at least two sessions;
+- strict 1080p and 3840×2160 SDR jobs for H.264/HEVC VideoToolbox;
+- cancellation after the hardware process emits progress, with no partial final output;
+- automatic speed-policy fallback to the real-probed software encoder when the
+  corresponding VideoToolbox candidate becomes unavailable;
 - H.264 High/CABAC and closed half-FPS IDR GOP, with one-to-two consecutive
   B-frames for exact-count backends or the qualified one-to-three VideoToolbox range;
 - HEVC closed IDR and a maximum two-second GOP;
@@ -98,7 +102,10 @@ The `.qualification` directory is evidence, not a source-controlled fixture. Rem
 it after archiving the report and media where your release records are stored.
 
 On the qualified Intel Mac (Intel UHD 630 + Radeon Pro 5300M, FFmpeg 9.0.1), the
-extended matrix completed with **14 passed / 36 unrequested skips** for
-`h264_videotoolbox,hevc_videotoolbox`. The retained report contains 27 probed and
-hashed media artifacts. This qualifies only that exact Mac/FFmpeg combination;
+extended matrix completed with **22 passed / 36 unrequested skips** for
+`h264_videotoolbox,hevc_videotoolbox`. The retained report contains 39 probed and
+hashed media artifacts plus UHD/cancellation evidence. SDR and HLG encode paths are
+qualified; HDR10 static metadata is deliberately fail-closed because this
+VideoToolbox path cannot prove ST2086/MaxCLL preservation. This qualifies only that
+exact Mac/FFmpeg combination;
 NVENC, QSV, AMF and Apple Silicon remain separate runner qualifications.

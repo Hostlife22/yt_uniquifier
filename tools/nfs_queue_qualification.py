@@ -11,9 +11,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import time
 from pathlib import Path
 
+from yt_uniquifier.core.checkpoint import CheckpointStore
+from yt_uniquifier.core.errors import CheckpointError
+from yt_uniquifier.core.models import (
+    EncoderCandidate,
+    Plan,
+    Profile,
+    Segment,
+    SourceMeta,
+)
 from yt_uniquifier.core.queue.leasing import FileQueue, QueueError, init_queue
 
 
@@ -163,6 +173,205 @@ def _recover(args: argparse.Namespace) -> int:
     return 0 if valid else 1
 
 
+def _wait_for_sigkill(ready: Path, *, phase: str, worker: str) -> None:
+    _write_json(
+        ready,
+        {"phase": phase, "worker": worker, "pid": os.getpid(), "ready": True},
+    )
+    while True:
+        signal.pause()
+
+
+def _crash_commit_phase(args: argparse.Namespace) -> int:
+    """Pause at one commit boundary so the Docker harness can SIGKILL us."""
+    from yt_uniquifier.core.queue import leasing as leasing_mod
+
+    queue = FileQueue(args.root, host=args.worker)
+    leased = queue.lease()
+    if leased is None:
+        return 70
+    args.output.mkdir(parents=True, exist_ok=True)
+    output = args.output / f"{args.phase}-output.bin"
+    staged = queue.staged_output_path(output)
+    staged.write_bytes(f"original:{args.phase}\n".encode())
+
+    if args.phase == "after-stage":
+        _wait_for_sigkill(args.ready, phase=args.phase, worker=args.worker)
+
+    if args.phase == "after-journal":
+        real_write_journal = queue._write_commit_journal
+
+        def pause_after_journal(
+            leased_path: Path, staged_path: Path, output_path: Path,
+        ) -> tuple[Path, Path]:
+            journal_and_fence = real_write_journal(
+                leased_path, staged_path, output_path,
+            )
+            _wait_for_sigkill(args.ready, phase=args.phase, worker=args.worker)
+            return journal_and_fence
+
+        queue._write_commit_journal = pause_after_journal  # type: ignore[method-assign]
+    elif args.phase in {"after-fence", "after-publish"}:
+        real_replace = leasing_mod.os.replace
+
+        def pause_on_replace(source: Path, destination: Path) -> None:
+            source_path = Path(source)
+            destination_path = Path(destination)
+            should_pause = (
+                args.phase == "after-fence"
+                and source_path == staged
+                and destination_path == output
+            ) or (
+                args.phase == "after-publish"
+                and source_path.name.startswith(".commit-")
+                and source_path.name.endswith(".fence")
+                and destination_path.parent == queue.layout.done
+            )
+            if should_pause:
+                _wait_for_sigkill(args.ready, phase=args.phase, worker=args.worker)
+            real_replace(source, destination)
+
+        leasing_mod.os.replace = pause_on_replace
+
+    queue.commit_output(leased, staged, output)
+    return 71
+
+
+def _recover_commit_phase(args: argparse.Namespace) -> int:
+    queue = FileQueue(args.root, host=args.worker)
+    reaped = queue.reap_stale(stale_sec=0)
+    recovered = queue.recover_commits(args.output, stale_sec=0)
+    output = args.output / f"{args.phase}-output.bin"
+    expected_original = f"original:{args.phase}\n".encode()
+    retried = False
+    if args.phase in {"after-stage", "after-journal"}:
+        leased = queue.lease()
+        if leased is None:
+            raise RuntimeError(f"{args.phase}: killed lease was not reaped")
+        staged = queue.staged_output_path(output)
+        staged.write_bytes(f"retried:{args.phase}\n".encode())
+        queue.commit_output(leased, staged, output)
+        retried = True
+        expected = f"retried:{args.phase}\n".encode()
+    else:
+        expected = expected_original
+
+    first_payload = output.read_bytes() if output.is_file() else b""
+    recovered_again = queue.recover_commits(args.output, stale_sec=0)
+    second_payload = output.read_bytes() if output.is_file() else b""
+    stale_parts = sorted(path.name for path in args.output.glob(".*.part.bin"))
+    for stale in stale_parts:
+        (args.output / stale).unlink(missing_ok=True)
+    valid = (
+        first_payload == expected
+        and second_payload == expected
+        and recovered_again == 0
+        and queue.stats()["done"] == 1
+    )
+    payload: dict[str, object] = {
+        "scenario": "sigkill_commit_phase",
+        "phase": args.phase,
+        "valid": valid,
+        "reaped": reaped,
+        "recovered": recovered,
+        "recovered_again": recovered_again,
+        "retried": retried,
+        "stale_parts_removed": stale_parts,
+        "stats": queue.stats(),
+    }
+    _write_json(args.result, payload)
+    print(json.dumps(payload, sort_keys=True))
+    return 0 if valid else 1
+
+
+def _checkpoint_plan(root: Path) -> Plan:
+    source_path = root / "checkpoint-source.bin"
+    source_path.write_bytes(b"licensed-placeholder\n")
+    return Plan(
+        source=SourceMeta(
+            path=source_path,
+            container="mkv",
+            duration_sec=1.0,
+            size_bytes=source_path.stat().st_size,
+        ),
+        profile=Profile(name="nfs-checkpoint", transforms=[]),
+        encoder=EncoderCandidate(
+            name="libx264", vendor="x264", codec="h264", works=True,
+        ),
+        plan_hash="nfs-checkpoint-contract",
+    )
+
+
+def _corrupt_checkpoint(args: argparse.Namespace) -> int:
+    work = args.root / "corrupt-checkpoint"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "state.json").write_text("{not valid json", encoding="utf-8")
+    store = CheckpointStore(work, _checkpoint_plan(args.root))
+    rejected = False
+    try:
+        store.init_or_resume([Segment(idx=0, start_sec=0.0, end_sec=1.0)])
+    except CheckpointError:
+        rejected = True
+    finally:
+        store.close()
+    payload: dict[str, object] = {
+        "scenario": "corrupt_checkpoint",
+        "valid": rejected,
+        "corruption_rejected": rejected,
+    }
+    _write_json(args.result, payload)
+    return 0 if rejected else 1
+
+
+def _disk_full_checkpoint(args: argparse.Namespace) -> int:
+    """Fill a bounded tmpfs and prove atomic checkpoint bytes survive ENOSPC."""
+    work = args.root / "disk-full-checkpoint"
+    store = CheckpointStore(work, _checkpoint_plan(args.root))
+    store.init_or_resume([Segment(idx=0, start_sec=0.0, end_sec=1.0)])
+    before = store.state_path.read_bytes()
+    # Inflate only the next in-memory snapshot. The durable state remains the
+    # small known-good file until the fsync+replace transaction succeeds.
+    store._state["fault_injection_padding"] = "x" * (512 * 1024)
+    stat = os.statvfs(args.root)
+    available = stat.f_bavail * stat.f_frsize
+    filler = args.root / "filler.bin"
+    reserve = 128 * 1024
+    with filler.open("wb") as handle:
+        chunk = b"0" * (64 * 1024)
+        remaining = max(0, available - reserve)
+        while remaining > 0:
+            piece = chunk[:min(len(chunk), remaining)]
+            try:
+                handle.write(piece)
+            except OSError:
+                break
+            remaining -= len(piece)
+        try:
+            handle.flush()
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
+    failed_with_enospc = False
+    try:
+        store.flush()
+    except OSError:
+        failed_with_enospc = True
+    after = store.state_path.read_bytes()
+    temp_files = list(work.glob("state.json.*.tmp"))
+    filler.unlink(missing_ok=True)
+    store.close()
+    valid = failed_with_enospc and before == after and not temp_files
+    payload: dict[str, object] = {
+        "scenario": "disk_full_checkpoint",
+        "valid": valid,
+        "flush_failed": failed_with_enospc,
+        "durable_state_preserved": before == after,
+        "temporary_files": [path.name for path in temp_files],
+    }
+    _write_json(args.result, payload)
+    return 0 if valid else 1
+
+
 def _path(value: str) -> Path:
     return Path(value)
 
@@ -226,6 +435,40 @@ def _parser() -> argparse.ArgumentParser:
     recover.add_argument("--worker", default="recovery-worker")
     recover.add_argument("--result", type=_path, required=True)
     recover.set_defaults(handler=_recover)
+
+    crash_phase = commands.add_parser("crash-commit-phase")
+    crash_phase.add_argument("root", type=_path)
+    crash_phase.add_argument("--output", type=_path, required=True)
+    crash_phase.add_argument(
+        "--phase",
+        choices=("after-stage", "after-journal", "after-fence", "after-publish"),
+        required=True,
+    )
+    crash_phase.add_argument("--worker", required=True)
+    crash_phase.add_argument("--ready", type=_path, required=True)
+    crash_phase.set_defaults(handler=_crash_commit_phase)
+
+    recover_phase = commands.add_parser("recover-commit-phase")
+    recover_phase.add_argument("root", type=_path)
+    recover_phase.add_argument("--output", type=_path, required=True)
+    recover_phase.add_argument(
+        "--phase",
+        choices=("after-stage", "after-journal", "after-fence", "after-publish"),
+        required=True,
+    )
+    recover_phase.add_argument("--worker", required=True)
+    recover_phase.add_argument("--result", type=_path, required=True)
+    recover_phase.set_defaults(handler=_recover_commit_phase)
+
+    corrupt = commands.add_parser("corrupt-checkpoint")
+    corrupt.add_argument("root", type=_path)
+    corrupt.add_argument("--result", type=_path, required=True)
+    corrupt.set_defaults(handler=_corrupt_checkpoint)
+
+    disk_full = commands.add_parser("disk-full-checkpoint")
+    disk_full.add_argument("root", type=_path)
+    disk_full.add_argument("--result", type=_path, required=True)
+    disk_full.set_defaults(handler=_disk_full_checkpoint)
     return parser
 
 

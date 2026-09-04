@@ -30,7 +30,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Selected multi-audio/subtitle language, title и supported dispositions
       сохраняются и валидируются вместе с supported auxiliary streams.
 - [x] SRT/ASS→MP4/MKV/MOV codec conversion and language/title retention verified.
-- [ ] Image-subtitle preflight/roundtrip verified with a real PGS fixture.
+- [x] MIT-licensed real PGS fixture is byte-identical through MKV; MP4/MOV fail
+      preflight before encode.
 - [x] MKV attachments, MOV `tmcd` и MP4 JPEG/PNG `attached_pic` сохраняются;
       несовместимые attachment/data/cover-art combinations явно rejected.
 - [x] SAR/DAR соответствует declared crop transform; square pixels не становятся
@@ -61,8 +62,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] MKV roundtrip: streams, byte-identical attachment, SRT/ASS, chapters.
 - [x] MOV roundtrip: `tmcd`, edit-list/audio bounds, SRT/ASS conversion и metadata.
 - [x] CFR: software libx264 23.976/24/25/29.97/30/50/59.94/60 сохраняет frame/PTS.
-- [x] VFR: multi-segment libx264 preserves 220/220 frames and 30/20/60 FPS cadence;
-      advertised hardware encoders remain pending.
+- [x] VFR: multi-segment libx264 and H.264/HEVC VideoToolbox preserve 220/220 frames
+      and the 30/20/60 FPS cadence; other hardware vendors remain pending.
 - [x] Synthetic long-GOP/sparse keyframes, static scene and rapid scene-cut
       segmentation verified; natural licensed corpus remains pending.
 - [x] Every concat seam checked against its matching source interval on the
@@ -147,13 +148,14 @@ release blockers, поэтому checklist намеренно не отмече�
       real NFS/network-partition qualification remains open.
 - [x] Checkpoint lock is acquired before `--new-variant` mutates state and is released
       for checkpoint initialization, observer startup and processing failures.
-- [ ] Kill/crash at each phase resumes without reprocessing valid completed segments;
-      deterministic audio/concat/final-replace faults and POSIX random SIGKILL are
-      covered, but reboot/power-loss and every phase boundary are not yet qualified.
+- [ ] Kill/crash at each full media phase resumes without reprocessing valid completed
+      segments; deterministic audio/concat/final-replace faults, POSIX random SIGKILL,
+      and all four distributed publication boundaries are covered, but reboot/power-loss
+      and every encode phase boundary are not yet qualified.
 - [x] Corrupt/zero/truncated segment is reprocessed automatically.
-- [ ] Low/full disk fails safely: injected checkpoint `fsync`, audio, concat and final
-      replace failures preserve prior artifacts and clean partials; a real disposable
-      full-volume/reboot qualification is still required.
+- [x] Low/full disk fails safely: checkpoint `fsync`, audio, concat and final replace
+      injections plus a real bounded ENOSPC tmpfs preserve prior artifacts and clean
+      partials. Power-loss durability remains a separate deployment qualification.
 - [x] Synthetic 1 h, 2 h and 3 h tests pass with RAM/disk/elapsed results retained in
       `BENCHMARKS.md`; natural licensed corpus remains required.
 
@@ -220,15 +222,16 @@ release blockers, поэтому checklist намеренно не отмече�
       a durable journal; old same-name markers and unfenced staged outputs cannot
       authorize publication.
 - [ ] Reaped job retains stable work/resume identity on another host.
-- [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap and
-      final-output reservation. The corrected ephemeral two-client NFSv4 soft-timeout
-      lab passed on GitHub-hosted Ubuntu (`33881832592`); production hard mounts,
-      separate physical hosts and foreign-host stale-owner behavior remain gates.
+- [ ] Production shared filesystem/NFS configuration is qualified under concurrent
+      lease/reap and final-output reservation. The expanded ephemeral two-client NFSv4
+      lab passes network partition, four SIGKILL boundaries, corrupt checkpoint,
+      repeated recovery and ENOSPC; production hard mounts and separate physical hosts
+      remain gates.
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and combined-RFC full local test gate pass (`1693 passed`,
-      `47 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`
+- [x] Ruff, strict mypy and full local production gate pass (`1699 passed`,
+      `55 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`
       (`1497 passed`, 12 expected skips), above the required 80%.
 - [x] CodeQL v4 run `33893258792` passed on `c0aaafd`; alert #13 is fixed and the
       GitHub API reports zero open code-scanning alerts.
@@ -251,8 +254,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (combined-RFC `make check`:
-      1693 passed, 47 expected hardware-selection/optional skips)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`:
+      1699 passed, 55 expected hardware-selection/optional skips)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -263,15 +266,15 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and
       QEMU-emulated `linux/arm64` on Docker Desktop/macOS; native Linux CI remains
       the release gate.
-- [x] Rights-attested natural-content corpus manifest, validation and executable
-      benchmark/QA matrix are prepared under `validation-corpus/`; real media results
-      remain `NOT VERIFIED` until licensed files are supplied locally.
+- [x] One-command rights-attested current/proposed corpus runner is prepared under
+      `validation-corpus/`; exact Plan, VMAF/SSIM/PSNR/LUFS/true peak/size/time/RAM and
+      JSON/CSV/HTML output passed synthetic smoke. Licensed media remains `NOT VERIFIED`.
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
 ## Текущий статус post-v1.5.0 main
 
-- [x] Fully provisioned combined-RFC `make check`: 1693 passed, 47 expected skips;
+- [x] Fully provisioned production `make check`: 1699 passed, 55 expected skips;
       fault-injection recovery matrix and three-round POSIX SIGKILL chaos gate passed.
 - [x] Remote non-integration branch coverage gate: 81.23% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case

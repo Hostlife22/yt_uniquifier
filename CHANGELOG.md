@@ -14,6 +14,12 @@ the last tag.
 
 ### Changed
 
+- Make manual release qualification execute the full Linux/macOS/Windows/AppImage,
+  embedded-version, SBOM, checksum and keyless-signing path without creating a tag;
+  only draft publication remains tag-gated.
+- Extend the licensed-corpus runner with named current/proposed variants, exact Plan
+  provenance, required VMAF/SSIM/PSNR/LUFS/true-peak/size/time/RAM metrics and
+  aggregate JSON/CSV/HTML reports runnable through `make production-benchmark`.
 - Make custom `video.fit_aspect` profiles source-aware and no-upscale by default;
   fixed-resolution shipped profiles retain their existing canvas through an explicit
   `allow_upscale: true` migration ([RFC #11](https://github.com/Hostlife22/yt_uniquifier/issues/11)).
@@ -24,6 +30,13 @@ the last tag.
 
 ### Added
 
+- Add strict Intel VideoToolbox 1080p/4K, cancellation and device-loss fallback
+  qualification, complementing the existing CFR/VFR, SDR/HLG, GOP/profile/level and
+  concurrency coverage.
+- Add an MIT-licensed real PGS fixture with byte-identical MKV passthrough and
+  fail-before-encode MP4/MOV regressions.
+- Extend the Docker NFSv4 lab with real SIGKILL at stage/journal/fence/publication
+  boundaries, idempotent recovery/retry, corrupt-checkpoint and bounded-ENOSPC tests.
 - Add RFC #12 plan-registered VMAF, SSIM, SSCD and ordered audio-fingerprint
   diagnostics without changing existing raw fields or verdict semantics. Automatic
   run/batch QA replays the exact transform graph and segment seeds into a bounded

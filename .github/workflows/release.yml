@@ -29,9 +29,9 @@ on:
   push:
     tags:
       - "v*.*.*"
-  # Manual dispatch lets the maintainer test the pipeline against a
-  # branch without cutting a real tag. The resulting draft release is
-  # named after the workflow run.
+  # Manual dispatch lets the maintainer test the complete build, SBOM,
+  # checksum and signing pipeline without cutting a real tag. It uploads a
+  # release-candidate artifact but never creates a GitHub Release.
   workflow_dispatch:
     inputs:
       ref:
@@ -131,6 +131,37 @@ jobs:
         run: |
           bash installers/macos/codesign-adhoc.sh dist/yt-uniq-gui.app
 
+      - name: Verify embedded version (Linux)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          expected="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          actual="$(dist/yt-uniq-gui/yt-uniq-gui --version)"
+          test "${actual}" = "${expected}"
+
+      - name: Verify embedded version and signature (macOS)
+        if: runner.os == 'macOS'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          expected="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          actual="$(dist/yt-uniq-gui.app/Contents/MacOS/yt-uniq-gui --version)"
+          test "${actual}" = "${expected}"
+          codesign --verify --deep --strict --verbose=2 dist/yt-uniq-gui.app
+
+      - name: Verify embedded version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $expected = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $actual = & "dist/yt-uniq-gui/yt-uniq-gui.exe" --version
+          if ($actual.Trim() -ne "$expected") {
+            throw "Embedded version mismatch: expected $expected, got $actual"
+          }
+
       - name: Package archive (Linux / macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -219,16 +250,25 @@ jobs:
           sudo pip3 install --break-system-packages "appimage-builder>=1.1"
 
       - name: Build AppImage
-        env:
-          YT_UNIQUIFIER_VERSION: ${{ github.ref_name && github.ref_name || '0.0.0-dev' }}
         run: |
-          # Strip the leading "v" from the tag (v1.0.0 → 1.0.0) — AppImage
-          # version fields are PEP-440-ish and not happy with a "v" prefix.
-          export YT_UNIQUIFIER_VERSION="${YT_UNIQUIFIER_VERSION#v}"
+          YT_UNIQUIFIER_VERSION="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          export YT_UNIQUIFIER_VERSION
           appimage-builder --recipe installers/linux/AppImageBuilder.yml \
             --skip-test
           find . -maxdepth 1 -type f \
             \( -name '*.AppImage' -o -name '*.AppImage.zsync' \) -print
+
+      - name: Verify AppImage version and bundled tools
+        env:
+          QT_QPA_PLATFORM: offscreen
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          expected="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          appimage="$(find . -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "${appimage}"
+          chmod +x "${appimage}"
+          actual="$("${appimage}" --version)"
+          test "${actual}" = "${expected}"
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v7
@@ -241,10 +281,9 @@ jobs:
           if-no-files-found: error
 
   release:
-    # Only attach to a GitHub Release when this is a tag push. Manual
-    # dispatch runs upload artifacts to the workflow run for ad-hoc
-    # inspection but don't create a release.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Always assemble and verify a complete release candidate. Only the final
+    # publish step is tag-gated, so workflow_dispatch proves the supply-chain
+    # path without creating a tag or draft release.
     needs: [build, appimage]
     runs-on: ubuntu-latest
     permissions:
@@ -273,19 +312,11 @@ jobs:
             -o -name 'yt-uniq-gui*.AppImage' \
             -o -name 'yt-uniq-gui*.AppImage.zsync' \) \
             -exec cp {} _release/ \;
+          test "$(find _release -maxdepth 1 -name 'yt-uniq-gui-Linux.tar.gz' | wc -l)" -eq 1
+          test "$(find _release -maxdepth 1 -name 'yt-uniq-gui-macOS.zip' | wc -l)" -eq 1
+          test "$(find _release -maxdepth 1 -name 'yt-uniq-gui-Windows.zip' | wc -l)" -eq 1
+          test "$(find _release -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
           ls -la _release/
-
-      - name: Generate SHA256SUMS
-        # v1.0.0 R5 — substitute for code signing on macOS/Windows.
-        # Users verify with:
-        #   curl -O https://.../SHA256SUMS
-        #   sha256sum -c SHA256SUMS --ignore-missing
-        # The file is intentionally a flat list, no GPG signature, so
-        # it works with stock coreutils on every platform.
-        run: |
-          cd _release
-          sha256sum yt-uniq-gui-* > SHA256SUMS
-          cat SHA256SUMS
 
       - name: Set up Python for SBOM
         uses: actions/setup-python@v7
@@ -315,6 +346,15 @@ jobs:
                      assert d.get('bomFormat') == 'CycloneDX', d.get('bomFormat'); \
                      print('SBOM components:', len(d.get('components', [])))"
 
+      - name: Generate and verify SHA256SUMS
+        # Include the SBOM itself. The checksum manifest intentionally does not
+        # list itself; cosign signs both it and every listed artifact below.
+        run: |
+          cd _release
+          sha256sum yt-uniq-gui-* sbom.cdx.json > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat SHA256SUMS
+
       - name: Install cosign
         # v1.1.0 Task 11: cosign keyless signing via GitHub OIDC.
         # No long-lived keys — the workflow's id-token claim is what
@@ -343,11 +383,20 @@ jobs:
           done
           find . -maxdepth 1 -type f -name '*.cosign.bundle' -print
 
+      - name: Upload assembled release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: yt-uniq-release-candidate
+          path: _release/*
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Publish DRAFT release
         # Draft so a human reviews before users see it. softprops is the
         # most-widely-used action for this; it accepts a glob of files
         # and attaches them to the release named after the tag.
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
           name: "yt-uniquifier ${{ github.ref_name }}"

@@ -39,6 +39,7 @@ fi
 for client in "${client_a}" "${client_b}"; do
   docker run -d --privileged --name "${client}" --network "${network_name}" \
     --volume "${repo_dir}:/repo:ro" --workdir /repo \
+    --tmpfs /fault-disk:size=2m,mode=1777 \
     --env PYTHONPATH=/repo/src "${client_image}" >/dev/null
 done
 
@@ -121,6 +122,52 @@ set -e
 test "${crash_rc}" -eq 73
 docker exec "${client_b}" "${tool[@]}" recover /shared/queue-crash \
   --output /shared/output-crash --result /shared/lab-results/recovery.json
+
+# Kill the worker with SIGKILL at every durable-publication boundary. Recovery
+# must either publish the already-fenced bytes or re-lease and retry; a second
+# recovery pass must always be idempotent.
+for phase in after-stage after-journal after-fence after-publish; do
+  queue="/shared/queue-${phase}"
+  output="/shared/output-${phase}"
+  ready="/shared/lab-results/${phase}-ready.json"
+  docker exec "${client_b}" "${tool[@]}" init "${queue}"
+  docker exec "${client_b}" "${tool[@]}" seed "${queue}" \
+    --count 1 --prefix "${phase}"
+  docker exec "${client_a}" "${tool[@]}" crash-commit-phase "${queue}" \
+    --output "${output}" --phase "${phase}" --worker "worker-${phase}" \
+    --ready "${ready}" &
+  crash_exec_pid=$!
+  for _attempt in $(seq 1 100); do
+    if docker exec "${client_b}" test -f "${ready}"; then
+      break
+    fi
+    sleep 0.1
+  done
+  docker exec "${client_b}" test -f "${ready}"
+  worker_pid="$(docker exec "${client_b}" python -c \
+    "import json; print(json.load(open('${ready}'))['pid'])")"
+  test -n "${worker_pid}"
+  docker exec "${client_a}" kill -9 "${worker_pid}"
+  set +e
+  wait "${crash_exec_pid}"
+  crash_phase_rc=$?
+  set -e
+  test "${crash_phase_rc}" -ne 0
+  docker exec "${client_b}" "${tool[@]}" recover-commit-phase "${queue}" \
+    --output "${output}" --phase "${phase}" --worker "recovery-${phase}" \
+    --result "/shared/lab-results/${phase}.json"
+done
+
+# A malformed resume checkpoint must fail closed on the actual NFS mount.
+docker exec "${client_b}" "${tool[@]}" corrupt-checkpoint \
+  /shared/checkpoint-faults \
+  --result /shared/lab-results/corrupt-checkpoint.json
+
+# A bounded tmpfs gives a deterministic ENOSPC without risking the Docker host.
+# The last durable checkpoint must remain byte-identical and no partial temp
+# state may survive.
+docker exec "${client_b}" "${tool[@]}" disk-full-checkpoint /fault-disk \
+  --result /shared/lab-results/disk-full-checkpoint.json
 
 docker cp "${server_name}:/exports/lab-results/." "${run_artifact_dir}/"
 docker inspect "${server_name}" "${client_a}" "${client_b}" \

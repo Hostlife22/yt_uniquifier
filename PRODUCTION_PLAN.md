@@ -116,8 +116,9 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
 
 **Status 2026-09-03:** implemented for declared policy. Main/selected audio,
 SRT/ASS, chapters, stream metadata, MKV attachments, MOV `tmcd` and MP4 JPEG/PNG
-cover art are preserved and final-contract validated. Unsupported auxiliary and
-multiple program-video inputs fail preflight. Real PGS remains `NOT VERIFIED`.
+cover art and real PGS-in-MKV are preserved and final-contract validated. PGS fails
+before encode for MP4/MOV. Unsupported auxiliary and multiple program-video inputs
+fail preflight.
 
 - **Files:** `core/orchestrator.py`, `core/segmenter.py`, `core/metadata.py`,
   `core/preflight.py`, `core/auxiliary_streams.py`, mapping helpers in
@@ -315,8 +316,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   VideoToolbox have real-output two-second GOP qualification. The internal plan-hash
   revision prevents mixed-policy resume. A manual trusted self-hosted hardware
   workflow now fails closed on explicitly requested encoders and retains bitstream
-  evidence. Per-GPU routing and actual NVENC/QSV/AMF plus AV1 VideoToolbox device runs
-  remain open.
+  evidence. Intel VideoToolbox now additionally passes SDR/HLG, CFR/VFR, 1080p/4K,
+  concurrent sessions, cancellation and simulated device-loss software fallback.
+  Static HDR10 metadata fails closed. Per-GPU routing and actual NVENC/QSV/AMF plus
+  AV1 VideoToolbox device runs remain open.
 
 ### 4.2 Resource-aware scheduling
 
@@ -439,8 +442,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   failure, concat failure and final replace failure. The POSIX chaos test covers
   process-group SIGKILL/resume. A fresh invocation restores the persisted seed and
   reuses byte-identical completed video/audio artifacts; decoded A/V hashes match the
-  original run exactly. Disposable-volume low-space/power-loss, natural licensed
-  1/2/3 h, NFS and hardware encoder/HDR cases remain `NOT VERIFIED`.
+  original run exactly. A bounded real ENOSPC tmpfs preserves the last checkpoint;
+  the Docker NFSv4 lab passes SIGKILL after stage/journal/fence/publish and idempotent
+  resume/publication. Power-loss, natural licensed 1/2/3 h, production hard-NFS and
+  hardware HDR cases remain `NOT VERIFIED`.
 
 ### 6.2 Web/distributed lifecycle
 
@@ -471,9 +476,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   The shared orchestrator now requires the plan-aware media contract and complete
   primary-video/all-audio decode before any frontend can complete or a queue worker
   can enter its publication fence. Rich similarity/quality reports remain optional
-  diagnostics by design. Hard quota enforcement, precise device routing,
-  multi-instance status aggregation and NFS/network-partition qualification remain
-  open.
+  diagnostics by design. The ephemeral two-client NFSv4 lab now covers partition,
+  four SIGKILL boundaries, repeated recovery, corrupt checkpoint and ENOSPC. Hard
+  quota enforcement, precise device routing, multi-instance status aggregation and
+  real hard-mount/cross-host qualification remain open.
 
   Web body-size enforcement now fails closed for missing, malformed, negative,
   duplicate, transfer-encoding-conflicting and over-limit Content-Length;
@@ -492,8 +498,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** install wheel/app/container, invoke ffmpeg/ffprobe, process canonical clip.
 - **Risk:** reducing matrix must not reduce platform coverage.
 - **Expected result:** faster feedback with stronger release evidence.
-- **Status:** release workflow already creates CycloneDX plus per-asset keyless cosign
-  bundles; Docker buildx emits SBOM/provenance and signs the digest. `actionlint`
+- **Status:** release workflow assembles CycloneDX, verified checksums and per-asset
+  keyless cosign bundles during tag and manual runs; only publishing is tag-gated.
+  Frozen Linux/macOS/Windows and AppImage versions are checked before upload. Docker
+  buildx emits SBOM/provenance and signs the digest. `actionlint`
   passes after shell-safe artifact discovery fixes. Gitleaks found no secrets in 324
   commits or ~174 MB local artifacts. Actual v1.5 tag artifacts remain `NOT VERIFIED`
   until the release workflow runs.

@@ -100,7 +100,10 @@ their contents.
 
 Docker on a Linux host can create an ephemeral NFSv4 server and two independent
 clients, then exercise concurrent leasing, a network partition with stale reaping,
-stale-owner publication fencing, and recovery after a crash between fence and publish:
+stale-owner publication fencing, and SIGKILL recovery at four publication boundaries
+(after stage, journal, fence and publish). It also verifies idempotent repeated
+recovery, corrupt-checkpoint rejection and atomic-checkpoint survival on a bounded
+ENOSPC tmpfs:
 
 ```bash
 tools/docker_nfs_fault_smoke.sh
@@ -113,10 +116,11 @@ recommended production `hard` mount above: passing the lab is a deterministic
 application/fencing gate, while the real production hosts must still be qualified
 with their actual `hard` mount, server, network and failure-recovery policy.
 
-The corrected lab passed on GitHub-hosted Ubuntu in Actions run `33881832592`,
+The original corrected lab passed on GitHub-hosted Ubuntu in Actions run
+`33881832592`. The expanded matrix also passed locally on Docker Desktop/Intel macOS,
 including concurrent lease uniqueness, stale reap/fencing and resume after restoring
-client TCP/2049. This is retained CI evidence, not certification of a deployment's
-actual NFS server or mount options.
+client TCP/2049. These are retained ephemeral-lab results, not certification of a
+deployment's actual NFS server or mount options.
 
 ## Per-machine encoder variation
 

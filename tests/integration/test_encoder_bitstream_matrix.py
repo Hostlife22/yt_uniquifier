@@ -13,10 +13,12 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import needs_ffmpeg
-from yt_uniquifier.core.errors import EncoderError, PreflightFailure
+from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
+from yt_uniquifier.core.errors import EncoderError, PipelineError, PreflightFailure
 from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.probe import probe
+from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
 _HARDWARE_ENCODERS: dict[str, tuple[str, str, str]] = {
@@ -580,3 +582,149 @@ def test_requested_hardware_supports_declared_parallel_sessions(
     for output in outputs:
         stream, frames = _probe_frames(output)
         _assert_common_delivery_contract(stream, frames, codec=codec)
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("resolution", [(1920, 1080), (3840, 2160)])
+@pytest.mark.parametrize("encoder", ["h264_videotoolbox", "hevc_videotoolbox"])
+def test_requested_videotoolbox_delivery_resolutions(
+    tmp_path: Path,
+    isolated_cache: Path,
+    resolution: tuple[int, int],
+    encoder: str,
+) -> None:
+    """Prove that strict hardware sessions support 1080p and UHD delivery.
+
+    ``_encode`` routes through the production planner and always emits
+    ``-allow_sw 0`` for VideoToolbox. A pass therefore cannot be Apple's silent
+    software fallback. The shorter fixture keeps the four-cell matrix practical
+    on Intel CI hosts while the six-second tests above retain the GOP assertions.
+    """
+    if encoder not in _REQUESTED_HARDWARE_ENCODERS:
+        pytest.skip(f"{encoder} was not requested for this hardware runner")
+    width, height = resolution
+    source = tmp_path / f"source-{width}x{height}.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i",
+            f"testsrc2=size={width}x{height}:rate=24:duration=1",
+            "-f", "lavfi", "-i",
+            "sine=frequency=997:sample_rate=48000:duration=1",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-color_range", "tv", "-color_primaries", "bt709",
+            "-color_trc", "bt709", "-colorspace", "bt709",
+            "-c:a", "aac", "-shortest", str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=180,
+    )
+    codec = _HARDWARE_ENCODERS[encoder][0]
+    output = _encode(
+        source,
+        tmp_path,
+        encoder=encoder,
+        codec=codec,
+        required=True,
+    )
+    payload = json.loads(subprocess.run(
+        [
+            ffprobe_bin(), "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,profile,level,width,height,pix_fmt",
+            "-of", "json", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout)
+    stream = payload["streams"][0]
+    assert (stream["width"], stream["height"]) == resolution
+    assert stream["codec_name"] == codec
+    assert stream["profile"] == _HARDWARE_ENCODERS[encoder][1]
+    assert stream["pix_fmt"] == "yuv420p"
+    assert isinstance(stream["level"], int) and stream["level"] > 0
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("encoder", ["h264_videotoolbox", "hevc_videotoolbox"])
+def test_requested_videotoolbox_encode_is_cancellable(
+    bitstream_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    encoder: str,
+) -> None:
+    """Cancel after FFmpeg reports progress and never publish a partial output."""
+    if encoder not in _REQUESTED_HARDWARE_ENCODERS:
+        pytest.skip(f"{encoder} was not requested for this hardware runner")
+    codec = _HARDWARE_ENCODERS[encoder][0]
+    profile = Profile(
+        name=f"cancel-{encoder}",
+        transforms=[],
+        target_codec=codec,  # type: ignore[arg-type]
+        output_container="mp4",
+        skip_watermark_check=True,
+    )
+    plan = build_plan(bitstream_source, profile, encoder_override=encoder)
+    output = tmp_path / f"cancel-{encoder}.mp4"
+    token = CancelToken()
+    progress_seen = False
+
+    def cancel_after_hardware_started(event: RunEvent) -> None:
+        nonlocal progress_seen
+        if event.kind == "progress" and not progress_seen:
+            progress_seen = True
+            token.cancel()
+
+    with pytest.raises(PipelineError, match="cancelled by user"):
+        run_full(
+            plan,
+            RunOptions(
+                work_dir=tmp_path / f"work-cancel-{encoder}" / plan.plan_hash,
+                output=output,
+                target_segment_sec=600.0,
+            ),
+            on_event=cancel_after_hardware_started,
+            cancel_token=token,
+        )
+    assert progress_seen, "cancellation fired before the hardware process started"
+    assert not output.exists(), "cancelled run published a partial final output"
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("hardware", "software", "codec"),
+    [
+        ("h264_videotoolbox", "libx264", "h264"),
+        ("hevc_videotoolbox", "libx265", "hevc"),
+    ],
+)
+def test_requested_videotoolbox_auto_policy_falls_back_to_software(
+    isolated_cache: Path,
+    hardware: str,
+    software: str,
+    codec: str,
+) -> None:
+    """Use real local probes, then model loss of only the hardware session."""
+    if hardware not in _REQUESTED_HARDWARE_ENCODERS:
+        pytest.skip(f"{hardware} was not requested for this hardware runner")
+    candidates = detect_encoders(force=True)
+    relevant = []
+    for candidate in candidates:
+        if candidate.name not in {hardware, software}:
+            continue
+        relevant.append(
+            candidate.model_copy(update={"works": False, "error": "device lost"})
+            if candidate.name == hardware
+            else candidate
+        )
+    selected = pick_encoder(
+        relevant,
+        codec=codec,  # type: ignore[arg-type]
+        policy="speed",
+    )
+    assert selected.name == software

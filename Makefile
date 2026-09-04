@@ -19,6 +19,8 @@ PYTEST      := $(VENV)/bin/pytest
 YT_UNIQ     := $(VENV)/bin/yt-uniq
 YT_UNIQ_GUI := $(VENV)/bin/yt-uniq-gui
 QT_OFFSCREEN := QT_QPA_PLATFORM=offscreen
+CORPUS_MANIFEST ?= validation-corpus/manifest.local.yaml
+CORPUS_RESULTS ?= validation-corpus/results/production
 
 # ---- meta ------------------------------------------------------------
 .DEFAULT_GOAL := help
@@ -128,6 +130,11 @@ cli:  ## Show yt-uniq CLI help.
 .PHONY: probe-encoders
 probe-encoders:  ## List ffmpeg encoders detected on this machine.
 	$(YT_UNIQ) probe --encoders
+
+.PHONY: production-benchmark
+production-benchmark:  ## Run licensed corpus current/proposed benchmark + reports.
+	$(PY) tools/natural_corpus.py validate $(CORPUS_MANIFEST)
+	$(PY) tools/natural_corpus.py run $(CORPUS_MANIFEST) --results $(CORPUS_RESULTS)
 
 # ---- packaging -------------------------------------------------------
 .PHONY: build

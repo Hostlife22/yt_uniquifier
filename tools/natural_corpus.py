@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import html
 import json
 import platform
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,7 +17,9 @@ from typing import Any
 
 import yaml
 
+from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.core.transforms.audio_loudnorm import measure
 
 REPO = Path(__file__).resolve().parents[1]
 ALLOWED_MEDIA_SUFFIXES = {".mkv", ".mov", ".mp4", ".mxf", ".webm"}
@@ -34,12 +39,20 @@ class CorpusCase:
 
 
 @dataclass(frozen=True)
+class BenchmarkVariant:
+    variant_id: str
+    profile: Path
+    encoder: str
+
+
+@dataclass(frozen=True)
 class CorpusManifest:
     path: Path
     profiles: tuple[Path, ...]
     encoders: tuple[str, ...]
     workers: int
     cases: tuple[CorpusCase, ...]
+    variants: tuple[BenchmarkVariant, ...]
 
 
 def _nonempty_string(value: object, field: str) -> str:
@@ -58,6 +71,26 @@ def _safe_relative(root: Path, value: object, field: str) -> tuple[Path, str]:
     return resolved, relative.as_posix()
 
 
+def _resolve_profile(manifest_path: Path, value: object, field: str) -> Path:
+    profile_value = Path(_nonempty_string(value, field))
+    profile = (
+        profile_value.resolve()
+        if profile_value.is_absolute()
+        else (manifest_path.parent / profile_value).resolve()
+    )
+    if not profile.is_file():
+        raise ValueError(f"profile does not exist: {value}")
+    load_profile(profile)
+    return profile
+
+
+def _safe_id(value: object, field: str) -> str:
+    identifier = _nonempty_string(value, field)
+    if not all(character.isalnum() or character in "-_" for character in identifier):
+        raise ValueError(f"{field} contains unsafe characters: {identifier}")
+    return identifier
+
+
 def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or raw.get("schema_version") != 1:
@@ -65,32 +98,54 @@ def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
     matrix = raw.get("matrix")
     if not isinstance(matrix, dict):
         raise ValueError("matrix must be a mapping")
-    profile_values = matrix.get("profiles")
-    encoder_values = matrix.get("encoders")
     workers = matrix.get("workers", 1)
-    if not isinstance(profile_values, list) or not profile_values:
-        raise ValueError("matrix.profiles must be a non-empty list")
-    if not isinstance(encoder_values, list) or not encoder_values:
-        raise ValueError("matrix.encoders must be a non-empty list")
     if not isinstance(workers, int) or not 1 <= workers <= 64:
         raise ValueError("matrix.workers must be an integer in [1, 64]")
 
+    variants: list[BenchmarkVariant] = []
     profiles: list[Path] = []
-    for index, value in enumerate(profile_values):
-        profile_value = Path(_nonempty_string(value, f"matrix.profiles[{index}]"))
-        profile = (
-            profile_value.resolve()
-            if profile_value.is_absolute()
-            else (path.parent / profile_value).resolve()
-        )
-        if not profile.is_file():
-            raise ValueError(f"profile does not exist: {value}")
-        load_profile(profile)
-        profiles.append(profile)
-    encoders = tuple(
-        _nonempty_string(value, f"matrix.encoders[{index}]")
-        for index, value in enumerate(encoder_values)
-    )
+    encoders: list[str] = []
+    variant_values = matrix.get("variants")
+    if variant_values is not None:
+        if not isinstance(variant_values, list) or not variant_values:
+            raise ValueError("matrix.variants must be a non-empty list")
+        variant_ids: set[str] = set()
+        for index, value in enumerate(variant_values):
+            if not isinstance(value, dict):
+                raise ValueError(f"matrix.variants[{index}] must be a mapping")
+            variant_id = _safe_id(value.get("id"), f"matrix.variants[{index}].id")
+            if variant_id in variant_ids:
+                raise ValueError(f"duplicate variant id: {variant_id}")
+            variant_ids.add(variant_id)
+            profile = _resolve_profile(
+                path, value.get("profile"), f"matrix.variants[{index}].profile",
+            )
+            encoder = _nonempty_string(
+                value.get("encoder"), f"matrix.variants[{index}].encoder",
+            )
+            variants.append(BenchmarkVariant(variant_id, profile, encoder))
+            profiles.append(profile)
+            encoders.append(encoder)
+    else:
+        profile_values = matrix.get("profiles")
+        encoder_values = matrix.get("encoders")
+        if not isinstance(profile_values, list) or not profile_values:
+            raise ValueError("matrix.profiles must be a non-empty list")
+        if not isinstance(encoder_values, list) or not encoder_values:
+            raise ValueError("matrix.encoders must be a non-empty list")
+        profiles = [
+            _resolve_profile(path, value, f"matrix.profiles[{index}]")
+            for index, value in enumerate(profile_values)
+        ]
+        encoders = [
+            _nonempty_string(value, f"matrix.encoders[{index}]")
+            for index, value in enumerate(encoder_values)
+        ]
+        variants = [
+            BenchmarkVariant(f"{profile.stem}-{encoder}", profile, encoder)
+            for profile in profiles
+            for encoder in encoders
+        ]
 
     case_values = raw.get("cases")
     if not isinstance(case_values, list) or not case_values:
@@ -100,11 +155,9 @@ def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
     for index, value in enumerate(case_values):
         if not isinstance(value, dict):
             raise ValueError(f"cases[{index}] must be a mapping")
-        case_id = _nonempty_string(value.get("id"), f"cases[{index}].id")
+        case_id = _safe_id(value.get("id"), f"cases[{index}].id")
         if case_id in ids:
             raise ValueError(f"duplicate case id: {case_id}")
-        if not all(character.isalnum() or character in "-_" for character in case_id):
-            raise ValueError(f"case id contains unsafe characters: {case_id}")
         ids.add(case_id)
         source, source_rel = _safe_relative(
             path.parent, value.get("source"), f"cases[{index}].source"
@@ -145,9 +198,10 @@ def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
     return CorpusManifest(
         path=path,
         profiles=tuple(profiles),
-        encoders=encoders,
+        encoders=tuple(encoders),
         workers=workers,
         cases=tuple(cases),
+        variants=tuple(variants),
     )
 
 
@@ -172,84 +226,332 @@ def _capture(command: list[str], log: Path) -> int:
     return result.returncode
 
 
+_PSNR_RE = re.compile(r"average:([0-9.]+|inf)")
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _psnr(source: Path, output: Path) -> tuple[float | None, str | None]:
+    """Measure decoded-video PSNR in the same resized domain as QA SSIM."""
+    command = [
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(output),
+        "-i", str(source), "-lavfi",
+        "[1:v][0:v]scale2ref=w=iw:h=ih[ref][dist];"
+        "[dist]setsar=1[d];[ref]setsar=1[r];[d][r]psnr",
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(
+            command, cwd=REPO, capture_output=True, text=True,
+            check=False, timeout=3600,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return None, f"PSNR unavailable: {exc}"
+    if result.returncode != 0:
+        tail = result.stderr.strip().splitlines()[-1] if result.stderr else "unknown"
+        return None, f"PSNR failed: {tail}"
+    matches = _PSNR_RE.findall(result.stderr)
+    if not matches:
+        return None, "PSNR unavailable: score not found"
+    if matches[-1] == "inf":
+        return None, "PSNR is infinite (decoded frames are identical)"
+    return float(matches[-1]), None
+
+
+def _audio_metrics(path: Path) -> tuple[float | None, float | None, str | None]:
+    try:
+        loudness = measure(path)
+    except Exception as exc:  # noqa: BLE001 - metric availability belongs in report
+        return None, None, f"audio loudness unavailable: {exc}"
+    return loudness.input_i, loudness.input_tp, None
+
+
+def _number(payload: dict[str, Any], key: str) -> float | int | None:
+    value = payload.get(key)
+    return value if isinstance(value, (float, int)) and not isinstance(value, bool) else None
+
+
+_CSV_FIELDS = (
+    "case_id", "variant_id", "profile", "encoder", "status",
+    "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
+    "source_size_bytes", "output_size_bytes", "size_ratio",
+    "duration_sec", "wall_sec", "rss_peak_kb",
+)
+
+
+def _source_row(source: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "case_id": source["case_id"],
+        "variant_id": "source",
+        "profile": "",
+        "encoder": "copy",
+        "status": "baseline",
+        "vmaf": 100.0,
+        "ssim": 1.0,
+        "psnr_db": None,
+        "lufs_i": source.get("lufs_i"),
+        "true_peak_dbtp": source.get("true_peak_dbtp"),
+        "source_size_bytes": source["size_bytes"],
+        "output_size_bytes": source["size_bytes"],
+        "size_ratio": 1.0,
+        "duration_sec": source.get("duration_sec"),
+        "wall_sec": None,
+        "rss_peak_kb": None,
+    }
+
+
+def _write_summary_csv(
+    sources: list[dict[str, Any]],
+    cells: list[dict[str, Any]],
+    destination: Path,
+) -> None:
+    with destination.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=_CSV_FIELDS)
+        writer.writeheader()
+        for source in sources:
+            writer.writerow(_source_row(source))
+        for cell in cells:
+            metrics = cell.get("metrics", {})
+            writer.writerow({
+                "case_id": cell["case_id"],
+                "variant_id": cell["variant_id"],
+                "profile": cell["profile"],
+                "encoder": cell["encoder"],
+                "status": "passed" if cell["ok"] else "failed",
+                **{field: metrics.get(field) for field in _CSV_FIELDS[5:]},
+            })
+
+
+def _write_summary_html(
+    sources: list[dict[str, Any]],
+    cells: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    destination: Path,
+) -> None:
+    headings = _CSV_FIELDS
+    rows: list[str] = []
+    for source in sources:
+        source_values = [_source_row(source)[field] for field in headings]
+        rows.append("<tr>" + "".join(
+            f"<td>{html.escape('' if value is None else str(value))}</td>"
+            for value in source_values
+        ) + "</tr>")
+    for cell in cells:
+        metrics = cell.get("metrics", {})
+        values = [
+            cell["case_id"], cell["variant_id"], cell["profile"], cell["encoder"],
+            "passed" if cell["ok"] else "failed",
+            *(metrics.get(field) for field in headings[5:]),
+        ]
+        rows.append("<tr>" + "".join(
+            f"<td>{html.escape('' if value is None else str(value))}</td>"
+            for value in values
+        ) + "</tr>")
+    comparison_json = html.escape(json.dumps(comparisons, indent=2, sort_keys=True))
+    document = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>Production benchmark</title>"
+        "<style>body{font-family:system-ui;margin:2rem}table{border-collapse:collapse}"
+        "th,td{border:1px solid #bbb;padding:.35rem;text-align:right}"
+        "th:first-child,td:first-child{text-align:left}pre{background:#eee;padding:1rem}"
+        "</style></head><body><h1>Production benchmark</h1><table><thead><tr>"
+        + "".join(f"<th>{html.escape(field)}</th>" for field in headings)
+        + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+        + f"<h2>Variant deltas</h2><pre>{comparison_json}</pre></body></html>\n"
+    )
+    destination.write_text(document, encoding="utf-8")
+
+
+def _comparisons(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for cell in cells:
+        grouped.setdefault(str(cell["case_id"]), []).append(cell)
+    result: list[dict[str, Any]] = []
+    delta_fields = (
+        "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
+        "output_size_bytes", "wall_sec", "rss_peak_kb",
+    )
+    for case_id, case_cells in grouped.items():
+        baseline = next(
+            (cell for cell in case_cells if cell["variant_id"] == "current"),
+            case_cells[0],
+        )
+        baseline_metrics = baseline.get("metrics", {})
+        for candidate in case_cells:
+            if candidate is baseline:
+                continue
+            candidate_metrics = candidate.get("metrics", {})
+            deltas: dict[str, float] = {}
+            for field in delta_fields:
+                old = baseline_metrics.get(field)
+                new = candidate_metrics.get(field)
+                if isinstance(old, (int, float)) and isinstance(new, (int, float)):
+                    deltas[field] = round(float(new) - float(old), 6)
+            result.append({
+                "case_id": case_id,
+                "baseline_variant": baseline["variant_id"],
+                "candidate_variant": candidate["variant_id"],
+                "deltas": deltas,
+            })
+    return result
+
+
 def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) -> int:
     results.mkdir(parents=True, exist_ok=True)
     cells: list[dict[str, Any]] = []
+    sources: list[dict[str, Any]] = []
     failed = False
     for case in manifest.cases:
-        for profile_path in manifest.profiles:
+        try:
+            source_duration: float | None = probe(case.source).duration_sec
+        except Exception:  # noqa: BLE001 - benchmark failure remains cell-local evidence
+            source_duration = None
+        source_lufs, source_true_peak, source_audio_note = _audio_metrics(case.source)
+        sources.append({
+            "case_id": case.case_id,
+            "source": case.source_rel,
+            "sha256": _sha256(case.source),
+            "size_bytes": case.source.stat().st_size,
+            "duration_sec": source_duration,
+            "lufs_i": source_lufs,
+            "true_peak_dbtp": source_true_peak,
+            "audio_note": source_audio_note,
+        })
+        for variant in manifest.variants:
+            profile_path = variant.profile
             profile = load_profile(profile_path)
-            for encoder in manifest.encoders:
-                cell_id = f"{case.case_id}__{profile_path.stem}__{encoder}"
-                cell_dir = results / cell_id
-                cell_dir.mkdir(parents=True, exist_ok=True)
-                output = cell_dir / f"output.{profile.output_container}"
-                benchmark_json = cell_dir / "benchmark.json"
-                qa_json = cell_dir / "qa.json"
-                benchmark_command = [
-                    sys.executable,
-                    str(REPO / "tools" / "benchmark.py"),
+            encoder = variant.encoder
+            cell_id = f"{case.case_id}__{variant.variant_id}"
+            cell_dir = results / cell_id
+            cell_dir.mkdir(parents=True, exist_ok=True)
+            output = cell_dir / f"output.{profile.output_container}"
+            benchmark_json = cell_dir / "benchmark.json"
+            plan_json = cell_dir / "plan.json"
+            qa_json = cell_dir / "qa.json"
+            benchmark_command = [
+                sys.executable,
+                str(REPO / "tools" / "benchmark.py"),
+                str(case.source),
+                "--profile",
+                str(profile_path),
+                "--out",
+                str(output),
+                "--encoder",
+                encoder,
+                "--workers",
+                str(manifest.workers),
+                "--work-dir",
+                str(cell_dir / "work"),
+                "--csv",
+                str(results / "benchmark-ledger.csv"),
+                "--json",
+                str(benchmark_json),
+                "--plan-json",
+                str(plan_json),
+                "--accept-watermark-risk",
+            ]
+            benchmark_rc = _capture(benchmark_command, cell_dir / "benchmark.log")
+            qa_rc: int | None = None
+            if benchmark_rc == 0:
+                qa_command = [
+                    str(REPO / ".venv" / "bin" / "yt-uniq"),
+                    "qa",
                     str(case.source),
-                    "--profile",
-                    str(profile_path),
-                    "--out",
                     str(output),
-                    "--encoder",
-                    encoder,
-                    "--workers",
-                    str(manifest.workers),
-                    "--work-dir",
-                    str(cell_dir / "work"),
-                    "--csv",
-                    str(results / "benchmark.csv"),
                     "--json",
-                    str(benchmark_json),
-                    "--accept-watermark-risk",
+                    str(qa_json),
+                    "--html",
+                    str(cell_dir / "qa.html"),
+                    "--plan-json",
+                    str(plan_json),
                 ]
-                benchmark_rc = _capture(benchmark_command, cell_dir / "benchmark.log")
-                qa_rc: int | None = None
-                if benchmark_rc == 0:
-                    qa_command = [
-                        str(REPO / ".venv" / "bin" / "yt-uniq"),
-                        "qa",
-                        str(case.source),
-                        str(output),
-                        "--json",
-                        str(qa_json),
-                        "--html",
-                        str(cell_dir / "qa.html"),
-                    ]
-                    if with_sscd:
-                        qa_command.append("--sscd")
-                    qa_rc = _capture(qa_command, cell_dir / "qa.log")
-                cell_ok = benchmark_rc == 0 and qa_rc == 0
-                failed |= not cell_ok
-                cells.append(
-                    {
-                        "cell_id": cell_id,
-                        "case_id": case.case_id,
-                        "source": case.source_rel,
-                        "source_sha256": _sha256(case.source),
-                        "rights_status": case.rights_status,
-                        "rights_reference": case.rights_reference,
-                        "media_class": case.media_class,
-                        "profile": profile_path.name,
-                        "encoder": encoder,
-                        "benchmark_exit_code": benchmark_rc,
-                        "qa_exit_code": qa_rc,
-                        "review_cues": case.review_cues,
-                    }
-                )
+                if with_sscd:
+                    qa_command.append("--sscd")
+                qa_rc = _capture(qa_command, cell_dir / "qa.log")
+            pipeline_ok = benchmark_rc == 0 and qa_rc == 0
+            benchmark = _load_json(benchmark_json)
+            qa = _load_json(qa_json)
+            psnr_db: float | None = None
+            psnr_note: str | None = "PSNR skipped because output is unavailable"
+            output_lufs: float | None = None
+            output_true_peak: float | None = None
+            output_audio_note: str | None = "audio metrics skipped because output is unavailable"
+            if output.is_file():
+                psnr_db, psnr_note = _psnr(case.source, output)
+                output_lufs, output_true_peak, output_audio_note = _audio_metrics(output)
+            output_size = output.stat().st_size if output.is_file() else None
+            source_size = case.source.stat().st_size
+            metrics = {
+                "vmaf": _number(qa, "vmaf_mean"),
+                "ssim": _number(qa, "ssim_mean"),
+                "registered_vmaf": _number(qa, "vmaf_registered_mean"),
+                "registered_ssim": _number(qa, "ssim_registered_mean"),
+                "registered_sscd": _number(qa, "sscd_registered_mean"),
+                "psnr_db": psnr_db,
+                "lufs_i": output_lufs,
+                "true_peak_dbtp": output_true_peak,
+                "source_size_bytes": source_size,
+                "output_size_bytes": output_size,
+                "size_ratio": (
+                    round(output_size / max(source_size, 1), 6)
+                    if output_size is not None else None
+                ),
+                "duration_sec": _number(qa, "output_duration_sec"),
+                "wall_sec": _number(benchmark, "wall_sec"),
+                "rss_peak_kb": _number(benchmark, "rss_peak_kb"),
+                "notes": [
+                    note for note in (psnr_note, output_audio_note) if note is not None
+                ],
+            }
+            required_metrics = (
+                "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
+                "output_size_bytes", "duration_sec", "wall_sec", "rss_peak_kb",
+            )
+            missing_metrics = [
+                field for field in required_metrics if metrics[field] is None
+            ]
+            metrics["complete"] = not missing_metrics
+            metrics["missing"] = missing_metrics
+            cell_ok = pipeline_ok and not missing_metrics
+            failed |= not cell_ok
+            cells.append({
+                "cell_id": cell_id,
+                "case_id": case.case_id,
+                "variant_id": variant.variant_id,
+                "source": case.source_rel,
+                "source_sha256": _sha256(case.source),
+                "rights_status": case.rights_status,
+                "rights_reference": case.rights_reference,
+                "media_class": case.media_class,
+                "profile": profile_path.name,
+                "encoder": encoder,
+                "benchmark_exit_code": benchmark_rc,
+                "qa_exit_code": qa_rc,
+                "ok": cell_ok,
+                "metrics": metrics,
+                "review_cues": case.review_cues,
+            })
+    comparisons = _comparisons(cells)
     summary = {
         "schema_version": 1,
         "manifest": manifest.path.name,
         "python": platform.python_version(),
         "platform": f"{platform.system()}-{platform.machine()}",
+        "sources": sources,
         "cells": cells,
+        "comparisons": comparisons,
     }
     (results / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    _write_summary_csv(sources, cells, results / "summary.csv")
+    _write_summary_html(sources, cells, comparisons, results / "summary.html")
     return 1 if failed else 0
 
 
@@ -278,7 +580,7 @@ def main() -> int:
         return 2
     print(
         f"manifest valid: {len(manifest.cases)} case(s), "
-        f"{len(manifest.profiles) * len(manifest.encoders)} cell(s) per case"
+        f"{len(manifest.variants)} cell(s) per case"
     )
     if args.command == "validate":
         return 0

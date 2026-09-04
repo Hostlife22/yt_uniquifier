@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 
 from tests.conftest import needs_ffmpeg
 from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
+from yt_uniquifier.core.errors import PreflightFailure
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.pipeline import build_main_audio_command_windowed
@@ -20,6 +22,7 @@ from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormParams, measure
 
 PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
+PGS_FIXTURE = Path(__file__).parents[1] / "fixtures" / "pgs" / "minimal.sup.b64"
 
 
 def _audio_duration(path: Path) -> float:
@@ -304,6 +307,39 @@ def ass_subtitle_source(tmp_path: Path) -> Path:
     return source
 
 
+@pytest.fixture
+def pgs_subtitle_source(tmp_path: Path) -> Path:
+    """MKV containing a real, redistributable HDMV PGS subtitle packet."""
+    subtitle = tmp_path / "minimal.sup"
+    encoded = b"".join(PGS_FIXTURE.read_bytes().split())
+    subtitle.write_bytes(base64.b64decode(encoded, validate=True))
+    raw_probe = probe(subtitle)
+    assert len(raw_probe.subtitle) == 1
+    assert raw_probe.subtitle[0].codec == "hdmv_pgs_subtitle"
+    assert raw_probe.subtitle[0].is_image_based is True
+
+    source = tmp_path / "pgs-source.mkv"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=2",
+            "-f", "lavfi", "-i",
+            "sine=frequency=440:sample_rate=48000:duration=2",
+            "-i", str(subtitle),
+            "-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-c:s", "copy", "-t", "2",
+            "-metadata:s:s:0", "language=eng",
+            "-metadata:s:s:0", "title=Licensed PGS fixture",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    return source
+
+
 @needs_ffmpeg
 @pytest.mark.integration
 def test_no_audio_transform_preserves_main_audio_subtitles_and_chapters(
@@ -551,6 +587,80 @@ def test_ass_subtitle_container_matrix(
     assert subtitle[0].codec in expected_codecs
     assert subtitle[0].language == "eng"
     assert subtitle[0].title == "Styled captions"
+
+
+def _extract_pgs(media: Path, destination: Path) -> bytes:
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(media), "-map", "0:s:0", "-c:s", "copy",
+            "-f", "sup", str(destination),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    return destination.read_bytes()
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_pgs_subtitle_is_bit_exact_through_mkv_pipeline(
+    pgs_subtitle_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+) -> None:
+    profile = Profile(
+        name="pgs-mkv-contract",
+        transforms=[],
+        output_container="mkv",
+        skip_watermark_check=True,
+    )
+    plan = build_plan(pgs_subtitle_source, profile, encoder_override="libx264")
+    output = tmp_path / "pgs-output.mkv"
+    run_full(plan, RunOptions(
+        work_dir=tmp_path / "work-pgs-mkv",
+        output=output,
+        target_segment_sec=600,
+    ))
+
+    output_subtitle = probe(output).subtitle
+    assert len(output_subtitle) == 1
+    assert output_subtitle[0].codec == "hdmv_pgs_subtitle"
+    assert output_subtitle[0].is_image_based is True
+    assert output_subtitle[0].language == "eng"
+    assert output_subtitle[0].title == "Licensed PGS fixture"
+    source_payload = _extract_pgs(pgs_subtitle_source, tmp_path / "source.sup")
+    output_payload = _extract_pgs(output, tmp_path / "output.sup")
+    assert output_payload == source_payload
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("container", ["mp4", "mov"])
+def test_pgs_subtitle_fails_before_encode_for_iso_bmff_containers(
+    pgs_subtitle_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    container: str,
+) -> None:
+    profile = Profile(
+        name=f"pgs-{container}-contract",
+        transforms=[],
+        output_container=container,  # type: ignore[arg-type]
+        skip_watermark_check=True,
+    )
+    plan = build_plan(pgs_subtitle_source, profile, encoder_override="libx264")
+    output = tmp_path / f"pgs-output.{container}"
+
+    with pytest.raises(PreflightFailure, match="subs.image_based"):
+        run_full(plan, RunOptions(
+            work_dir=tmp_path / f"work-pgs-{container}",
+            output=output,
+            target_segment_sec=600,
+        ))
+    assert not output.exists()
+    assert not list((tmp_path / f"work-pgs-{container}").glob("segment-*.mp4"))
 
 
 @needs_ffmpeg

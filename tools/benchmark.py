@@ -161,6 +161,12 @@ def main() -> int:
         "Shape is stable across releases; consumed by "
         "tools/perf_compare.py.",
     )
+    ap.add_argument(
+        "--plan-json",
+        type=Path,
+        default=None,
+        help="Write the exact Plan used by this run for registered QA metrics.",
+    )
     args = ap.parse_args()
 
     profile = load_profile(args.profile)
@@ -209,6 +215,8 @@ def main() -> int:
         "out": str(args.out),
         "duration_sec": round(plan.source.duration_sec, 2),
         "size_bytes": plan.source.size_bytes,
+        "output_size_bytes": args.out.stat().st_size,
+        "size_ratio": round(args.out.stat().st_size / max(plan.source.size_bytes, 1), 6),
         "encoder": plan.encoder.name,
         "workers": args.workers,
         "wall_sec": round(wall, 2),
@@ -219,6 +227,7 @@ def main() -> int:
     }
 
     write_header = not args.csv.exists() or args.csv.stat().st_size == 0
+    args.csv.parent.mkdir(parents=True, exist_ok=True)
     with args.csv.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
         if write_header:
@@ -241,6 +250,10 @@ def main() -> int:
             "out": str(args.out),
             "duration_sec": round(plan.source.duration_sec, 2),
             "size_bytes": plan.source.size_bytes,
+            "output_size_bytes": args.out.stat().st_size,
+            "size_ratio": round(
+                args.out.stat().st_size / max(plan.source.size_bytes, 1), 6,
+            ),
             "encoder": plan.encoder.name,
             "workers": args.workers,
             "wall_sec": round(wall, 2),
@@ -252,6 +265,13 @@ def main() -> int:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(
             json.dumps(snapshot, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    if args.plan_json is not None:
+        args.plan_json.parent.mkdir(parents=True, exist_ok=True)
+        args.plan_json.write_text(
+            plan.model_dump_json(indent=2) + "\n",
             encoding="utf-8",
         )
 

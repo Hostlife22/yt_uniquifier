@@ -15,9 +15,10 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 | 2 × concurrent H.264 VideoToolbox 1080p | 180/180 frames каждый; 7.72 s/job, 8.09 s aggregate wall | `max_parallel=2` подтверждён для этого Mac |
 | MP4/MKV/MOV, 3 s tagged SDR | 7/7 integration tests; all A/V streams decode; chapters/subtitles retained by policy | Container smoke закрыт для synthetic core matrix |
 | MKV attachment / MOV tmcd / MP4 cover art | Attachment bytes exact; `01:00:00:00` retained; JPEG bytes exact | Supported auxiliary topology is preserved and final-contract validated |
-| ASS subtitle → MKV/MOV | ASS copied to MKV; converted to `mov_text` in MOV; language/title retained | Text subtitle policy confirmed; real PGS fixture remains pending |
+| ASS subtitle → MKV/MOV | ASS copied to MKV; converted to `mov_text` in MOV; language/title retained | Text subtitle policy confirmed |
+| MIT-licensed real PGS fixture | MKV extraction is byte-identical; MP4/MOV fail preflight before encode | Image-subtitle container contract confirmed with `hdmv_pgs_subtitle` bytes |
 | APFS queue, 4 processes × 80 jobs | 80 unique leases, 0 duplicates/losses | Single-host atomic lease contract подтверждён; NFS не проверен |
-| Segmented VFR, libx264, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software VFR preserve contract разрешён; hardware paths остаются unverified |
+| Segmented VFR, libx264/VideoToolbox, 6 s | 220/220 frames; 30/20/60 FPS cadence retained; monotonic PTS; A/V end delta ≤50 ms | Software plus Intel H.264/HEVC VideoToolbox preserve contract разрешён; other hardware remains unverified |
 | Temporal jitter, maximum 0.2/0.2 | bounded 289-character filter; 24/30/60 FPS retained 58/72, 71/90, 145/180 frames; VFR cadence classes retained | Pattern is based on a 24 Hz PTS grid instead of source frame number; hardware paths remain unverified |
 | Auto encoder policy, H.264 | `quality` → libx264; `speed` → H.264 VideoToolbox | Default follows production quality priority; hardware requires explicit policy/override |
 | `soft`, 30.183 s, policy smoke | libx264: 17.86 s, 752 frames; VideoToolbox: 9.36 s, 752 frames; both A/V start 0 | Selection policy changes throughput without losing decoded frames on this Mac |
@@ -44,11 +45,11 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Windowed audio boundary events | Six pulse markers before/on/after the 60 s and 120 s crossfades retained exactly once within 30 ms; 180 s duration stayed within one AAC-frame budget | Crossfade assembly does not drop, repeat or accumulate timing error on the synthetic divergent-EQ fixture |
 | libx264 H.264 upload structure | 24 FPS output: High Profile, CABAC, max B-run 2, four IDR GOP starts across 48 frames with max interval 12 | Software H.264 no longer relies on library GOP/B-frame defaults; other locally available codecs are covered by the separate matrix below |
 | Local HEVC/AV1 bitstream matrix | 5/5: libx265, SVT-AV1, libaom-AV1, H.264 and HEVC VideoToolbox; 144/144 frames, tagged BT.709, expected profiles/pixel formats and bounded GOPs | VideoToolbox HEVC profile is pinned to Main/Main10 by output depth; H.264 VideoToolbox produced CABAC/IDR and a one-frame B-run on this Intel Mac; GitHub Apple Silicon produced a three-frame run because VideoToolbox exposes frame reordering as a boolean |
-| Strict self-hosted qualification harness | Extended local mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 14 passed, 36 unrequested cases skipped in 122.61 s; JUnit plus 27 hashed/probed media artifacts collected | Bitstream, exact VFR PTS/frame count, HEVC HLG, static-HDR10 fail-closed policy and two-session concurrency passed on this Intel Mac; NVENC/QSV/AMF remain `NOT VERIFIED` |
+| Strict self-hosted qualification harness | Extended local mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 22 passed, 36 unrequested cases skipped in 157.07 s; JUnit plus 39 hashed/probed media artifacts collected | Bitstream, 1080p/4K SDR, exact VFR PTS/frame count, HEVC HLG, static-HDR10 fail-closed policy, cancellation, fallback and two-session concurrency passed on this Intel Mac; NVENC/QSV/AMF remain `NOT VERIFIED` |
 | Debian 12 production container bitstream matrix | FFmpeg 5.1.9: libx265/SVT-AV1/libaom-AV1 3 passed; two unavailable VideoToolbox cases skipped | Current wheel and software encoder policy work on the shipped Linux runtime, including libaom constant-quality mode |
 | HEVC/AV1 two-second GOP synthetic delta | 6 s, 640x360, 24 FPS: keyframes 0/48/96; file-size change vs defaults: x265 +1.48%, SVT +0.96%, libaom +1.06%, HEVC VideoToolbox -3.57% | Small synthetic result supports predictable random access; natural-corpus size/quality impact remains required |
 | Multi-audio codec/container matrix | AAC main + Opus secondary across MP4/MOV/MKV | MP4/MOV transcode unsupported passthrough to AAC; MKV preserves Opus and stream metadata |
-| SRT/ASS container matrix | Both text formats passed MP4/MOV/MKV; MP4/MOV emit mov_text and MKV retains SubRip/ASS, with language/title intact | Text-subtitle policy is executable rather than documentation-only; real PGS remains pending |
+| SRT/ASS/PGS container matrix | Text formats passed MP4/MOV/MKV; real PGS is byte-identical through MKV and rejected before MP4/MOV encode | Subtitle policy is executable with text and image-based fixtures |
 | Exact media deltas | 3 s MP4/MOV/MKV: 72/72 decoded video frames; normalized 48 kHz audio sample delta ≤1024 and packet-end delta ≤50 ms | Found and fixed a real loudnorm PTS discontinuity that previously cut 3581 decoded source-relative samples during final mux limiting |
 | Loudnorm mode observability | 44.1 kHz transformed fixture requested linear; FFmpeg reported dynamic; output remained -14.0 LUFS | Runtime mode and fallback reason are now retained instead of assuming measured input guarantees linear processing |
 | Seed/resume reproducibility | Fresh invocation seed differs, persisted seed is restored; retained segment/audio mtimes+hashes and decoded A/V SHA-256 remain equal | Resume does not reroll stochastic transforms or reprocess completed media |
@@ -58,7 +59,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1693 passed, 47 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:49 | Combined RFC #11/#12 integration, version-contract and production-hardening changes do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
+| Full local quality gate | 1699 passed, 55 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:30 | PGS, benchmark, VideoToolbox and fault-lab additions do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
 | Remote release-candidate matrix | commit `c0aaafd`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.23% | No-upscale, registered QA, admission-race and version-contract fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
 | CI-equivalent coverage | 1497 passed, 12 expected skips, 198 deselected; 81.23% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
 
@@ -248,7 +249,7 @@ Photometric-only `color_eq`/`noise` path не блокируется. Это saf
 | Rubber Band | Real FFmpeg variability integration — PASS |
 | SSCD model | Self >0.999; unrelated clip <0.95 — PASS |
 | 4K AV1 profiles | Real SVT-AV1/profile integration — PASS |
-| VideoToolbox hardware | H.264 1080p/4K + HEVC 4K 10-bit, `allow_sw=0` — PASS |
+| VideoToolbox hardware | H.264/HEVC 1080p/4K SDR, HLG Main10, VFR, 2 sessions, cancellation/fallback, `allow_sw=0` — PASS; static HDR10 metadata fail-closed |
 
 ## Synthetic long-form results — v1.4.0 candidate
 
@@ -378,10 +379,12 @@ mounts in production, and native cross-host deployment qualification remains req
 
 `validation-corpus/manifest.example.yaml` plus `tools/natural_corpus.py` validate
 relative media paths, explicit owned/licensed/public-domain status, non-empty rights
-references, SDR/HDR10/HLG classes, profiles and encoders. The runner records source
-SHA-256 and invokes the existing benchmark and QA pipelines per matrix cell. No media
-is committed and no natural-content result is claimed; those results remain
-**NOT VERIFIED** until the owner adds licensed fixtures.
+references, SDR/HDR10/HLG classes and named current/proposed variants. One
+`make production-benchmark` run records source SHA-256 and exact Plan provenance,
+invokes the existing benchmark and registered-QA pipelines, adds PSNR/LUFS/true peak,
+and emits aggregate JSON/CSV/HTML with size/time/RAM deltas. A two-variant real-FFmpeg
+synthetic smoke passed locally. No natural media is committed and natural-content
+results remain **NOT VERIFIED** until the owner adds licensed fixtures.
 
 ## Production benchmark protocol
 
@@ -434,8 +437,9 @@ release по [официальным upload settings](https://support.google.com
 - Real licensed/natural 1 h / 2 h / 3 h+ movies and listening/visual inspection.
 - 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
 - HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
-- Real PGS subtitle roundtrip (installed FFmpeg exposes a decoder but no fixture encoder).
-- NVENC/QSV/AMF; VideoToolbox concurrency/static HDR metadata.
+- NVENC/QSV/AMF and AV1 VideoToolbox.
+- Natural HDR10 static-metadata output on hardware; Intel VideoToolbox is fail-closed
+  for this case rather than silently stripping metadata.
 - Rubber Band subjective quality on speech/music (functional/duration path verified).
 - YouTube ingestion/transcode result.
 

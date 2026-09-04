@@ -13,18 +13,25 @@ stay in your controlled records; the manifest stores only an internal reference.
      validation-corpus/manifest.example.yaml --allow-missing-media
    ```
 
-4. Validate real files and run the complete profile/encoder matrix:
+4. Validate real files and run the complete named current/proposed matrix with
+   one command:
 
    ```bash
-   .venv/bin/python tools/natural_corpus.py validate \
-     validation-corpus/manifest.local.yaml
-   .venv/bin/python tools/natural_corpus.py run \
-     validation-corpus/manifest.local.yaml \
-     --results validation-corpus/results/baseline
+   make production-benchmark
    ```
 
+   Override paths when needed with
+   `CORPUS_MANIFEST=/path/manifest.yaml CORPUS_RESULTS=/path/results`.
+
 Add `--with-sscd` only when the `[ml]` extra and approved model weights are present.
-Each cell retains benchmark/QA JSON, HTML and logs; `summary.json` binds the source
-SHA-256, rights reference, profile and encoder. The existing raw similarity fields
-are diagnostics, not evidence about an external rights-management system. Registered
-quality metrics from RFC #12 will be added to this same result layout after approval.
+Each cell retains its exact Plan, benchmark/QA JSON, HTML and logs. Aggregate
+`summary.json`, `summary.csv`, and `summary.html` report VMAF, SSIM, PSNR, integrated
+LUFS, true peak, source/output size, encode time, and peak process-tree RAM. The
+source section records source audio/size baselines; the comparison section reports
+candidate-minus-current deltas. Registered RFC #12 metrics are included when the
+exact Plan can be replayed. Raw similarity fields remain diagnostics, not evidence
+about any external rights-management system.
+
+The runner performs full-file metric passes. A 1–3 hour corpus can therefore take
+substantially longer than the encode itself; keep each rights reference auditable and
+do not substitute unlicensed media merely to shorten the run.

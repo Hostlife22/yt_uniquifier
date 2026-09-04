@@ -19,7 +19,7 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-04):
 
 - Ruff и strict mypy: passed (`162` source files).
-- Combined RFC integration `make check`: `1693 passed, 47 expected skips` на полностью
+- Combined production integration `make check`: `1699 passed, 55 expected skips` на полностью
   установленном optional environment; subsequent admission/CLI fixes passed the
   six-cell remote Linux/macOS/Windows matrix at commit `c0aaafd`.
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
@@ -39,6 +39,11 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
 - Rubber Band и SSCD с реальной TorchScript model: passed (`5/5`).
 - 4K AV1/profile matrix: passed (`11/11`); VideoToolbox hardware smoke прошёл для
   H.264 1080p/4K и HEVC 4K 10-bit без software fallback.
+- Expanded strict VideoToolbox matrix on Intel macOS covers H.264/HEVC 1080p/4K,
+  SDR/HLG, CFR/VFR, GOP/profile/level, two sessions, mid-process cancellation and
+  automatic software fallback. Static HDR10 metadata remains deliberately rejected.
+- A redistributable real PGS bitstream is byte-identical through MKV; MP4/MOV reject
+  it before starting encode.
 - Synthetic long-form 1/2/3 h: `7200/14400/21600` decoded frames, start `0`,
   duration drift не более `13.8 ms`; peak RSS `107/136/158 MB`.
 - Kill/resume: два completed segment сохранили SHA-256 и mtime, итог `7200/7200`
@@ -432,8 +437,10 @@ lowest normalized violation с явным non-converged result. Ограниче
   crash между ownership fence и final rename; old same-name marker не может разрешить
   публикацию, а unfenced staged bytes отбрасываются после reaping.
   Общий `run_full` теперь не публикует результат до успешного полного A/V decode.
-  Rich QA sidecars остаются опциональной диагностикой; NFS/network-partition
-  qualification остаётся открытой.
+  Rich QA sidecars остаются опциональной диагностикой. Expanded two-client Docker
+  NFSv4 qualification passes partition, four SIGKILL publication boundaries,
+  idempotent recovery, corrupt-checkpoint and bounded-ENOSPC cases; the real
+  production hard mount remains open.
 
 ## Encoder audit
 
@@ -445,7 +452,7 @@ Availability probing реальным коротким encode — сильная
 | NVENC | H264/HEVC/AV1 candidates, heuristic parallel cap | 10-bit/profile/level/resolution/rate-control/session and per-GPU routing unverified |
 | QSV | H264/HEVC/AV1 candidates | Device initialization, 10-bit and filters unverified |
 | AMF | H264/HEVC/AV1 candidates | Pixel formats/rate-control/driver capabilities unverified |
-| VideoToolbox | Real local H264/HEVC capability probe; HLG and two-session H264 verified on this Mac | Other hardware/driver matrices remain unverified |
+| VideoToolbox | H264/HEVC SDR/HLG, CFR/VFR, 1080p/4K, GOP/profile/level, two sessions, cancellation and fallback verified on this Intel Mac | Static HDR10 metadata fails closed; Apple Silicon/other driver matrices remain unverified |
 | libx264 | Reliable quality-policy default | GOP differs from YouTube guidance |
 | libx265 | Reliable quality-policy default | Wider natural HDR corpus still required |
 | AV1 | SVT-AV1 locally available | Vulkan auto-selection disabled until a real hardware-frame upload graph exists; other HW AV1 unavailable locally |
@@ -500,7 +507,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | Combined RFC gate: 1693 passed, 47 expected hardware/optional skips on fully provisioned macOS |
+| Full `make check` | Production gate: 1699 passed, 55 expected hardware/optional skips on fully provisioned macOS |
 | Branch coverage gate | 81.23% (`1497 passed`, required 80%) on remote Ubuntu/Python 3.12 commit `c0aaafd` |
 | Ruff | Passed |
 | Strict mypy (`162` source files) | Passed |
@@ -515,6 +522,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | MOV timecode | Post-fix passed: tmcd track and `01:00:00:00` preserved |
 | MP4 attached picture | Post-fix passed: one program video plus byte-identical JPEG cover |
 | ASS subtitle | Post-fix passed: MKV copy and MOV mov_text conversion with language/title |
+| PGS subtitle | Post-fix passed: real MIT fixture byte-identical in MKV; MP4/MOV fail early |
 | Windowed audio 125 s | Post-fix passed: error ≤ 0.03 s |
 | 44.1 kHz `soft` smoke | Post-fix passed: 29.991 s, 48 kHz, -14.0 LUFS |
 | Timestamp smoke | Post-fix passed: video starts 0.000 s, 752/752 frames |

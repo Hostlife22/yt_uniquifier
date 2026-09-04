@@ -1,12 +1,16 @@
 schema_version: 1
 
 matrix:
-  profiles:
-    - ../src/yt_uniquifier/profiles/soft.yaml
-    - ../src/yt_uniquifier/profiles/medium.yaml
-  encoders:
-    - libx264
   workers: 1
+  # Named variants make proposed-current deltas explicit in summary.json/html.
+  # Replace either profile with the exact production candidate being evaluated.
+  variants:
+    - id: current
+      profile: ../src/yt_uniquifier/profiles/soft.yaml
+      encoder: libx264
+    - id: proposed
+      profile: ../src/yt_uniquifier/profiles/medium.yaml
+      encoder: libx264
 
 cases:
   - id: sdr-dialogue-1080p
