@@ -28,6 +28,8 @@ the last tag.
 
 ### Fixed
 
+- Detect and redact POSIX, Windows drive, and UNC absolute paths independently of
+  the collector host OS, preventing path disclosure in cross-platform worker logs.
 - Keep the base/dev CI matrix collectable without the optional web extra by
   importing Prometheus only inside its web-metrics regression test.
 - Base corpus identity on content SHA-256 so moves retain IDs and in-place content

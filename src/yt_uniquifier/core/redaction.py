@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 REDACTED = "<REDACTED>"
@@ -47,10 +47,14 @@ def redact_path(value: str, *, all_absolute: bool = False) -> str:
         prefix = home.rstrip("/\\") + separator
         if value.startswith(prefix):
             return "<HOME>" + value[len(home):]
-    if all_absolute and (
-        Path(value).is_absolute() or PureWindowsPath(value).is_absolute()
-    ):
-        name = PureWindowsPath(value).name if "\\" in value else Path(value).name
+    posix_path = PurePosixPath(value)
+    windows_path = PureWindowsPath(value)
+    if all_absolute and (posix_path.is_absolute() or windows_path.is_absolute()):
+        # Pure path classes deliberately avoid host-OS semantics.  Observability
+        # can receive a POSIX path from a remote worker while running on Windows
+        # (or a Windows/UNC path while running on POSIX), and those paths must be
+        # treated as sensitive regardless of the collector's platform.
+        name = windows_path.name if windows_path.is_absolute() else posix_path.name
         return f"<PATH>/{name}" if name else "<PATH>"
     return value
 

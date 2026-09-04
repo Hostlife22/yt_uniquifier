@@ -14,7 +14,7 @@ from yt_uniquifier.core.models import (
     SourceMeta,
     TransformConfig,
 )
-from yt_uniquifier.core.redaction import REDACTED, redact_mapping
+from yt_uniquifier.core.redaction import REDACTED, redact_mapping, redact_path
 from yt_uniquifier.core.runner import RunEvent
 from yt_uniquifier.core.transform_compatibility import (
     COMPATIBILITY_GRAPH,
@@ -134,6 +134,19 @@ def test_observability_redacts_nested_tokens_and_absolute_paths() -> None:
     assert redacted["nested"]["unknown_field"] == "<PATH>/source.mov"
     assert "ghp_" not in redacted["nested"]["provider_error"]
     assert "/srv/app/private" not in redacted["nested"]["trace"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/srv/private/licensed-master.mkv",
+        "C:/Users/customer/licensed-master.mkv",
+        r"C:\Users\customer\licensed-master.mkv",
+        r"\\server\licensed\licensed-master.mkv",
+    ],
+)
+def test_absolute_path_redaction_is_independent_of_host_os(path: str) -> None:
+    assert redact_path(path, all_absolute=True) == "<PATH>/licensed-master.mkv"
 
 
 def test_metrics_have_bounded_states_and_no_correlation_labels() -> None:
