@@ -116,10 +116,21 @@ jobs:
         if: runner.os == 'macOS'
         run: test -d dist/yt-uniq-gui.app
 
-      - name: Verify bundle artefact exists (Linux / Windows)
-        if: runner.os != 'macOS'
+      - name: Verify bundle artefact exists (Linux)
+        if: runner.os == 'Linux'
         run: |
           find dist/yt-uniq-gui -mindepth 1 -maxdepth 1 -print -quit
+
+      - name: Verify bundle artefact exists (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -PathType Container "dist/yt-uniq-gui")) {
+            throw "Windows release bundle directory was not created"
+          }
+          if (-not (Get-ChildItem "dist/yt-uniq-gui" | Select-Object -First 1)) {
+            throw "Windows release bundle directory is empty"
+          }
 
       - name: Ad-hoc codesign .app bundle (macOS)
         # v1.1.0 Task 8: ad-hoc signature stabilises the bundle across
