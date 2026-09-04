@@ -273,13 +273,16 @@ jobs:
 
       - name: Install appimage-builder
         run: |
-          sudo apt-get install -y python3-pip libgdk-pixbuf-2.0-0 fakeroot \
+          sudo apt-get install -y python3-venv libgdk-pixbuf-2.0-0 fakeroot \
             squashfs-tools zsync desktop-file-utils
           # appimage-builder 1.1.0 still relies on packaging's legacy Debian
           # version parser. packaging>=22 rejects versions such as
-          # 1.22.6ubuntu6 while resolving the APT runtime closure.
-          sudo pip3 install --break-system-packages \
+          # 1.22.6ubuntu6 while resolving the APT runtime closure. Isolate the
+          # compatibility pin instead of replacing Ubuntu's system package.
+          python3 -m venv "${RUNNER_TEMP}/appimage-builder-venv"
+          "${RUNNER_TEMP}/appimage-builder-venv/bin/pip" install \
             "packaging==21.3" "appimage-builder==1.1.0"
+          echo "${RUNNER_TEMP}/appimage-builder-venv/bin" >> "${GITHUB_PATH}"
 
       - name: Build AppImage
         run: |
