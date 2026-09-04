@@ -16,7 +16,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 2. Correctness blockers
 
-- [x] 44.1 kHz pitch+tempo сохраняет expected duration; 48/96 kHz full matrix pending.
+- [x] 44.1/48/96 kHz pitch+tempo сохраняет expected duration и explicit 48 kHz output.
 - [x] Final processed audio sample rate соответствует policy: 48 kHz.
 - [x] Output с no audio transforms сохраняет selected main audio.
 - [x] Negative AAC priming/edit-list PTS не сдвигает video на regression fixture.
@@ -40,13 +40,15 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 3. SDR/HDR/color
 
 - [x] Synthetic SDR BT.709: transfer/primaries/matrix/limited range/yuv420p verified.
-- [ ] Full/limited range conversion explicit and tested.
+- [x] SDR full/limited range preservation is explicit in FFmpeg and x264 arguments
+      and survives real segment encode, concat and final validation.
 - [x] Synthetic HDR10: 10-bit, PQ, Rec.2020, ST2086 и MaxCLL/FALL verified на x265.
 - [x] Synthetic HLG: 10-bit, HLG/Rec.2020/limited range и A/V timeline verified на
       libx265 и HEVC VideoToolbox этого Mac.
 - [x] HDR10+/Dolby Vision policy explicit: dynamic metadata rejected early.
 - [ ] HDR→SDR zscale/tonemap output BT.709 verified on dark/highlight/skin content.
-- [ ] No SDR transform is accidentally applied in nonlinear HDR domain.
+- [x] Undefined HDR→8-bit output policy and tonemap after another video transform
+      fail before encode; HDR-preserving color operations use the linear-light wrap.
 - [ ] NVENC/QSV/AMF/VideoToolbox/x265/AV1 HDR capability tested per advertised target.
 
 ## 4. Containers and cadence
@@ -68,10 +70,13 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Mono, stereo and 5.1 topology passes the real transform matrix; multiple
       selected tracks pass the full container pipeline.
 - [x] 44.1, 48 and 96 kHz pitch inputs pass and produce explicit 48 kHz output.
-- [ ] AAC/Opus and advertised passthrough codecs per target container.
+- [x] Main AAC plus secondary Opus is container-qualified: Opus is copied in MKV
+      and explicitly transcoded to AAC for MP4/MOV while metadata is preserved.
 - [x] Loudnorm measures actual pre-loudnorm chain, not original source.
 - [x] Final integrated loudness within ±0.5 LU on regression fixture; corpus pending.
-- [ ] Linear/dynamic normalization mode recorded; fallback not silent.
+- [x] Requested and FFmpeg-reported loudnorm modes are recorded in the audio log
+      and emitted as a RunEvent; unusable-measurement and FFmpeg-selected dynamic
+      fallbacks have distinct explicit reasons.
 - [x] Haas rejects non-stereo; reverb/compand/noise/pitch plus EQ/smear/resample
       preserve mono, stereo and 5.1 channel counts in the real FFmpeg matrix.
 - [ ] Boundary impulse/listening tests find no click, gap, repeat or accumulated shift.
@@ -92,14 +97,15 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Quality-first profile has corpus-backed VMAF/SSIM/PSNR/LUFS/size/time bands.
 - [x] Aggressive/destructive profiles are opt-in by explicit profile selection and
       visibly marked experimental; corpus-backed safe operating bounds remain pending.
-- [ ] Random seeds reproduce exact plan/commands/output semantics on resume.
+- [x] Resume restores the persisted run seed, leaves completed segment/audio artifacts
+      untouched and reproduces exact decoded SHA-256 for video and audio.
 
 ## 7. Encoders
 
 - [x] `--encoder` either selects exact requested encoder or fails clearly.
 - [x] Availability probe covers job codec, pixel format, bit depth, resolution and RC.
-- [ ] Encoder cache includes FFmpeg/OS/GPU signature; invalidation after a later runtime
-      device failure remains open.
+- [x] Encoder cache includes FFmpeg/OS/GPU signature; an exact-job success is
+      invalidated after a later runtime encode/device failure and must be reprobed.
 - [x] libx264/libx265/SVT-AV1 software paths verified locally.
 - [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
       H.264 + HEVC VideoToolbox verified on this Intel Mac, other vendors unavailable.
@@ -138,7 +144,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Silent stall watchdog and configurable wall policy tested with real subprocesses.
 - [x] Segment encode, concat and sanitizer use the same bounded-log/watchdog runner;
       no fixed one-hour concat/sanitizer termination remains.
-- [ ] Cancellation terminates complete process tree on Linux/macOS/Windows.
+- [ ] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
+      shell-grandchild and watchdog paths pass on this Mac, remote Linux/Windows
+      runner qualification remains `NOT VERIFIED`.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [ ] Run/plan/job/segment correlation IDs appear in structured logs/events.
 - [ ] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
@@ -194,8 +202,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1578 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `82.23%` (`1446 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1593 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `82.32%` (`1456 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -218,7 +226,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1578 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1593 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -232,9 +240,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1578 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1593 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 82.23% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 82.32% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.

@@ -300,29 +300,61 @@ def test_44100_pitch_pipeline_preserves_duration_and_outputs_48000(
     assert abs(_audio_duration(output) - 3.0) <= 0.05
     loudness = measure(output, LoudnormParams(integrated=-14.0))
     assert loudness.input_i == pytest.approx(-14.0, abs=0.5)
+    loudnorm_log = (
+        tmp_path / "work-soft" / plan.plan_hash / "main_audio.m4a.log"
+    ).read_text(encoding="utf-8")
+    assert "[yt-uniquifier] loudnorm" in loudnorm_log
+    mode_line = next(
+        line for line in loudnorm_log.splitlines()
+        if line.startswith("[yt-uniquifier] loudnorm ")
+    )
+    mode_record = json.loads(mode_line.split(" loudnorm ", 1)[1])
+    assert mode_record["requested_mode"] == "linear"
+    assert mode_record["reported_mode"] in {"linear", "dynamic"}
+    assert mode_record["dynamic_fallback"] is (
+        mode_record["reported_mode"] == "dynamic"
+    )
+    if mode_record["reported_mode"] == "dynamic":
+        assert mode_record["fallback_reason"] == "ffmpeg_rejected_linear_constraints"
     assert len(result.subtitle) == 1
     assert len(result.chapters) == 2
 
 
 @needs_ffmpeg
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("output_container", "expected_codecs"),
+    [
+        ("mp4", ["aac", "aac"]),
+        ("mov", ["aac", "aac"]),
+        ("mkv", ["aac", "opus"]),
+    ],
+)
 def test_all_audio_tracks_use_container_compatible_codecs(
-    multi_audio_source: Path, tmp_path: Path, isolated_cache: Path,
+    multi_audio_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    output_container: str,
+    expected_codecs: list[str],
 ) -> None:
     soft = load_profile(PROFILES_DIR / "soft.yaml")
-    profile = soft.model_copy(update={"audio_tracks": "all", "name": "all-audio"})
+    profile = soft.model_copy(update={
+        "audio_tracks": "all",
+        "name": f"all-audio-{output_container}",
+        "output_container": output_container,
+    })
     plan = build_plan(multi_audio_source, profile, encoder_override="libx264")
-    output = tmp_path / "all-audio.mp4"
+    output = tmp_path / f"all-audio.{output_container}"
     run_full(
         plan,
         RunOptions(
-            work_dir=tmp_path / "work-all-audio" / plan.plan_hash,
+            work_dir=tmp_path / f"work-all-audio-{output_container}" / plan.plan_hash,
             output=output,
         ),
     )
 
     result = probe(output)
-    assert [stream.codec for stream in result.audio] == ["aac", "aac"]
+    assert [stream.codec for stream in result.audio] == expected_codecs
     assert [stream.language for stream in result.audio] == ["eng", "spa"]
 
 

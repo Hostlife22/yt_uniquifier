@@ -44,10 +44,15 @@ from yt_uniquifier.core.resource_budget import resource_pool_dir
 from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
-from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
+from yt_uniquifier.core.transforms.audio_loudnorm import (
+    LoudnormMeasurement,
+    normalization_mode_for,
+    parse_reported_normalization_mode,
+)
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
 _log = logging.getLogger(__name__)
+_LOUDNORM_LOG_TAIL_BYTES = 64 * 1024
 
 KEYFRAME_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
 KEYFRAME_CACHE_SCHEMA_VERSION = 2
@@ -571,12 +576,25 @@ def process_video_segment(
             forwarded_on_event: Callable[[RunEvent], None] | None = _wrap
         else:
             forwarded_on_event = None
-        run_ffmpeg(
-            cmd, output=out, on_event=forwarded_on_event, cancel_token=cancel_token,
-            pause_token=pause_token,
-            log_path=out.with_suffix(".mkv.log"),
-            extra_env=extra_env,
-        )
+        try:
+            run_ffmpeg(
+                cmd, output=out, on_event=forwarded_on_event,
+                cancel_token=cancel_token, pause_token=pause_token,
+                log_path=out.with_suffix(".mkv.log"), extra_env=extra_env,
+            )
+        except PipelineError:
+            # Exact-job capability successes are process-local and otherwise
+            # survive a later driver reset/device disappearance. Force the next
+            # run to reopen the encoder during preflight instead of trusting the
+            # stale result. Discovery cache stays intact because transient
+            # session pressure does not prove the encoder is permanently absent.
+            from yt_uniquifier.core.encoder import invalidate_encoder_capability
+
+            try:
+                invalidate_encoder_capability(seg_plan)
+            except Exception as exc:  # noqa: BLE001 - never mask encode failure
+                _log.warning("could not invalidate encoder capability cache: %s", exc)
+            raise
 
     # Drive the encode (and any retries) by re-using one helper.
     def _encode_once() -> None:
@@ -982,18 +1000,67 @@ def process_main_audio(
     # runtime that burned 18 min of video work on the 2026-05-31 matrix
     # incident (see audio_windows.verify_audio_filters_available docstring).
     verify_audio_filters_available(plan)
+    audio_log = out.with_suffix(".m4a.log")
     try:
         run_ffmpeg(
             cmd, output=temp_out, on_event=on_event, cancel_token=cancel_token,
             pause_token=pause_token,
-            log_path=out.with_suffix(".m4a.log"),
+            log_path=audio_log,
         )
         if not temp_out.is_file() or temp_out.stat().st_size <= 0:
             raise PipelineError("main audio encode produced no usable output")
+        _record_loudnorm_mode(plan, measurement, audio_log, on_event)
         os.replace(temp_out, out)
     finally:
         temp_out.unlink(missing_ok=True)
     return out, measurement
+
+
+def _record_loudnorm_mode(
+    plan: Plan,
+    measurement: LoudnormMeasurement | None,
+    log_path: Path,
+    on_event: Callable[[RunEvent], None] | None,
+) -> None:
+    """Persist and emit the selected/reported loudnorm pass-2 mode."""
+    has_loudnorm = any(
+        transform.enabled and transform.id == "audio.loudnorm"
+        for transform in plan.profile.transforms
+    )
+    if not has_loudnorm or measurement is None:
+        return
+
+    requested = normalization_mode_for(measurement)
+    try:
+        with log_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - _LOUDNORM_LOG_TAIL_BYTES))
+            log_tail = handle.read().decode("utf-8", errors="replace")
+        reported = parse_reported_normalization_mode(log_tail)
+    except OSError:
+        reported = None
+    dynamic_fallback = requested == "dynamic" or reported == "dynamic"
+    payload: dict[str, object] = {
+        "stage": "loudnorm",
+        "requested_mode": requested,
+        "reported_mode": reported or "unknown",
+        "dynamic_fallback": dynamic_fallback,
+    }
+    if requested == "dynamic":
+        payload["fallback_reason"] = "unusable_pass1_measurement"
+    elif reported == "dynamic":
+        payload["fallback_reason"] = "ffmpeg_rejected_linear_constraints"
+    try:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n[yt-uniquifier] loudnorm "
+                + json.dumps(payload, sort_keys=True)
+                + "\n"
+            )
+    except OSError as exc:
+        _log.warning("could not append loudnorm mode to %s: %s", log_path, exc)
+    if on_event is not None:
+        on_event(RunEvent(kind="log", payload=payload))
 
 
 # ---- concat ------------------------------------------------------------------

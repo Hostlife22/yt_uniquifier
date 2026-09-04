@@ -127,6 +127,37 @@ def test_no_target_skips_scoring_entirely(
     assert events == []
 
 
+def test_runtime_encode_failure_invalidates_exact_encoder_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from yt_uniquifier.core import encoder
+
+    plan = _make_plan(target_vmaf=None)
+    invalidated: list[Plan] = []
+    monkeypatch.setattr(
+        segmenter,
+        "build_video_segment_command_fused",
+        lambda *args, **kwargs: pipeline.BuiltCommand(args=["ffmpeg"]),
+    )
+    monkeypatch.setattr(
+        segmenter,
+        "run_ffmpeg",
+        lambda *args, **kwargs: (_ for _ in ()).throw(PipelineError("device reset")),
+    )
+    monkeypatch.setattr(
+        encoder,
+        "invalidate_encoder_capability",
+        lambda candidate_plan: invalidated.append(candidate_plan) or True,
+    )
+
+    with pytest.raises(PipelineError, match="device reset"):
+        segmenter.process_video_segment(_make_segment(), plan, tmp_path)
+
+    assert len(invalidated) == 1
+    assert invalidated[0].encoder == plan.encoder
+
+
 def test_unregistered_target_fails_even_without_orchestrator_preflight(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

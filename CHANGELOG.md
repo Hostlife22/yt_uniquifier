@@ -14,6 +14,15 @@ the last tag.
 
 ### Fixed
 
+- Reject HDR input before encoding when neither a verified HDR-preserve policy nor an
+  explicit first-video-stage SDR tonemap is selected.
+- Record requested and FFmpeg-reported loudnorm modes and make the dynamic fallback
+  reason visible in the audio log and run events without loading an unbounded
+  long-form FFmpeg log into memory.
+- Invalidate a cached exact-job encoder capability after a later segment runtime
+  failure so the next run reopens the encoder during preflight.
+- Verify that SDR full/limited range, AAC+Opus container policy and persisted-seed
+  resume semantics survive real segment/concat processing on the qualified Mac.
 - Make encoder discovery probe `libaom-av1` with fast probe-only settings so a
   working reference encoder is not hidden by the generic 15-second timeout.
 - Compare concat seam windows against the matching source interval with bounded

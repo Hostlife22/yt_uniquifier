@@ -15,6 +15,7 @@ import platform
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ class EncoderCapabilityResult:
 
 
 _CAPABILITY_CACHE: dict[str, EncoderCapabilityResult] = {}
+_CAPABILITY_CACHE_LOCK = threading.Lock()
 
 
 def _cache_path() -> Path:
@@ -463,12 +465,9 @@ def probe_encoder_for_plan(plan: Plan) -> EncoderCapabilityResult:
     except (IndexError, ValueError):
         pass
     pix_fmt = _segment_pix_fmt(plan)
-    key_payload = json.dumps(
-        {"version": _ffmpeg_version_hash(), "cmd": cmd[1:]},
-        sort_keys=True,
-    )
-    cache_key = hashlib.sha256(key_payload.encode("utf-8")).hexdigest()
-    cached = _CAPABILITY_CACHE.get(cache_key)
+    cache_key = _capability_cache_key(cmd)
+    with _CAPABILITY_CACHE_LOCK:
+        cached = _CAPABILITY_CACHE.get(cache_key)
     if cached is not None:
         return cached
     try:
@@ -502,8 +501,31 @@ def probe_encoder_for_plan(plan: Plan) -> EncoderCapabilityResult:
     # a failed probe for the lifetime of a web/worker process would keep rejecting
     # every later job even after the device becomes available again.
     if result.supported:
-        _CAPABILITY_CACHE[cache_key] = result
+        with _CAPABILITY_CACHE_LOCK:
+            _CAPABILITY_CACHE[cache_key] = result
     return result
+
+
+def invalidate_encoder_capability(plan: Plan) -> bool:
+    """Forget an exact-job success after a later runtime encode failure.
+
+    A device can disappear or its driver can reset after preflight. Keeping the
+    successful process-local probe in that case makes the next run skip the only
+    check that can observe the changed device state.
+    """
+    from yt_uniquifier.core.pipeline import build_encoder_capability_probe
+
+    cache_key = _capability_cache_key(build_encoder_capability_probe(plan))
+    with _CAPABILITY_CACHE_LOCK:
+        return _CAPABILITY_CACHE.pop(cache_key, None) is not None
+
+
+def _capability_cache_key(command: list[str]) -> str:
+    key_payload = json.dumps(
+        {"version": _ffmpeg_version_hash(), "cmd": command[1:]},
+        sort_keys=True,
+    )
+    return hashlib.sha256(key_payload.encode("utf-8")).hexdigest()
 
 
 def _load_cache(

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import needs_ffmpeg
+from yt_uniquifier.core.errors import PreflightFailure
+from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
@@ -103,6 +105,40 @@ def test_hdr_source_is_detected_as_hdr(hdr_clip: Path) -> None:
     assert meta.video[0].color.mastering_display is not None
     assert meta.video[0].color.max_cll == 1000
     assert meta.video[0].color.max_fall == 400
+
+
+@needs_ffmpeg
+@needs_hdr_stack
+@pytest.mark.integration
+def test_hdr_without_explicit_output_policy_fails_before_segment_creation(
+    hdr_clip: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+) -> None:
+    output = tmp_path / "unsafe.mp4"
+    work_dir = tmp_path / "work"
+    profile = Profile(
+        name="undefined-hdr-policy",
+        transforms=[],
+        keep_hdr=False,
+        output_container="mp4",
+        target_codec="h264",
+    )
+    plan = build_plan(hdr_clip, profile, encoder_override="libx264")
+
+    with pytest.raises(PreflightFailure, match="hdr.output_policy.missing"):
+        run_full(
+            plan,
+            RunOptions(
+                work_dir=work_dir,
+                output=output,
+                target_segment_sec=600.0,
+                enforce_preflight=True,
+            ),
+        )
+
+    assert not output.exists()
+    assert not (work_dir / "state.json").exists()
 
 
 @needs_ffmpeg

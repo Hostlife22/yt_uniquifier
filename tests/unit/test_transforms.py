@@ -147,7 +147,10 @@ def test_blend_b_scale2ref_ordering() -> None:
 
 
 def test_loudnorm_parse_measurement() -> None:
-    from yt_uniquifier.core.transforms.audio_loudnorm import _parse_measurement
+    from yt_uniquifier.core.transforms.audio_loudnorm import (
+        _parse_measurement,
+        parse_reported_normalization_mode,
+    )
 
     stderr = """
 [Parsed_loudnorm_0 @ 0x7f]
@@ -172,3 +175,18 @@ ffmpeg done.
     assert m.input_lra == 5.1
     assert m.input_thresh == -32.6
     assert m.target_offset == 0.04
+    assert parse_reported_normalization_mode(stderr) == "linear"
+
+
+def test_loudnorm_reported_mode_parser_uses_last_pass() -> None:
+    from yt_uniquifier.core.transforms.audio_loudnorm import (
+        parse_reported_normalization_mode,
+    )
+
+    log = (
+        '"normalization_type" : "linear"\n'
+        'Normalization Type: Dynamic\n'
+    )
+
+    assert parse_reported_normalization_mode(log) == "dynamic"
+    assert parse_reported_normalization_mode("no loudnorm report") is None

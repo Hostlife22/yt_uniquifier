@@ -816,20 +816,28 @@ def _check_rubberband_perf(
 
 
 def _check_tonemap_order(plan: Plan) -> list[PreflightFinding]:
-    """Warn if video.tonemap_sdr is not the first enabled transform.
+    """Reject video.tonemap_sdr after another enabled video transform.
 
     Other color/eq/noise ops applied BEFORE tonemap operate on PQ-encoded
     values (which are nonlinear with light), giving wrong colors. Placing
-    tonemap first means everything after sees plain BT.709 SDR.
+    tonemap first means everything after sees plain BT.709 SDR. Audio
+    transforms are built as a separate graph and do not affect this order.
     """
-    enabled = [tc for tc in plan.profile.transforms if tc.enabled]
-    for i, tc in enumerate(enabled):
+    from yt_uniquifier.core.transforms import get
+
+    enabled_video = [
+        tc
+        for tc in plan.profile.transforms
+        if tc.enabled and get(tc.id).kind == "video"
+    ]
+    for i, tc in enumerate(enabled_video):
         if tc.id == "video.tonemap_sdr" and i != 0:
             return [PreflightFinding(
-                code="tonemap.not_first", severity="warn",
+                code="tonemap.not_first", severity="fail",
                 message=(
                     "video.tonemap_sdr should be the first enabled transform "
-                    f"(currently position {i + 1} of {len(enabled)})."
+                    f"in the video graph (currently position {i + 1} of "
+                    f"{len(enabled_video)})."
                 ),
                 suggestion="Move video.tonemap_sdr to the top of profile.transforms.",
             )]
@@ -913,7 +921,22 @@ def _check_hdr(
                     "remove the color transforms."
                 ),
             ))
-        # Without keep_hdr we still re-encode to 8-bit yuv420p, which collapses HDR.
+        # Every encode path converts this Plan to yuv420p. Keeping the source's
+        # PQ/HLG tags on that 8-bit signal does not make it SDR and causes the
+        # final media contract to fail only after all segments have been encoded.
+        # Require the operator to choose one explicit, verifiable output policy.
+        findings.append(PreflightFinding(
+            code="hdr.output_policy.missing",
+            severity="fail",
+            message=(
+                f"HDR source ({v.color.transfer}) cannot be encoded with keep_hdr=false "
+                "unless video.tonemap_sdr performs an explicit SDR conversion."
+            ),
+            suggestion=(
+                "Use an HDR profile with keep_hdr: true and a verified HEVC encoder, "
+                "or add video.tonemap_sdr as the first enabled video transform."
+            ),
+        ))
         return findings
 
     if v.color.dynamic_metadata:

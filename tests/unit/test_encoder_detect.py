@@ -365,3 +365,36 @@ def test_plan_capability_probe_does_not_cache_transient_failure(
     assert first.supported is False
     assert second.supported is True
     assert run.call_count == 2
+
+
+def test_runtime_invalidation_forces_exact_capability_reprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = MagicMock()
+    plan.source.video = [MagicMock(width=1920, height=1080)]
+    command = [
+        "/usr/bin/ffmpeg", "-f", "lavfi", "-i",
+        "testsrc2=s=1920x1080:r=24:d=0.25", "-f", "null", "-",
+    ]
+    run = MagicMock(
+        return_value=subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(enc_mod, "_ffmpeg_version_hash", lambda: "version-device")
+    monkeypatch.setattr(enc_mod.subprocess, "run", run)
+    monkeypatch.setattr(
+        "yt_uniquifier.core.pipeline.build_encoder_capability_probe",
+        lambda _plan: command,
+    )
+    monkeypatch.setattr(
+        "yt_uniquifier.core.pipeline._segment_pix_fmt", lambda _plan: "yuv420p",
+    )
+    enc_mod._CAPABILITY_CACHE.clear()
+
+    assert enc_mod.probe_encoder_for_plan(plan).supported is True
+    assert enc_mod.probe_encoder_for_plan(plan).supported is True
+    assert run.call_count == 1
+
+    assert enc_mod.invalidate_encoder_capability(plan) is True
+    assert enc_mod.invalidate_encoder_capability(plan) is False
+    assert enc_mod.probe_encoder_for_plan(plan).supported is True
+    assert run.call_count == 2

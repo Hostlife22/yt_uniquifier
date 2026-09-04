@@ -5,14 +5,15 @@ profile engine или QA system не создаются. План был сог�
 Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
-## Статус на 2026-09-03
+## Статус на 2026-09-04
 
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
   web guards; correctness-aware QA verdict; job-specific encoder probe; runner
   watchdog/bounded logs; persistent bounded web lifecycle; filesystem-wide web
   run-count admission; local cross-process encoder/disk admission; per-process queue
-  IDs.
+  IDs; explicit HDR output-policy/tonemap-order gate; loudnorm runtime-mode
+  observability; exact-job encoder-cache invalidation after runtime failure.
 - **PARTIAL:** 2.1, 2.3, 3.1–3.3 — безопасные локальные fixes выполнены, profile
   claims исправлены, destructive stacks помечены experimental, а invalid
   `target_vmaf` feedback и основные compound-quality risks выявляются preflight;
@@ -23,7 +24,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   natural long-GOP corpus pending.
 - **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
-  crash/no-op resume and APFS distributed fencing.
+  crash/no-op resume, exact persisted-seed A/V reproducibility, SDR full/limited
+  range, MP4/MOV/MKV AAC+Opus policy and APFS distributed fencing.
 - **NOT VERIFIED / planned:** natural long-form corpus, NVENC/QSV/AMF, hardware VFR,
   NFS/network partitions and aligned transform-quality metrics.
 
@@ -297,8 +299,9 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** predictable encoder choice and early incompatibility error.
 - **Status:** partial — `quality|balanced|speed` selection implemented with quality
   default; explicit override is strict; job-resolution/pixfmt/rate-control probe and
-  NVIDIA-aware cache key are active; unverified `av1_vulkan` is disabled. Per-GPU
-  routing and the external NVENC/QSV/AMF matrix remain open.
+  NVIDIA-aware cache key are active; a later segment runtime failure invalidates the
+  exact-job success so the next preflight reprobes it; unverified `av1_vulkan` is
+  disabled. Per-GPU routing and the external NVENC/QSV/AMF matrix remain open.
 
 ### 4.2 Resource-aware scheduling
 
@@ -334,8 +337,9 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** diagnosable long-form operation with bounded memory.
 - **Status:** partial — the shared runner has bounded in-memory tail, full log tee,
   progress-based stall watchdog, process-group termination and optional wall timeout;
-  concat and sanitizer now use it without a fixed one-hour kill. Remaining standalone
-  QA subprocesses need the same migration.
+  concat and sanitizer now use it without a fixed one-hour kill. POSIX process-tree
+  cancellation, including a shell grandchild, passed on this Mac; Windows/Linux
+  runner qualification and remaining standalone QA subprocess migration stay open.
 
 ## Phase 5 — QA
 
@@ -420,8 +424,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Status:** in progress — deterministic regressions now cover rejected concurrent
   ownership, initialization cleanup, checkpoint `fsync` failure, atomic main-audio
   failure, concat failure and final replace failure. The POSIX chaos test covers
-  process-group SIGKILL/resume. Disposable-volume low-space/power-loss, natural
-  licensed 1/2/3 h, NFS and hardware encoder/HDR cases remain `NOT VERIFIED`.
+  process-group SIGKILL/resume. A fresh invocation restores the persisted seed and
+  reuses byte-identical completed video/audio artifacts; decoded A/V hashes match the
+  original run exactly. Disposable-volume low-space/power-loss, natural licensed
+  1/2/3 h, NFS and hardware encoder/HDR cases remain `NOT VERIFIED`.
 
 ### 6.2 Web/distributed lifecycle
 

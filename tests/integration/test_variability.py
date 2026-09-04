@@ -24,6 +24,21 @@ def _md5(path: Path) -> str:
     return h.hexdigest()
 
 
+def _decoded_sha256(path: Path, stream: str) -> str:
+    result = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-i", str(path),
+            "-map", stream, "-f", "hash", "-hash", "sha256", "-",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    ).stdout.strip()
+    assert result.startswith("SHA256=")
+    return result
+
+
 def _have_rubberband() -> bool:
     """True iff the local ffmpeg was built with --enable-librubberband.
 
@@ -102,26 +117,43 @@ def test_resume_same_work_dir_reuses_seed(
         target_segment_sec=600.0,
         enforce_preflight=False,
     ))
+    state_dir = work_dir / plan1.plan_hash
+    segment = state_dir / "seg_0000.mkv"
+    audio = state_dir / "main_audio.m4a"
+    retained = {
+        "segment": (segment.stat().st_mtime_ns, _md5(segment)),
+        "audio": (audio.stat().st_mtime_ns, _md5(audio)),
+    }
 
     # Second invocation reads state.json, restores the seed.
     plan2 = build_plan(tiny_clip, profile, encoder_override="libx264")
     out2 = tmp_path / "b.mp4"
+    events = []
     run_full(plan2, RunOptions(
         work_dir=work_dir / plan2.plan_hash,
         output=out2,
+        keep_segments=True,
         target_segment_sec=600.0,
         enforce_preflight=False,
-    ))
+    ), on_event=events.append)
 
     assert plan1.plan_hash == plan2.plan_hash
-    # MD5 differs only because mp4 creation_time changes per mux; video/audio
-    # bitstreams are byte-identical (same seed produced the same segments).
-    # Verify content equality via probed duration + file-size proximity.
+    assert plan1.run_seed != plan2.run_seed
+    assert any(
+        event.payload.get("message") == "restored run_seed from state.json"
+        and event.payload.get("run_seed") == plan1.run_seed
+        for event in events
+    )
+    assert retained["segment"] == (segment.stat().st_mtime_ns, _md5(segment))
+    assert retained["audio"] == (audio.stat().st_mtime_ns, _md5(audio))
+
+    # Container metadata/creation timestamps may differ, but decoded video and
+    # audio semantics must be exactly reproducible under the restored run seed.
     from yt_uniquifier.core.probe import probe
     m1, m2 = probe(out1), probe(out2)
     assert abs(m1.duration_sec - m2.duration_sec) < 0.05
-    # Sizes should be within ~1 KB (metadata only).
-    assert abs(m1.size_bytes - m2.size_bytes) < 4096
+    assert _decoded_sha256(out1, "0:v:0") == _decoded_sha256(out2, "0:v:0")
+    assert _decoded_sha256(out1, "0:a:0") == _decoded_sha256(out2, "0:a:0")
 
 
 @needs_ffmpeg

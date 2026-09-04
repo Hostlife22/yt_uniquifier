@@ -1,7 +1,7 @@
 # Benchmark Methodology and Baseline
 
 Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
-2026-09-03. Результаты относятся только к указанному локальному environment и не
+2026-09-04. Результаты относятся только к указанному локальному environment и не
 экстраполируются автоматически на фильмы/HDR/GPU.
 
 ## Production acceptance delta — 2026-09-03 (post-v1.4.0)
@@ -41,13 +41,17 @@ ingestion/transcode остаются `NOT VERIFIED`.
 |---|---:|---|
 | Registered seam diagnostic | Clean FFV1 source/output passes; black boundary defect fails; 8 focused tests | Tool compares source/output with reset PTS and ±frame registration instead of output/self motion |
 | Audio layout/rate matrix | 24 real-FFmpeg cases: 7 effects × mono/stereo/5.1 plus 44.1/48/96 kHz | Tested effects preserve channel count; Haas stays stereo-only fail-closed; final rate is 48 kHz |
+| Multi-audio codec/container matrix | AAC main + Opus secondary across MP4/MOV/MKV | MP4/MOV transcode unsupported passthrough to AAC; MKV preserves Opus and stream metadata |
+| Loudnorm mode observability | 44.1 kHz transformed fixture requested linear; FFmpeg reported dynamic; output remained -14.0 LUFS | Runtime mode and fallback reason are now retained instead of assuming measured input guarantees linear processing |
+| Seed/resume reproducibility | Fresh invocation seed differs, persisted seed is restored; retained segment/audio mtimes+hashes and decoded A/V SHA-256 remain equal | Resume does not reroll stochastic transforms or reprocess completed media |
 | HDR regression | HDR10 preserve, HLG preserve and HDR10→SDR: 4 passed | x265/zscale/tonemap paths remain qualified on this Mac |
+| SDR range roundtrip | Full (`pc`) and limited (`tv`) survive segment encode/concat | Generic FFmpeg tags and x264 bitstream range flags agree with decoded output |
 | libaom discovery | Generic probe 15.63 s/timeout → probe-only fast settings 1.5–1.9 s/pass | Working libaom is no longer hidden; production encode argv is unchanged |
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1578 passed, 2 expected skipped; Ruff + strict mypy pass; 10:22 | Phase 6 changes do not regress the complete Mac suite |
-| CI-equivalent coverage | 1446 passed, 1 expected skipped; 82.23% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
+| Full local quality gate | 1593 passed, 2 expected skipped; Ruff + strict mypy pass; 10:42 | Current Phase 6 changes do not regress the complete Mac suite |
+| CI-equivalent coverage | 1456 passed, 1 expected skipped, 138 deselected; 82.32% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
 
 The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
 and #12. Their production code is intentionally not implemented before the mandatory

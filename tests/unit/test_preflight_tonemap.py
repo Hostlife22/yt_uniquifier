@@ -90,7 +90,7 @@ def test_tonemap_present_no_encoder_8bit_fail(tmp_path: Path) -> None:
     assert "hdr.encoder.8bit" not in _codes(findings)
 
 
-def test_tonemap_not_first_warns(tmp_path: Path) -> None:
+def test_tonemap_not_first_fails(tmp_path: Path) -> None:
     src = _hdr_source(tmp_path)
     plan = _plan(src, [
         TransformConfig(id="video.color_eq"),     # tonemap should be first
@@ -98,7 +98,22 @@ def test_tonemap_not_first_warns(tmp_path: Path) -> None:
     ])
     findings = preflight(src, plan, plan.encoder)
     assert "tonemap.not_first" in _codes(findings)
-    # It's a warning, not a fail.
+    assert has_fail(findings)
+
+
+def test_audio_transform_before_tonemap_does_not_change_video_order(
+    tmp_path: Path,
+) -> None:
+    src = _hdr_source(tmp_path)
+    plan = _plan(src, [
+        TransformConfig(id="audio.eq"),
+        TransformConfig(id="video.tonemap_sdr"),
+        TransformConfig(id="video.color_eq"),
+    ])
+
+    findings = preflight(src, plan, plan.encoder)
+
+    assert "tonemap.not_first" not in _codes(findings)
     assert not has_fail(findings)
 
 

@@ -136,13 +136,15 @@ def test_hdr_keep_missing_zscale_fails(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_hdr_without_keep_no_zscale_check(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Without keep_hdr we don't need zscale at all — no fail on its absence."""
+    """An undefined HDR output policy fails without an irrelevant zscale finding."""
     monkeypatch.setattr(preflight_mod, "_ffmpeg_filter_works",
                         lambda _spec, _kind: False)
     src = _hdr_source(tmp_path)
     plan = _plan(src, "libx265", keep_hdr=False)
     f = preflight(src, plan, plan.encoder)
     assert "hdr.zscale.missing" not in _codes(f)
+    assert "hdr.output_policy.missing" in _codes(f)
+    assert has_fail(f)
 
 
 def test_hdr_keep_with_blend_b_warns(

@@ -19,14 +19,22 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-04):
 
 - Ruff и strict mypy: passed (`158` source files).
-- Canonical `make check`: `1578 passed, 2 skipped` на полностью установленном
-  optional environment (`10:22`, Phase 6 hardening повтор).
+- Canonical `make check`: `1593 passed, 2 skipped` на полностью установленном
+  optional environment (`10:42`, current Phase 6 hardening повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
 - Windowed audio `125.0 s`: duration contract passed с допуском одного AAC frame.
 - HDR10 keep-HDR и HDR→SDR с реальным `zscale`: passed; ST2086 и MaxCLL/FALL
-  сохранены на libx265. Unsupported dynamic HDR отклоняется до encode.
+  сохранены на libx265. Unsupported dynamic HDR и неопределённый HDR→8-bit policy
+  отклоняются до encode; tonemap после другого video transform запрещён.
+- SDR limited (`tv`) и full (`pc`) range переживают реальный segment/concat roundtrip;
+  FFmpeg tags и x264 bitstream range flags согласованы.
+- AAC main + Opus secondary проверены в MP4/MOV/MKV: Opus сохраняется в MKV и
+  транскодируется в AAC для MP4/MOV без потери language metadata.
+- Loudnorm runtime record содержит requested/reported mode и причину fallback. На
+  локальном transformed 44.1 kHz fixture FFmpeg выбрал dynamic при запрошенном
+  linear, сохранив итог `-14.0 LUFS`; это теперь наблюдаемое поведение.
 - Rubber Band и SSCD с реальной TorchScript model: passed (`5/5`).
 - 4K AV1/profile matrix: passed (`11/11`); VideoToolbox hardware smoke прошёл для
   H.264 1080p/4K и HEVC 4K 10-bit без software fallback.
@@ -34,6 +42,8 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   duration drift не более `13.8 ms`; peak RSS `107/136/158 MB`.
 - Kill/resume: два completed segment сохранили SHA-256 и mtime, итог `7200/7200`
   frames; 3 h no-op resume сохранил output SHA и занял `4.24 s`.
+- Fresh resume invocation восстанавливает persisted seed: готовые video/audio
+  artifacts сохраняют mtime+hash, а decoded video/audio SHA-256 совпадают точно.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
 - Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
@@ -112,7 +122,7 @@ Chromaprint и SSCD полезны только как внутренние diag
 | `src/yt_uniquifier/core` | 77 Python files |
 | GUI | 47 files |
 | Web | 14 files |
-| Tests | 224 files |
+| Tests | 225 files |
 | Docs | 30 documents, около 4.9k строк |
 | Specs | 37 documents, около 14.3k строк |
 | Shipped profiles | 16 YAML |
@@ -164,21 +174,21 @@ Web / distributed worker: rich diagnostic QA is not automatic
 |---|---|---|---|---|
 | Probe | `core/probe.py::probe` | ffprobe JSON → `SourceMeta` | media path → stream metadata | A/V/S/chapter/HDR plus internal attachment/data/cover-art topology; stable serialized schema retained |
 | Profile | `core/profile_loader.py`, `core/models.py::Profile` | YAML validation, transform configs | YAML → typed profile | Единый engine сохранён; часть top-level полей не подключена |
-| Plan | `core/orchestrator.py::build_plan` | source/profile/encoder/seed/hash | metadata → `Plan` | Hash не удостоверяет содержимое |
-| Encoder | `core/encoder.py` | availability smoke and selection | FFmpeg build → candidate | Проверяет запуск, но только 640×360 8-bit |
+| Plan | `core/orchestrator.py::build_plan` | source/profile/encoder/seed/hash | metadata → `Plan` | Content fingerprint and complete topology participate in resume identity; seed restoration is regression-tested |
+| Encoder | `core/encoder.py` | discovery, policy selection and exact-job probe | FFmpeg build + actual plan → candidate/capability | Resolution/pixfmt/color/RC probe and runtime cache invalidation implemented; per-vendor hardware qualification remains open |
 | Preflight | `core/preflight.py` | policy/capability checks | `Plan` → findings | Container-aware subtitle/auxiliary/multi-video policy now blocks known lossy mappings; uncommon codecs need fixtures |
-| Transform registry | `core/transforms/` | typed filter fragments | labels/params/RNG → filter chain | Хорошо унифицирован; есть ошибки параметризации и channel-awareness |
-| Filter graph | `core/pipeline.py` | filter order, mapping, codec args | plan → FFmpeg argv | Основной segmented и legacy full-file paths расходятся |
-| Segmentation | `core/segmenter.py` | keyframe/scene plans, parallel encode, concat | plan → segments → output | Fused path экономит I/O; timestamp/stream/timeout defects |
-| Resume | `core/checkpoint.py` | state, hashes, locks | segment state ↔ JSON | Atomic segment hashes сильны; identity/locking/final validation слабы |
-| Runner | `core/runner.py` | subprocess, progress, cancel, NVENC retry | argv → events/result | Process-tree cancel хорош; нет stall/wall timeout, logs держатся в RAM |
+| Transform registry | `core/transforms/` | typed filter fragments | labels/params/RNG → filter chain | Хорошо унифицирован; topology guards implemented, perceptual compatibility corpus incomplete |
+| Filter graph | `core/pipeline.py` | filter order, mapping, codec args | plan → FFmpeg argv | Shared helpers reduced drift; full-file and segmented execution shapes intentionally remain |
+| Segmentation | `core/segmenter.py` | keyframe/scene plans, parallel encode, concat | plan → segments → output | Relative timestamps, bounded scene gaps and final A/V contract verified on software paths |
+| Resume | `core/checkpoint.py` | state, hashes, locks | segment state ↔ JSON | Content-bound identity, atomic hashes/locks and exact artifact reuse verified locally; NFS remains open |
+| Runner | `core/runner.py` | subprocess, progress, cancel, NVENC retry | argv → events/result | Bounded tail/full log, stall watchdog and process-tree cancel implemented; remote OS qualification incomplete |
 | Metadata | `core/metadata.py`, `core/auxiliary_streams.py` | sanitize/reapply metadata and auxiliary policy | source metadata → args | Selected stream/chapter plus supported attachment/timecode/cover metadata preserved and validated |
 | QA | `core/qa/` | correctness, pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | `INVALID` и независимые UI axes реализованы; aligned quality/structured LUFS schema pending RFC |
-| Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | Математически неустойчива, SSCD objective ошибочен |
-| CLI | `cli/` | user orchestration | args → core APIs | Полное покрытие функций; `--encoder Force` фактически preference |
+| Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | SSCD direction, deterministic search/cache/retry fixed; natural-corpus thresholds remain experimental |
+| CLI | `cli/` | user orchestration | args → core APIs | Core orchestration reused; explicit `--encoder` is strict and cannot silently fall back |
 | GUI | `gui/` | desktop orchestration/workers | UI → core APIs | Core не дублируется; реальные heavy e2e opt-in |
 | Web | `web/`, `core/output_reservation.py`, `core/resource_budget.py` | API/SSE/static UI, persisted status and shared admission | requests → background threads | Shared run/output/encoder and estimated disk bounds implemented on local FS; hard quotas, device routing, NFS qualification and rich QA policy remain open |
-| Distributed | `core/queue`, `cli/cmd_worker.py` | shared-FS lease/worker | pending → done/failed | Atomic rename хорош; heartbeat только per-host и resume не переносим |
+| Distributed | `core/queue`, `cli/cmd_worker.py` | shared-FS lease/worker | pending → done/failed | Process-unique leases and fenced publication recover locally; cross-host/NFS semantics remain open |
 
 ## Что уже реализовано и не следует дублировать
 
@@ -194,8 +204,9 @@ HDR passthrough wrapping и HDR→SDR tonemap. Базовый VFR smoke сохр
 
 Реализованы pitch/tempo (`asetrate` и optional rubberband), EQ, resample, compand,
 Haas, spectral smear, reverb, noise overlay и EBU R128 loudnorm. Архитектурно верно,
-что main audio обрабатывается целиком; исправлять нужно sample-rate math, global
-measurement placement, windows и channel-layout behavior.
+что main audio обрабатывается целиком. Sample-rate math, global pre-loudnorm
+measurement, window overlap и topology guards исправлены; natural-content listening,
+phase correlation and clipping qualification остаются открыты.
 
 ### Pipeline / QA / infrastructure
 
@@ -228,19 +239,20 @@ measurement placement, windows и channel-layout behavior.
 | `video.speed` | Изменение временной шкалы | Motion cadence и duration меняются | pixels yes / timestamps risky | `rate<1` + final source `-t` обрезает хвост; нет cross-check с audio tempo |
 | `video.subtitles` | Burn-in SRT | Permanent pixels, encode cost | Unverified / yes | Отдельно от soft subtitle preservation; filter injection protection сделана хорошо |
 | `video.tonemap_sdr` | HDR→SDR | Необратимая смена dynamic range; high cost | Converts HDR / VFR yes | Требует verified zscale, scene/content validation, BT.709 tagging |
-| `audio.pitch_tempo` | Независимые pitch/tempo | Formant artifacts у asetrate; rubberband дороже | N/A | **P0:** assumes 48 kHz; 44.1 kHz source стал 27.6 s; sync ломается |
-| `audio.eq` | Частотная коррекция | Clipping/tonal coloration | N/A | Pass-1 loudnorm измеряется до EQ, поэтому linear mode может silently fall back |
+| `audio.pitch_tempo` | Независимые pitch/tempo | Formant artifacts у asetrate; rubberband дороже | N/A | Source-aware math и 44.1/48/96 kHz duration fixed; natural speech/music quality unqualified |
+| `audio.eq` | Частотная коррекция | Clipping/tonal coloration | N/A | Pass-1 теперь измеряет pre-loudnorm graph; FFmpeg всё ещё может выбрать dynamic, но requested/reported mode и причина записываются |
 | `audio.resample` | Controlled SR conversion | Обычно малая потеря/CPU | N/A | Документация обещает SoX-style, но `soxr` явно не выбран |
 | `audio.compand` | Dynamic range | Pumping/changed dialogue dynamics | N/A | Перед loudnorm меняет measurement conditions; channel linking не audited |
 | `audio.haas_stereo` | Stereo width | Mono cancellation/comb filtering | N/A | Не channel-layout-aware; опасен для mono/5.1/downmix |
 | `audio.spectral_smear` | Малое spectral decorrelation | Transients/clarity хуже | N/A | Вместе с reverb/compand/pitch накапливает слышимую деградацию |
 | `audio.reverb` | Room response | Clarity↓, loudness/peak change | N/A | Нужен post-chain loudness measurement и speech/music presets |
 | `audio.noise_overlay` | Добавить noise floor | Size почти не меняет, слышимое качество резко хуже | N/A | Default -12 dB ≈ 25% amplitude — неприемлем для quality-first production |
-| `audio.loudnorm` | LUFS/true-peak target | Полезен; dynamic mode может resample до 192 kHz | N/A | Measurement сейчас до preceding transforms; output SR не закреплён и стал 96 kHz |
+| `audio.loudnorm` | LUFS/true-peak target | Полезен; dynamic mode внутренне может oversample | N/A | Измеряет фактическую preceding chain, final output закреплён на 48 kHz; runtime mode/fallback наблюдаемы |
 
-Критичная комбинация текущего `soft` на 44.1 kHz: `pitch_tempo` сокращает звук,
-после чего loudnorm переходит в dynamic mode и AAC output становится 96 kHz. Это не
-«агрессивный профиль», а shipped default с фактической A/V ошибкой.
+Критичная комбинация исходного `soft` на 44.1 kHz сокращала звук и отдавала 96 kHz.
+Она исправлена source-aware pitch math, измерением фактической pre-loudnorm chain и
+явным final 48 kHz. Dynamic fallback остаётся допустимым поведением FFmpeg, но теперь
+не является silent: режим и причина сохраняются в log/event.
 
 ## Profile audit
 
@@ -249,13 +261,13 @@ Expected VMAF/size/speed ниже обозначены как `UNVERIFIED`, ко
 
 | Profile | Video / audio summary | Codec, HDR, use case | Expected VMAF / size / speed | Problems |
 |---|---|---|---|---|
-| `soft` | crop, color, noise / pitch, loudnorm | H264 SDR, quality-first | UNVERIFIED / near-source / medium | 44.1 kHz P0; measured VMAF 3.12 из-за timestamp path |
-| `medium` | soft + EQ | H264 SDR | UNVERIFIED / ↑ / medium | То же + loudnorm pre-measure mismatch |
+| `soft` | crop, color, noise / pitch, loudnorm | H264 SDR, quality-first | UNVERIFIED / near-source / medium | Audio/timestamp defects fixed; natural-content acceptance band absent |
+| `medium` | soft + EQ | H264 SDR | UNVERIFIED / ↑ / medium | Pre-loudnorm measurement fixed; compound perceptual quality unqualified |
 | `aggressive` | larger crop/color/noise, rotate / pitch, EQ | H264 SDR | UNVERIFIED / ↑ / slow | Несколько resamples; visible quality risk |
-| `cid_aware` | crop/color/noise/sharpen/temporal / pitch, EQ, Haas, compand | H264 SDR | UNVERIFIED / ↑↑ / slow | Divergent window drift; motion/audio damage; naming claims не доказаны |
-| `cid_aggressive` | above + speed / above + smear/reverb/noise | H264 SDR | UNVERIFIED / ↑↑ / slowest | Quality-first use case не соответствует; noise -12 dB; tail truncation risk |
-| `medium_hdr` | crop/color/noise / pitch, EQ, loudnorm | HEVC HDR passthrough | UNVERIFIED / high / slow | Mastering/CLL/dynamic metadata preservation не доказано |
-| `cid_aware_hdr_to_sdr` | tonemap + crop/color/noise / pitch/EQ/resample | H264 SDR derivative | UNVERIFIED / medium / slow | zscale unavailable locally; real HDR validation missing |
+| `cid_aware` | crop/color/noise/sharpen/temporal / pitch, EQ, Haas, compand | H264 SDR | UNVERIFIED / ↑↑ / slow | Window drift fixed; natural motion/audio damage and naming claims remain unqualified |
+| `cid_aggressive` | above + speed / above + smear/reverb/noise | H264 SDR | UNVERIFIED / ↑↑ / slowest | Explicitly experimental; noise -12 dB and compound quality risk remain |
+| `medium_hdr` | crop/color/noise / pitch, EQ, loudnorm | HEVC HDR passthrough | UNVERIFIED / high / slow | Static metadata proven on x265; dynamic HDR rejected; natural/HW matrix incomplete |
+| `cid_aware_hdr_to_sdr` | tonemap + crop/color/noise / pitch/EQ/resample | H264 SDR derivative | UNVERIFIED / medium / slow | Synthetic zscale path passes; dark/highlight/skin corpus validation missing |
 | `youtube_1080p` | fit 1080 + soft/medium | H264 YouTube | UNVERIFIED / medium / medium | Может upscale; no explicit GOP/profile/audio 384k recommendation |
 | `youtube_4k` | fit 4K + soft | H264 YouTube 4K | UNVERIFIED / very high / very slow | Arbitrary upscale; H264 4K CPU cost; no evidence against source-resolution upload |
 | `youtube_av1` | fit 1080 + medium | AV1 YouTube | UNVERIFIED / low / very slow | HW AV1 paths incompletely parameterized; compatibility matrix absent |
@@ -428,8 +440,9 @@ Availability probing реальным коротким encode — сильная
 
 Automatic selection now has explicit `quality|balanced|speed` policy, defaulting to
 quality; `--encoder` is strict and cannot silently select another candidate. Cache
-includes OS/device environment plus NVIDIA UUID/driver state; non-NVIDIA runtime
-failure invalidation remains open.
+includes OS/device environment plus NVIDIA UUID/driver state. A later segment encode
+failure invalidates the exact-job process cache, forcing the next run to reopen the
+encoder in preflight; vendor-specific driver-reset behavior remains `NOT VERIFIED`.
 
 ## Security findings
 
@@ -473,10 +486,10 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1509 passed, 2 skipped на fully provisioned macOS environment |
-| Branch coverage gate | 81.92% (`1408 passed`, required 80%) |
+| Full `make check` | 1593 passed, 2 skipped на fully provisioned macOS environment |
+| Branch coverage gate | 82.32% (`1456 passed`, required 80%) |
 | Ruff | Passed |
-| Strict mypy (`157` source files) | Passed |
+| Strict mypy (`158` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |
 | macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
 | 16 profile loads | Passed |
@@ -497,7 +510,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | SSCD real model | Passed: self-similarity and unrelated-content discrimination |
 | 4K | AV1 profile plus H.264/HEVC VideoToolbox smoke passed |
 | 1h/2h/3h+ synthetic | Passed with exact decoded frame counts; natural movie corpus NOT VERIFIED |
-| Crash/no-op resume | Passed; completed segment bytes/mtime and final SHA reused |
+| Crash/no-op resume | Passed; completed segment/audio bytes+mtime reused, persisted seed restored, decoded A/V SHA-256 equal |
 
 GitHub read-only check на момент завершения аудита: latest CI, docs и CodeQL runs для
 `14df893` завершились успешно; open pull requests — 0; open CodeQL alerts — 0.

@@ -17,6 +17,7 @@ import math
 import re
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +33,12 @@ from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
 
 # YouTube content loudness target.
 DEFAULT_TARGET_I = -14.0
+LoudnormMode = Literal["linear", "dynamic"]
+_NORMALIZATION_TYPE_RE = re.compile(
+    r'(?:"normalization_type"\s*:\s*"|Normalization Type:\s*)'
+    r"(linear|dynamic)",
+    flags=re.IGNORECASE,
+)
 
 
 class LoudnormParams(BaseModel):
@@ -156,21 +163,21 @@ def build_apply(
             -params.target_jitter_lufs, params.target_jitter_lufs,
         )
     out = alloc.next("a")
-    if not _measurement_is_usable(m):
+    if normalization_mode_for(m) == "dynamic":
         # FFmpeg reports +/-inf for silent or sub-gating-duration audio.
         # Passing those tokens as measured_* values makes pass 2 fail
         # before it processes a sample. Dynamic single-pass mode is the
         # documented fallback and preserves silence/very short clips.
         filt = (
             f"loudnorm=I={target_i}:TP={params.true_peak}:LRA={params.lra}:"
-            "linear=false:print_format=summary"
+            "linear=false:print_format=json"
         )
         return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
     filt = (
         f"loudnorm=I={target_i}:TP={params.true_peak}:LRA={params.lra}:"
         f"measured_I={m.input_i}:measured_TP={m.input_tp}:measured_LRA={m.input_lra}:"
         f"measured_thresh={m.input_thresh}:offset={m.target_offset}:"
-        "linear=true:print_format=summary"
+        "linear=true:print_format=json"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
 
@@ -186,6 +193,20 @@ def _measurement_is_usable(m: LoudnormMeasurement) -> bool:
         and -99.0 <= m.input_tp <= 99.0
         and -99.0 <= m.target_offset <= 99.0
     )
+
+
+def normalization_mode_for(m: LoudnormMeasurement) -> LoudnormMode:
+    """Return the requested pass-2 mode for a measured signal."""
+    return "linear" if _measurement_is_usable(m) else "dynamic"
+
+
+def parse_reported_normalization_mode(log_text: str) -> LoudnormMode | None:
+    """Extract the last mode reported by FFmpeg's loudnorm output."""
+    matches = _NORMALIZATION_TYPE_RE.findall(log_text)
+    if not matches:
+        return None
+    value = matches[-1].lower()
+    return "dynamic" if value == "dynamic" else "linear"
 
 
 def _build_placeholder(
