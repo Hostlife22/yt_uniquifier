@@ -110,6 +110,9 @@ release blockers, поэтому checklist намеренно не отмече�
       invalidated after a later runtime encode/device failure and must be reprobed.
 - [x] libx264/libx265/SVT-AV1/libaom-AV1 software paths verified locally; software
       HEVC/AV1 bitstreams also pass in the Debian 12 production container.
+- [x] Manual self-hosted hardware qualification fails closed for explicitly requested
+      encoders and retains JUnit, encoded media, hashes, FFprobe/FFmpeg and GPU evidence;
+      its mandatory VideoToolbox mode passed on this Mac.
 - [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
       H.264 + HEVC VideoToolbox are bitstream-verified on this Intel Mac, while
       other vendors and AV1 VideoToolbox are unavailable.

@@ -304,8 +304,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   disabled. The libx264 and local VideoToolbox H.264 paths request an explicit
   High/CABAC/max-2-B/closed half-FPS structure; libx265, SVT-AV1, libaom-AV1 and
   local HEVC VideoToolbox have real-output two-second GOP qualification. The internal
-  plan-hash revision prevents mixed-policy resume. Per-GPU routing and NVENC/QSV/AMF
-  plus AV1 VideoToolbox hardware qualification remain open.
+  plan-hash revision prevents mixed-policy resume. A manual trusted self-hosted
+  hardware workflow now fails closed on explicitly requested encoders and retains
+  bitstream evidence. Per-GPU routing and actual NVENC/QSV/AMF plus AV1 VideoToolbox
+  device runs remain open.
 
 ### 4.2 Resource-aware scheduling
 

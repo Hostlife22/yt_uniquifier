@@ -12,6 +12,12 @@ the last tag.
 
 ## [Unreleased]
 
+### Added
+
+- Add an opt-in, manual self-hosted hardware qualification workflow for
+  NVENC/QSV/AMF/VideoToolbox, with strict requested-encoder bitstream contracts and
+  retained JUnit, encoded-media, FFprobe, FFmpeg and GPU-inventory evidence.
+
 ### Fixed
 
 - Keep `libaom-av1` in valid constant-quality mode by no longer combining

@@ -75,6 +75,7 @@ nav:
       - Validation harness: validation_harness.md
   - Operations:
       - Calibration: calibrate.md
+      - Hardware qualification: hardware_qualification.md
       - YouTube targets: youtube_targets.md
       - Telemetry: telemetry.md
       - Localization: i18n.md

@@ -1,0 +1,102 @@
+name: Hardware qualification
+
+# Hardware results are meaningful only on a runner with the matching physical
+# device and production driver. Keep this manual and isolated from pull requests:
+# checking out untrusted PR code on a persistent self-hosted runner is unsafe.
+on:
+  workflow_dispatch:
+    inputs:
+      runner_os:
+        description: Self-hosted runner OS label
+        required: true
+        default: Linux
+        type: choice
+        options:
+          - Linux
+          - Windows
+          - macOS
+      runner_label:
+        description: Dedicated runner label (for example gpu-nvenc)
+        required: true
+        type: string
+      encoders:
+        description: Comma-separated exact FFmpeg encoders present on this device
+        required: true
+        type: string
+      python_version:
+        description: Python version
+        required: true
+        default: "3.12"
+        type: choice
+        options:
+          - "3.12"
+          - "3.11"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-qualification-${{ inputs.runner_label }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: [self-hosted, "${{ inputs.runner_os }}", "${{ inputs.runner_label }}"]
+    timeout-minutes: 90
+    env:
+      QT_QPA_PLATFORM: offscreen
+      YT_UNIQ_HARDWARE_ENCODERS: ${{ inputs.encoders }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: pip
+
+      - name: Verify required host tools
+        shell: bash
+        run: |
+          ffmpeg -version
+          ffprobe -version
+          ffmpeg -hide_banner -encoders
+
+      - name: Install package
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-lock.txt ]; then
+            pip install --require-hashes -r requirements-lock.txt
+            pip install -e ".[dev]" --no-deps
+          else
+            pip install -e ".[dev]"
+          fi
+
+      - name: Run real hardware bitstream contracts
+        timeout-minutes: 60
+        shell: bash
+        run: |
+          mkdir -p qualification-artifacts
+          pytest tests/integration/test_encoder_bitstream_matrix.py -vv \
+            --basetemp=qualification-artifacts/pytest-temp \
+            --junitxml=qualification-artifacts/junit.xml
+
+      - name: Collect runner and output evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p qualification-artifacts
+          python tools/hardware_qualification_report.py \
+            --media-root qualification-artifacts \
+            --output qualification-artifacts/report.json
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardware-qualification-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification-artifacts/
+          if-no-files-found: warn
+          retention-days: 30

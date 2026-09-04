@@ -48,7 +48,9 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   consecutive B-frames and closed 12-frame GOP. Local bitstream matrix additionally
   confirms closed two-second HEVC GOPs for libx265/VideoToolbox and two-second AV1
   GOPs for SVT-AV1/libaom; H.264 VideoToolbox emits High/CABAC/IDR with a one-frame
-  B-run on this Intel Mac. NVENC/QSV/AMF and AV1 VideoToolbox remain `NOT VERIFIED`.
+  B-run on this Intel Mac. A manual trusted self-hosted workflow now retains strict
+  per-device JUnit/media/FFprobe evidence, but NVENC/QSV/AMF and AV1 VideoToolbox
+  remain `NOT VERIFIED` until that workflow runs on matching physical hardware.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
 - Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
