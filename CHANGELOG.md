@@ -32,6 +32,10 @@ the last tag.
 
 ### Fixed
 
+- Make cross-platform qualification deterministic: normalize Windows path assertions,
+  allow the two AAC access units of decoder-visible padding observed with
+  AAC-in-Matroska on macOS arm64 while retaining strict timestamp/end checks, and
+  resume the partitioned NFS worker only after its mount is reachable again.
 - Normalize audio timestamps after the complete transform/loudnorm chain so final
   duration limiting cannot truncate valid AAC tail samples after a filter-created PTS
   discontinuity; container contracts now compare decoded frames, samples and ends.
