@@ -32,6 +32,9 @@ the last tag.
 
 ### Fixed
 
+- Enforce the documented fail-fast policy for HDR-preserving
+  `video.fit_aspect mode=pad_blur`; its `gblur` background is not validated in
+  the HDR transfer domain, so operators must tonemap first or use crop/black-pad.
 - Make cross-platform qualification deterministic: normalize Windows path assertions,
   allow the two AAC access units of decoder-visible padding observed with
   AAC-in-Matroska on macOS arm64 while retaining strict timestamp/end checks, and

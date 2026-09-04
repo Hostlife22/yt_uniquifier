@@ -9,10 +9,12 @@ import pytest
 from yt_uniquifier.core.correlation import CorrelationIds
 from yt_uniquifier.core.models import (
     EncoderCandidate,
+    HDRInfo,
     Plan,
     Profile,
     SourceMeta,
     TransformConfig,
+    VideoStream,
 )
 from yt_uniquifier.core.redaction import REDACTED, redact_mapping, redact_path
 from yt_uniquifier.core.runner import RunEvent
@@ -23,7 +25,11 @@ from yt_uniquifier.core.transform_compatibility import (
 from yt_uniquifier.core.transforms import all_ids, get
 
 
-def _plan(*transforms: TransformConfig, keep_hdr: bool = False) -> Plan:
+def _plan(
+    *transforms: TransformConfig,
+    keep_hdr: bool = False,
+    hdr_source: bool = False,
+) -> Plan:
     profile = Profile(
         name="compat-test",
         transforms=list(transforms),
@@ -35,6 +41,22 @@ def _plan(*transforms: TransformConfig, keep_hdr: bool = False) -> Plan:
             container="mp4",
             duration_sec=1.0,
             size_bytes=1,
+            video=[VideoStream(
+                index=0,
+                codec="hevc" if hdr_source else "h264",
+                width=1920,
+                height=1080,
+                fps=24.0,
+                duration_sec=1.0,
+                pix_fmt="yuv420p10le" if hdr_source else "yuv420p",
+                color=HDRInfo(
+                    is_hdr=hdr_source,
+                    transfer="smpte2084" if hdr_source else "bt709",
+                    primaries="bt2020" if hdr_source else "bt709",
+                    space="bt2020nc" if hdr_source else "bt709",
+                    bit_depth=10 if hdr_source else 8,
+                ),
+            )],
         ),
         profile=profile,
         encoder=EncoderCandidate(
@@ -78,6 +100,46 @@ def test_compatibility_rejects_conflicting_hdr_modes() -> None:
     }
 
 
+def test_compatibility_rejects_blurred_padding_in_preserved_hdr() -> None:
+    plan = _plan(
+        TransformConfig(
+            id="video.fit_aspect",
+            params={"target_aspect": "16:9", "mode": "pad_blur"},
+        ),
+        keep_hdr=True,
+        hdr_source=True,
+    )
+
+    assert "hdr.fit_aspect.pad_blur" in {
+        issue.code for issue in evaluate_transform_compatibility(plan)
+    }
+
+
+def test_compatibility_allows_hdr_crop_and_sdr_blurred_padding() -> None:
+    hdr_crop = _plan(
+        TransformConfig(
+            id="video.fit_aspect",
+            params={"target_aspect": "16:9", "mode": "crop"},
+        ),
+        keep_hdr=True,
+        hdr_source=True,
+    )
+    sdr_blur = _plan(
+        TransformConfig(
+            id="video.fit_aspect",
+            params={"target_aspect": "16:9", "mode": "pad_blur"},
+        ),
+        keep_hdr=True,
+    )
+
+    assert "hdr.fit_aspect.pad_blur" not in {
+        issue.code for issue in evaluate_transform_compatibility(hdr_crop)
+    }
+    assert "hdr.fit_aspect.pad_blur" not in {
+        issue.code for issue in evaluate_transform_compatibility(sdr_blur)
+    }
+
+
 def test_compatibility_rejects_audio_after_loudnorm_and_duplicate() -> None:
     ordered_wrong = _plan(
         TransformConfig(id="audio.loudnorm", enabled=True),
@@ -104,6 +166,7 @@ def test_compatibility_graph_covers_requested_domains() -> None:
         "hdr.output_policy.missing",
         "hdr.dynamic_metadata.unsupported",
         "hdr.static_metadata.encoder_unverified",
+        "hdr.fit_aspect.pad_blur",
         "audio.haas_requires_stereo",
         "audio.loudnorm.order",
         "timeline.rate_mismatch",

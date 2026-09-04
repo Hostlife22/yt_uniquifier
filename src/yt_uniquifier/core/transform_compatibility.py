@@ -83,6 +83,10 @@ COMPATIBILITY_GRAPH: tuple[CompatibilityRule, ...] = (
         "Two-source blend operates in the transfer domain and can shift HDR colour.",
     ),
     CompatibilityRule(
+        "hdr.fit_aspect.pad_blur", "hdr", ("video.fit_aspect",), "fail",
+        "Blurred-background fitting is not validated in the HDR transfer domain.",
+    ),
+    CompatibilityRule(
         "audio.haas_requires_stereo", "audio", ("audio.haas_stereo",), "fail",
         "Haas processing requires a two-channel main audio stream.",
     ),
@@ -151,6 +155,28 @@ def evaluate_transform_compatibility(plan: Plan) -> list[CompatibilityIssue]:
             ),
             suggestion="Choose exactly one output mode: keep HDR or tonemap to SDR.",
         ))
+
+    source_is_hdr = bool(plan.source.video and plan.source.video[0].color.is_hdr)
+    if source_is_hdr and plan.profile.keep_hdr:
+        for item in enabled:
+            if item.id != "video.fit_aspect":
+                continue
+            spec = get(item.id)
+            params = spec.schema.model_validate({**spec.defaults, **item.params})
+            if getattr(params, "mode", None) == "pad_blur":
+                issues.append(CompatibilityIssue(
+                    code="hdr.fit_aspect.pad_blur",
+                    severity="fail",
+                    message=(
+                        "video.fit_aspect mode=pad_blur uses gblur in the HDR "
+                        "transfer domain and can shift luminance and colour."
+                    ),
+                    suggestion=(
+                        "Tonemap to SDR before pad_blur, or use crop/pad_black "
+                        "for HDR preservation."
+                    ),
+                ))
+                break
 
     loudnorm_positions = [
         index for index, item in enumerate(enabled) if item.id == "audio.loudnorm"
