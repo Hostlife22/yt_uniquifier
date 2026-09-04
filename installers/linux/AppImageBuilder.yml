@@ -87,7 +87,12 @@ AppDir:
       - libxcb-sync1
       - libxcb-xfixes0
       - libxcb-xkb1
-    exclude: []
+    # AppImage must use the host's absolute ELF loader. Bundling libc causes
+    # appimage-builder 1.1.0 to rewrite interpreters to a relative lib64 path,
+    # which is not executable on current Ubuntu runners (APPRUN_ERROR/ENOENT).
+    exclude:
+      - libc6
+      - libc-bin
 
   runtime:
     env:
