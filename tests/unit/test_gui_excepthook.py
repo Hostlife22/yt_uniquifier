@@ -21,6 +21,17 @@ import pytest
 from yt_uniquifier.gui import app_pyqt
 
 
+def test_gui_version_option_exits_before_qapplication(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["yt-uniq-gui", "--version"])
+
+    app_pyqt.main()
+
+    assert capsys.readouterr().out.strip() == app_pyqt.__version__
+
+
 @pytest.fixture()
 def isolated_crash_log(tmp_path, monkeypatch):
     """Redirect CONFIG_DIR so crash.log lands under tmp_path."""

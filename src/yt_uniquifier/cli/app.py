@@ -20,6 +20,15 @@ from yt_uniquifier.core.plugins import drop_disabled_plugins
 
 _log = logging.getLogger(__name__)
 
+
+def _version_callback(value: bool) -> None:
+    """Print the package version before command validation when requested."""
+    if value:
+        from yt_uniquifier import __version__
+
+        typer.echo(__version__)
+        raise typer.Exit()
+
 app = typer.Typer(
     no_args_is_help=True,
     help=(
@@ -33,6 +42,13 @@ app = typer.Typer(
 @app.callback()
 def _global(
     ctx: typer.Context,
+    show_version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print version and exit.",
+    ),
     no_plugins: bool = typer.Option(
         False,
         "--no-plugins",

@@ -188,7 +188,7 @@ def test_shared_admission_retries_when_contended_slot_disappears(
     def open_after_concurrent_release(
         path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
     ) -> int:
         nonlocal collision_injected
         if Path(path).name == "slot-0000.lock" and not collision_injected:

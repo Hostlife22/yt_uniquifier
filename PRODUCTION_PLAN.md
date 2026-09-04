@@ -2,7 +2,7 @@
 
 Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
 profile engine или QA system не создаются. План был согласован; Phase 1 и часть
-Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. Остальные пункты
+Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
 ## Статус на 2026-09-04
@@ -15,7 +15,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   IDs; explicit HDR output-policy/tonemap-order gate; loudnorm runtime-mode
   observability; exact-job encoder-cache invalidation after runtime failure; full
   declared compatibility graph; hierarchical correlation IDs; bounded run-state
-  metrics; shared observability redaction; content-addressed corpus cache.
+  metrics; shared observability redaction; content-addressed corpus cache; RFC #11
+  source-aware no-upscale defaults; RFC #12 plan-registered QA diagnostics.
 - **PARTIAL:** 2.1, 2.3, 3.1–3.2 — безопасные локальные fixes выполнены, profile
   claims исправлены, destructive stacks помечены experimental, а invalid
   `target_vmaf` feedback и основные compound-quality risks выявляются preflight;
@@ -28,8 +29,9 @@ Phase 2/3 production guardrails реализованы в candidate `v1.4.0`. О
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
   crash/no-op resume, exact persisted-seed A/V reproducibility, SDR full/limited
   range, MP4/MOV/MKV AAC+Opus policy and APFS distributed fencing.
-- **NOT VERIFIED / planned:** natural long-form corpus, NVENC/QSV/AMF, hardware VFR,
-  NFS/network partitions and aligned transform-quality metrics.
+- **NOT VERIFIED / planned:** natural long-form corpus and registered-metric thresholds,
+  NVENC/QSV/AMF, hardware VFR, production cross-host NFS/network partitions and
+  YouTube ingestion/transcode.
 
 ## Принципы реализации
 
@@ -387,11 +389,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   official SSCD model opt-in.
 - **Risk:** thresholds corpus-dependent; ship as calibrated diagnostics.
 - **Expected result:** metrics correlate with an engineering decision.
-- **Status:** implemented on the pending RFC #12 branch — existing raw metrics and
-  verdicts remain stable; plan-aware FFV1 replay, local PTS reset, bounded audio/SSCD
-  alignment, content/tool/plan/seed-keyed SSCD cache and explicit coverage/confidence
-  are locally verified. Merge still awaits the mandatory RFC acceptance window;
-  licensed natural-content thresholds remain deliberately unverified.
+- **Status:** implemented in `main` under RFC #12 — existing raw metrics and verdicts
+  remain stable; plan-aware FFV1 replay, local PTS reset, bounded audio/SSCD alignment,
+  content/tool/plan/seed-keyed SSCD cache and explicit coverage/confidence are locally
+  verified. The six-cell native CI matrix passed at `91c2091`; licensed natural-content
+  thresholds remain deliberately unverified.
 
 ### 5.3 Calibration v2 within current engine
 
@@ -493,7 +495,7 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Status:** release workflow already creates CycloneDX plus per-asset keyless cosign
   bundles; Docker buildx emits SBOM/provenance and signs the digest. `actionlint`
   passes after shell-safe artifact discovery fixes. Gitleaks found no secrets in 324
-  commits or ~174 MB local artifacts. Actual v1.4 tag artifacts remain `NOT VERIFIED`
+  commits or ~174 MB local artifacts. Actual v1.5 tag artifacts remain `NOT VERIFIED`
   until the release workflow runs.
 
 ## Phase 7 — Documentation

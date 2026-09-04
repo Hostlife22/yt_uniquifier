@@ -114,8 +114,8 @@ GitHub Issues with the **`a11y`** label go to the same triage queue as
 security reports, with a 5-business-day acknowledgement target. Please
 include:
 
-- OS + version, screen reader + version, Qt version
-  (`yt-uniq-gui --version` prints the latter).
+- OS + version, screen reader + version, application version
+  (`yt-uniq-gui --version`), and the installed PyQt6/Qt version.
 - The exact screen + chord that failed.
 - Whether the failure is in the *announcement* (silent, wrong text,
   wrong role) or in the *interaction* (unreachable control, lost focus,

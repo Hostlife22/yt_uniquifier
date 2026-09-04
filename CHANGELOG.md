@@ -17,6 +17,10 @@ the last tag.
 - Make custom `video.fit_aspect` profiles source-aware and no-upscale by default;
   fixed-resolution shipped profiles retain their existing canvas through an explicit
   `allow_upscale: true` migration ([RFC #11](https://github.com/Hostlife22/yt_uniquifier/issues/11)).
+- Migrate the advanced-security workflow to `github/codeql-action@v4` and keep the
+  concurrent-admission regression helper's fallback file mode least-privileged.
+- Make the documented `--version` option functional in both CLI and GUI entry points,
+  and stamp the package version into the macOS application bundle metadata.
 
 ### Added
 

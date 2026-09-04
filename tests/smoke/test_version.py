@@ -13,6 +13,12 @@ def test_version_command() -> None:
     assert __version__ in result.stdout
 
 
+def test_version_option() -> None:
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == __version__
+
+
 def test_help_command() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0

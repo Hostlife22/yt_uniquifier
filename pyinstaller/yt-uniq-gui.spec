@@ -17,10 +17,14 @@
 # - If your platform fails, fall back to: pipx install 'yt-uniquifier[gui]'
 
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from importlib.metadata import version
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+
+APP_VERSION = version("yt-uniquifier")
 
 # Bundle YAML profiles + QA HTML template.
 datas = []
+datas += copy_metadata("yt-uniquifier")
 datas += collect_data_files("yt_uniquifier", subdir="profiles", include_py_files=False)
 datas += collect_data_files(
     "yt_uniquifier", subdir="core/qa/templates", include_py_files=False,
@@ -79,4 +83,8 @@ if sys.platform == "darwin":
         name="yt-uniq-gui.app",
         icon=None,
         bundle_identifier="com.yt-uniquifier.gui",
+        info_plist={
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
+        },
     )

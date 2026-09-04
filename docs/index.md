@@ -40,7 +40,7 @@ copy of an earlier render.
 pip install yt-uniquifier              # core + CLI
 pip install yt-uniquifier[gui]          # adds the PyQt6 desktop GUI
 pip install yt-uniquifier[web]          # adds the FastAPI web UI
-yt-uniq --version
+yt-uniq version                       # `--version` is also supported
 ```
 
 Requires `ffmpeg` / `ffprobe` on `PATH`. Optional binaries:

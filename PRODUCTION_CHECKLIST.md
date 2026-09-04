@@ -7,11 +7,14 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 1. Scope and release identity
 
 - [ ] Release commit/tag immutable; worktree clean.
-- [ ] Version едина в package, CLI, GUI, web OpenAPI, artifacts и changelog.
-- [ ] Stable API/Profile/CLI/Event changes имеют RFC, migration, snapshots и
+- [x] Package metadata, CLI command/option, GUI runtime, web OpenAPI, wheel and local
+      macOS bundle runtime/plist agree on `1.5.0`; tagged Linux/Windows artifacts remain
+      covered by the immutable-release gate below.
+- [x] Stable API/Profile/CLI/Event changes имеют RFC, migration, snapshots и
       `CHANGELOG.md` entry.
-- [ ] Supported Python, FFmpeg, OS и hardware matrix документирована.
-- [ ] Legal-use framing сохранён; similarity metrics не называются доказательством
+- [x] Supported Python, FFmpeg, OS и hardware matrix документирована; unavailable
+      hardware remains explicitly `NOT VERIFIED` rather than advertised as qualified.
+- [x] Legal-use framing сохранён; similarity metrics не называются доказательством
       обхода или вероятностью внешней rights-detection system.
 
 ## 2. Correctness blockers
@@ -92,7 +95,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `target_loudness_lufs`, `audio_tracks`, `output_container`, `target_vmaf` affect
       actual command or are removed through approved migration.
 - [x] Total crop semantics match documented maximum.
-- [ ] No-upscale default enforced unless user explicitly requests upscale.
+- [x] No-upscale default enforced unless user explicitly requests upscale; shipped
+      fixed-canvas profiles retain compatibility through explicit `allow_upscale: true`.
 - [x] Transform compatibility graph rejects invalid HDR/audio/time/container combos.
 - [x] Invalid `target_vmaf` feedback rejects unregistered geometry/time/overlay/
       tonemap paths before encoding, including direct segmenter calls.
@@ -159,10 +163,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Silent stall watchdog and configurable wall policy tested with real subprocesses.
 - [x] Segment encode, concat and sanitizer use the same bounded-log/watchdog runner;
       no fixed one-hour concat/sanitizer termination remains.
-- [ ] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
-      shell-grandchild and watchdog paths pass on this Mac, and the same integration
-      test is wired into every native CI OS; remote Linux/Windows result remains
-      `NOT VERIFIED` until the pushed workflow completes.
+- [x] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
+      shell-grandchild/watchdog paths pass locally and the six-cell native CI matrix
+      passed at commit `91c2091`.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [x] Run/plan/job/segment correlation IDs appear in structured logs/events.
 - [x] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
@@ -173,8 +176,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] Orchestrator enforces stream/duration/HDR correctness before success.
 - [x] Known QA topology/timestamp/decode correctness failures produce `INVALID`.
-- [x] Raw and spatial/temporal registered quality metrics are both reported on the
-      RFC #12 implementation branch; merge awaits mandatory RFC acceptance.
+- [x] Raw and spatial/temporal registered quality metrics are both reported from
+      `main` under RFC #12 without changing raw verdict semantics.
 - [x] No low VMAF substitution and no pHash-as-quality fallback; SSIM is used only
       when VMAF is unavailable and retains its metric identity.
 - [x] Audio fingerprint uses ordered start/middle/tail windows for >600 s media and
@@ -183,7 +186,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] SSCD midpoint frame extraction is batched into one cancellable FFmpeg runner
       process per file and returns the complete requested grid.
 - [x] SSCD reports bounded monotonic temporal coverage/confidence and supports a
-      cached registered comparison on the RFC #12 implementation branch.
+      cached plan-registered comparison from `main`.
 - [x] CLI/HTML similarity diagnostics are clearly separated from correctness/quality;
       structured JSON axis fields await an approved stable-schema RFC.
 - [x] Corpus IDs/content cache survive move and invalidate on content change; legacy
@@ -224,11 +227,12 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1639 passed`, `47 skipped`);
-      local CI-equivalent core branch coverage is `82.35%` (`1472 passed`, one
-      expected skip), above the required 80%; remote commit gate remains required.
-- [x] CodeQL has zero open alerts before this change; post-push commit scan is a
-      required final gate.
+- [x] Ruff, strict mypy and combined-RFC full local test gate pass (`1693 passed`,
+      `47 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.25%`
+      (`1494 passed`, 12 expected skips), above the required 80%.
+- [ ] CodeQL workflow passed on `91c2091`, but alert #13 identified a permissive
+      fallback mode in a test helper. The helper is corrected and the workflow is
+      migrated to `codeql-action@v4`; require a clean post-push scan before release.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
 - [x] Plugin manifest/sandbox/allowlist tests pass; pre-import disable documented.
@@ -237,7 +241,7 @@ release blockers, поэтому checklist намеренно не отмече�
       Content-Length fail closed.
 - [x] Container runs as non-root UID 1000; input mount is documented read-only.
 - [ ] Release workflow generates CycloneDX plus cosign bundles, and Docker buildx
-      emits SBOM/provenance and keyless signature; verify the actual tagged v1.4
+      emits SBOM/provenance and keyless signature; verify the actual tagged v1.5
       artifacts after the release workflow runs.
 - [x] Gitleaks found no secrets across 324 commits or the local ~174 MB build
       artifacts; persisted web errors remain redacted by regression tests.
@@ -248,12 +252,12 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1639 passed,
-      47 expected hardware-selection/optional skips)
+- [x] Full contracts/property/GUI/offscreen suite (combined-RFC `make check`:
+      1693 passed, 47 expected hardware-selection/optional skips)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
-- [x] `make build-wheel` and clean-environment import smoke for v1.4.0
+- [x] `make build-wheel` produced `yt_uniquifier-1.5.0-py3-none-any.whl`
 - [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
 - [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
       and `/readyz` pass, shared resource-registry path is writable.
@@ -266,15 +270,15 @@ release blockers, поэтому checklist намеренно не отмече�
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
-## Текущий статус post-v1.4.0 main
+## Текущий статус post-v1.5.0 main
 
-- [x] Fully provisioned `make check`: 1667 passed, 47 expected skips; fault-injection
-      recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 82.35% (required: 80%).
+- [x] Fully provisioned combined-RFC `make check`: 1693 passed, 47 expected skips;
+      fault-injection recovery matrix and three-round POSIX SIGKILL chaos gate passed.
+- [x] Remote non-integration branch coverage gate: 81.25% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
-- [x] Strict mypy: passed (161 source files).
+- [x] Strict mypy: passed (162 source files).
 - [x] All 16 shipped profiles load.
 - [x] Real Calibration v2 CLI: stratified probe, 3 encode/quality/similarity trials,
       strict media contract, tuned YAML and second-run scored-cache reuse passed.

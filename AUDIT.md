@@ -5,7 +5,7 @@
 Режим аудита: исходный production-код не изменялся до согласования плана.
 Implementation status обновлён после подтверждения пользователя.
 
-## Implementation status — v1.4.0 candidate
+## Implementation status — v1.5.0 candidate
 
 Подтверждённые P0 и локально исправимые P1 correctness defects устранены в
 существующем pipeline без rewrite. Добавлены container-aware stream mapping,
@@ -18,9 +18,10 @@ contract, stream title/disposition validation, bounded persistent web run store 
 
 Post-fix verification на этом хосте (обновлено 2026-09-04):
 
-- Ruff и strict mypy: passed (`158` source files).
-- Canonical `make check`: `1617 passed, 2 skipped` на полностью установленном
-  optional environment (`10:54`, current Phase 6 hardening повтор).
+- Ruff и strict mypy: passed (`162` source files).
+- Combined RFC integration `make check`: `1693 passed, 47 expected skips` на полностью
+  установленном optional environment; subsequent admission/CLI fixes passed the
+  six-cell remote Linux/macOS/Windows matrix at commit `91c2091`.
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -78,9 +79,10 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
 - Generic `libaom-av1` discovery больше не даёт false timeout: probe-only speed args
   сократили локальный smoke с 15.63 s до 1.5–1.9 s. Реальный pipeline test также
   выявил и исправил несовместимое сочетание `-b:v 0` с VBV options в production argv.
-- No-upscale changes remain isolated in the RFC #11 branch. Registered QA from RFC
-  #12 is implemented on its pending branch with unchanged raw metrics/verdicts; both
-  implementations remain unmergeable until the comment window and maintainer decision.
+- RFC #11 source-aware no-upscale policy and RFC #12 plan-registered QA are integrated
+  in `main` under the repository-owner review-window override. Raw metric/verdict
+  semantics remain backward-compatible; registered VMAF/SSIM/SSCD/audio diagnostics
+  are additive and retain explicit alignment coverage/confidence.
 
 Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
 corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube
@@ -193,7 +195,7 @@ Web / distributed worker: rich diagnostic QA is not automatic
 | Resume | `core/checkpoint.py` | state, hashes, locks | segment state ↔ JSON | Content-bound identity, atomic hashes/locks and exact artifact reuse verified locally; NFS remains open |
 | Runner | `core/runner.py` | subprocess, progress, cancel, NVENC retry | argv → events/result | Bounded tail/full log, stall watchdog and process-tree cancel implemented; remote OS qualification incomplete |
 | Metadata | `core/metadata.py`, `core/auxiliary_streams.py` | sanitize/reapply metadata and auxiliary policy | source metadata → args | Selected stream/chapter plus supported attachment/timecode/cover metadata preserved and validated |
-| QA | `core/qa/` | correctness, pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | `INVALID` и независимые UI axes реализованы; aligned quality/structured LUFS schema pending RFC |
+| QA | `core/qa/` | correctness, pHash, audio, SSCD, VMAF, SSIM, corpus | source/output → report | `INVALID`, independent raw axes and plan-registered quality/alignment diagnostics implemented; structured LUFS/true-peak fields remain future contract work |
 | Calibration | `core/calibration/` | scale profile and iterate | source/profile/targets → tuned profile | SSCD direction, deterministic search/cache/retry fixed; natural-corpus thresholds remain experimental |
 | CLI | `cli/` | user orchestration | args → core APIs | Core orchestration reused; explicit `--encoder` is strict and cannot silently fall back |
 | GUI | `gui/` | desktop orchestration/workers | UI → core APIs | Core не дублируется; реальные heavy e2e opt-in |
@@ -456,7 +458,10 @@ encoder in preflight; vendor-specific driver-reset behavior remains `NOT VERIFIE
 
 ## Security findings
 
-Недавние CodeQL findings исправлены; открытых alerts после предыдущего push — 0.
+CodeQL run для `91c2091` завершился, но выявил alert #13 в test-only
+monkeypatch: fallback `os.open` mode был `0o777`. В current candidate mode сужен до
+`0o600`, а workflow переведён на `codeql-action@v4`; closure должен подтвердить
+post-push scan.
 Path validation и plugin capability/audit-hook defenses выглядят осмысленно.
 
 Оставшиеся operational risks:
@@ -496,12 +501,12 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1617 passed, 2 skipped на fully provisioned macOS environment |
-| Branch coverage gate | 82.35% (`1472 passed`, required 80%) |
+| Full `make check` | Combined RFC gate: 1693 passed, 47 expected hardware/optional skips on fully provisioned macOS |
+| Branch coverage gate | 81.25% (`1494 passed`, required 80%) on remote Ubuntu/Python 3.12 commit `91c2091` |
 | Ruff | Passed |
-| Strict mypy (`158` source files) | Passed |
-| Wheel build | v1.4.0 wheel + clean import smoke passed |
-| macOS PyInstaller build | Passed: `dist/yt-uniq-gui.app` |
+| Strict mypy (`162` source files) | Passed |
+| Wheel build | v1.5.0 wheel build passed |
+| macOS PyInstaller build | Passed: frozen runtime and both plist version fields report `1.5.0` |
 | 16 profile loads | Passed |
 | Encoder detection | H264/HEVC VideoToolbox, x264/x265, SVT-AV1 and libaom available locally |
 | Chapters smoke | Post-fix passed: 2 → 2 chapters |
@@ -522,8 +527,9 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | 1h/2h/3h+ synthetic | Passed with exact decoded frame counts; natural movie corpus NOT VERIFIED |
 | Crash/no-op resume | Passed; completed segment/audio bytes+mtime reused, persisted seed restored, decoded A/V SHA-256 equal |
 
-GitHub read-only check на момент завершения аудита: latest CI, docs и CodeQL runs для
-`14df893` завершились успешно; open pull requests — 0; open CodeQL alerts — 0.
+GitHub check на 2026-09-04: six-cell CI и CodeQL workflow для `91c2091`
+завершились успешно; RFC #11/#12 закрыты как completed. Выявленный
+alert #13 исправлен в current candidate и ожидает post-push closure.
 
 Подробные приоритеты: `RISK_REGISTER.md`. План локальных исправлений без rewrite:
 `PRODUCTION_PLAN.md`. Измерения: `BENCHMARKS.md`.

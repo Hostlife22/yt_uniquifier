@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from yt_uniquifier import __version__
 from yt_uniquifier.gui.screens.base import ScreenBase
 from yt_uniquifier.gui.screens.batch import BatchScreen
 from yt_uniquifier.gui.screens.calibrate import CalibrateScreen
@@ -347,7 +348,13 @@ def _resolve_boot_locale() -> str:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--version"]:
+        print(__version__)
+        return
+
     app = QApplication(sys.argv)
+    app.setApplicationName("yt-uniq-gui")
+    app.setApplicationVersion(__version__)
     _install_global_excepthook()
     # v0.9 R5 — install the translator BEFORE MainWindow constructs
     # any widget so the first paint already shows the right language.

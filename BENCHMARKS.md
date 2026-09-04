@@ -4,7 +4,7 @@ Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 2026-09-04. Результаты относятся только к указанному локальному environment и не
 экстраполируются автоматически на фильмы/HDR/GPU.
 
-## Production acceptance delta — 2026-09-03 (post-v1.4.0)
+## Production acceptance delta — 2026-09-04 (post-v1.5.0 integration)
 
 На Intel macOS с Homebrew FFmpeg 9.0.1 дополнительно подтверждено:
 
@@ -58,14 +58,15 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1667 passed, 47 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:02 | RFC #12 implementation and production-hardening changes do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
-| CI-equivalent coverage | 1515 passed, 1 expected skipped, 198 deselected; 81.96% branch-aware core coverage | Required 80% gate passes; v1.5.0 wheel and sdist build successfully on the RFC #12 branch |
+| Full local quality gate | 1693 passed, 47 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:49 | Combined RFC #11/#12 integration, version-contract and production-hardening changes do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
+| Remote release-candidate matrix | commit `91c2091`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.25% | No-upscale, registered QA and admission-race fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
+| CI-equivalent coverage | 1494 passed, 12 expected skips, 198 deselected; 81.25% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
 
-The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
-and #12. Implementations are isolated on pending branches and cannot land before the
-mandatory comment window and maintainer decision.
+The no-upscale and raw/registered metric contracts from GitHub RFC #11 and #12 are
+integrated in `main` under the documented repository-owner review-window override.
+Both RFC issues are closed as completed after local and six-cell remote qualification.
 
-RFC #12 implementation-branch synthetic qualification on the current Intel Mac:
+RFC #12 integrated synthetic qualification on the current Intel Mac:
 
 | Case | Result | Decision enabled |
 |---|---|---|
