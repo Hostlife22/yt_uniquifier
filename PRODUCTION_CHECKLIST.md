@@ -216,10 +216,9 @@ release blockers, поэтому checklist намеренно не отмече�
       authorize publication.
 - [ ] Reaped job retains stable work/resume identity on another host.
 - [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap and
-      final-output reservation; an ephemeral two-client NFSv4 fault lab is available,
-      but this Mac's Docker engine failed during the first hard-mount partition attempt
-      and the corrected soft-timeout rerun is `NOT VERIFIED`. Production hard mounts
-      and foreign-host stale-owner behavior remain deployment gates.
+      final-output reservation. The corrected ephemeral two-client NFSv4 soft-timeout
+      lab passed on GitHub-hosted Ubuntu (`33881832592`); production hard mounts,
+      separate physical hosts and foreign-host stale-owner behavior remain gates.
 
 ## 12. Security and supply chain
 

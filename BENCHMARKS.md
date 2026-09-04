@@ -357,10 +357,11 @@ verification items.
 The repository now contains a two-client NFSv4 lab for concurrent lease uniqueness,
 partition/reap/stale-commit fencing and crash-journal recovery. Its first Docker
 Desktop run used a production-like `hard` mount and wedged the Linux VM during forced
-network teardown. The harness was corrected to use a bounded `soft` mount for safe
-fault-lab cleanup while `docs/distributed.md` continues to require `hard` mounts in
-production. The corrected end-to-end result is **NOT VERIFIED on this Mac** until
-Docker Desktop recovers; native Linux and the actual deployment mount remain required.
+network teardown. The harness now uses a bounded `soft` mount and faults client
+TCP/2049 with `iptables`, keeping Docker's control plane responsive. GitHub-hosted
+Ubuntu run `33881832592` passed the complete corrected matrix. This qualifies the
+application-level ephemeral lab only; `docs/distributed.md` still requires `hard`
+mounts in production, and native cross-host deployment qualification remains required.
 
 `validation-corpus/manifest.example.yaml` plus `tools/natural_corpus.py` validate
 relative media paths, explicit owned/licensed/public-domain status, non-empty rights

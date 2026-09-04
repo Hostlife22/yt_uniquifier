@@ -113,6 +113,11 @@ recommended production `hard` mount above: passing the lab is a deterministic
 application/fencing gate, while the real production hosts must still be qualified
 with their actual `hard` mount, server, network and failure-recovery policy.
 
+The corrected lab passed on GitHub-hosted Ubuntu in Actions run `33881832592`,
+including concurrent lease uniqueness, stale reap/fencing and resume after restoring
+client TCP/2049. This is retained CI evidence, not certification of a deployment's
+actual NFS server or mount options.
+
 ## Per-machine encoder variation
 
 By design, two workers may use **different** encoders (one libx264 on
