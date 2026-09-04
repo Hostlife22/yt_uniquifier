@@ -20,7 +20,8 @@ required to exist and complete; it cannot turn into a skip. The output checks co
 - exact codec, level signalling and MP4 sample-entry tag;
 - Main/High profile and 8-bit 4:2:0 pixel format;
 - preserved frame count, cadence and BT.709/range signalling;
-- H.264 High/CABAC, one-to-two consecutive B-frames and closed half-FPS IDR GOP;
+- H.264 High/CABAC and closed half-FPS IDR GOP, with one-to-two consecutive
+  B-frames for exact-count backends or the qualified one-to-three VideoToolbox range;
 - HEVC closed IDR and a maximum two-second GOP;
 - AV1 keyframe intervals of at most two seconds.
 

@@ -34,12 +34,14 @@ The actual bitstream regression checks profile, B-frame runs, IDR cadence and CA
 Changing this internal encoder policy increments the plan-hash policy revision, so
 resume cannot combine segments encoded under different GOP rules.
 
-H.264 VideoToolbox requests the same structure and is locally verified for High,
-CABAC, closed half-FPS IDR cadence and bounded B-frames. The Intel Mac hardware emits
-one consecutive B-frame even when the requested maximum is two, so it is not claimed
-as byte-for-byte equivalent to libx264. NVENC, QSV and AMF remain **NOT VERIFIED**.
-Accepting `-g`/`-bf` arguments is insufficient: each backend must prove its output on
-matching physical hardware.
+H.264 VideoToolbox requests the same generic structure and is verified for High,
+CABAC, closed half-FPS IDR cadence and bounded B-frame reordering. FFmpeg exposes
+Apple's frame-reordering switch through any positive `-bf` value rather than a
+reliable exact count: qualified Intel hardware emits runs of one B-frame and GitHub's
+Apple Silicon runner emits runs of three. It is therefore not claimed as
+byte-for-byte or B-pattern equivalent to libx264. NVENC, QSV and AMF remain
+**NOT VERIFIED**. Accepting `-g`/`-bf` arguments is insufficient: each backend must
+prove its output on matching physical hardware.
 
 ## HEVC and AV1 random access
 

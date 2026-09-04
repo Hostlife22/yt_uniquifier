@@ -1193,11 +1193,13 @@ def _h264_upload_structure_args(plan: Plan) -> list[str]:
     YouTube documents High Profile, CABAC, two consecutive B-frames and a closed
     GOP containing half the frame rate.  ``-g`` is a frame count, so fractional
     rates are rounded to the nearest whole frame while retaining native cadence.
-    This is used by libx264 and by the locally bitstream-qualified VideoToolbox
-    path. Other hardware vendors remain excluded until they prove that they honour
-    the requested structure rather than merely accepting argv. VideoToolbox can
-    emit one consecutive B-frame on hardware even when the requested maximum is two;
-    the qualification matrix records that backend-specific result explicitly.
+    This is used by libx264 and by the bitstream-qualified VideoToolbox path. Other
+    hardware vendors remain excluded until they prove that they honour the requested
+    structure rather than merely accepting argv. FFmpeg maps any positive ``-bf``
+    value to VideoToolbox's boolean AllowFrameReordering property, so Apple hardware
+    chooses the pattern: qualified Intel and Apple Silicon devices emit runs of one
+    and three B-frames respectively. The backend-specific test records that bounded
+    behaviour while still requiring High/CABAC/closed-IDR output.
     """
     gop_frames = max(1, math.floor(_source_fps(plan) / 2 + 0.5))
     return [

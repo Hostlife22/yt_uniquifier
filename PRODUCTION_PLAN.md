@@ -301,13 +301,15 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   default; explicit override is strict; job-resolution/pixfmt/rate-control probe and
   NVIDIA-aware cache key are active; a later segment runtime failure invalidates the
   exact-job success so the next preflight reprobes it; unverified `av1_vulkan` is
-  disabled. The libx264 and local VideoToolbox H.264 paths request an explicit
-  High/CABAC/max-2-B/closed half-FPS structure; libx265, SVT-AV1, libaom-AV1 and
-  local HEVC VideoToolbox have real-output two-second GOP qualification. The internal
-  plan-hash revision prevents mixed-policy resume. A manual trusted self-hosted
-  hardware workflow now fails closed on explicitly requested encoders and retains
-  bitstream evidence. Per-GPU routing and actual NVENC/QSV/AMF plus AV1 VideoToolbox
-  device runs remain open.
+  disabled. The libx264 H.264 path requests an exact High/CABAC/max-2-B/closed
+  half-FPS structure. VideoToolbox requests High/CABAC/frame reordering/closed GOP;
+  its device-selected B-frame runs are bounded at one on qualified Intel hardware and
+  three on GitHub Apple Silicon. libx265, SVT-AV1, libaom-AV1 and local HEVC
+  VideoToolbox have real-output two-second GOP qualification. The internal plan-hash
+  revision prevents mixed-policy resume. A manual trusted self-hosted hardware
+  workflow now fails closed on explicitly requested encoders and retains bitstream
+  evidence. Per-GPU routing and actual NVENC/QSV/AMF plus AV1 VideoToolbox device runs
+  remain open.
 
 ### 4.2 Resource-aware scheduling
 

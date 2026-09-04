@@ -157,6 +157,8 @@ def _assert_h264_structure(
     path: Path,
     stream: dict[str, object],
     frames: list[dict[str, object]],
+    *,
+    max_consecutive_b_frames: int = 2,
 ) -> None:
     keyframes = _assert_common_delivery_contract(stream, frames, codec="h264")
 
@@ -173,7 +175,7 @@ def _assert_h264_structure(
             longest_b_run = max(longest_b_run, current_b_run)
         else:
             current_b_run = 0
-    assert 1 <= longest_b_run <= 2
+    assert 1 <= longest_b_run <= max_consecutive_b_frames
 
     headers = subprocess.run(
         [
@@ -255,7 +257,12 @@ def test_h264_videotoolbox_bitstream_contract(
         codec="h264",
     )
     stream, frames = _probe_frames(output)
-    _assert_h264_structure(output, stream, frames)
+    # FFmpeg's VideoToolbox wrapper only maps positive ``-bf`` to Apple's
+    # AllowFrameReordering boolean; the device chooses the actual pattern.
+    # Qualified Intel hardware emits one consecutive B-frame, while GitHub's
+    # Apple Silicon runners emit three. Both retain the requested closed IDR
+    # cadence, High profile and CABAC contract checked below.
+    _assert_h264_structure(output, stream, frames, max_consecutive_b_frames=3)
 
 
 @needs_ffmpeg
@@ -305,7 +312,13 @@ def test_requested_hardware_bitstream_contract(
     )
     stream, frames = _probe_frames(output)
     if codec == "h264":
-        _assert_h264_structure(output, stream, frames)
+        max_b_frames = 3 if encoder == "h264_videotoolbox" else 2
+        _assert_h264_structure(
+            output,
+            stream,
+            frames,
+            max_consecutive_b_frames=max_b_frames,
+        )
         return
 
     keyframes = _assert_common_delivery_contract(stream, frames, codec=codec)
