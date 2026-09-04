@@ -239,14 +239,22 @@ jobs:
           tar -xzf _dl/yt-uniq-gui-Linux.tar.gz -C dist
           find dist/yt-uniq-gui -mindepth 1 -maxdepth 1 -print -quit
 
-      - name: Fetch static ffmpeg (johnvansickle release)
+      - name: Fetch pinned static ffmpeg
         # AppImage must be portable across glibc versions, so the
-        # apt-installed ffmpeg used elsewhere in CI is not suitable.
-        # johnvansickle ships a fully static x86_64 build.
+        # apt-installed ffmpeg used elsewhere in CI is not suitable. Use an
+        # immutable mirror of johnvansickle's 7.0.2 build and enforce the
+        # published SHA-256 pin before extracting anything.
         run: |
           mkdir -p .perf_cache/ffmpeg-static
-          curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
-            | tar -xJ --strip-components=1 -C .perf_cache/ffmpeg-static
+          archive="${RUNNER_TEMP}/ffmpeg-7.0.2-amd64-static.tar.xz"
+          curl --fail --show-error --location \
+            --retry 5 --retry-all-errors --retry-delay 2 \
+            --output "${archive}" \
+            https://github.com/publicala/ffmpeg-static/releases/download/v7.0.2/ffmpeg-7.0.2-amd64-static.tar.xz
+          echo "abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67  ${archive}" \
+            | sha256sum --check --strict
+          xz --test "${archive}"
+          tar -xJf "${archive}" --strip-components=1 -C .perf_cache/ffmpeg-static
           .perf_cache/ffmpeg-static/ffmpeg -version | head -1
           .perf_cache/ffmpeg-static/ffprobe -version | head -1
 
