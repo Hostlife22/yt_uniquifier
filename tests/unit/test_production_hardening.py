@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from prometheus_client import generate_latest
+import pytest
 
 from yt_uniquifier.core.correlation import CorrelationIds
 from yt_uniquifier.core.models import (
@@ -137,6 +137,7 @@ def test_observability_redacts_nested_tokens_and_absolute_paths() -> None:
 
 
 def test_metrics_have_bounded_states_and_no_correlation_labels() -> None:
+    prometheus_client = pytest.importorskip("prometheus_client")
     from yt_uniquifier.web import metrics
 
     before = metrics.RUN_STATE_EVENTS_TOTAL.labels(state="resumed")._value.get()
@@ -151,7 +152,7 @@ def test_metrics_have_bounded_states_and_no_correlation_labels() -> None:
     after = metrics.RUN_STATE_EVENTS_TOTAL.labels(state="resumed")._value.get()
     assert after == before + 1
 
-    exposition = generate_latest().decode()
+    exposition = prometheus_client.generate_latest().decode()
     for state in metrics.RUN_STATES:
         assert f'state="{state}"' in exposition
     assert "/secret/run-token" not in exposition
@@ -161,7 +162,7 @@ def test_metrics_have_bounded_states_and_no_correlation_labels() -> None:
         kind="error",
         payload={"encoder": "ghp_" + ("a" * 32)},
     ))
-    assert "ghp_" not in generate_latest().decode()
+    assert "ghp_" not in prometheus_client.generate_latest().decode()
 
 
 def test_transform_reference_lists_every_registered_transform() -> None:

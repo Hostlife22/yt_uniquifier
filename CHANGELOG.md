@@ -28,6 +28,8 @@ the last tag.
 
 ### Fixed
 
+- Keep the base/dev CI matrix collectable without the optional web extra by
+  importing Prometheus only inside its web-metrics regression test.
 - Base corpus identity on content SHA-256 so moves retain IDs and in-place content
   replacement atomically invalidates stale fingerprints; upgrade schema-v1 stores.
 - Recursively redact sensitive paths and credentials from structured logs, audit and
