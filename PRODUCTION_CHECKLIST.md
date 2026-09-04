@@ -242,9 +242,12 @@ release blockers, поэтому checklist намеренно не отмече�
       malformed, negative, duplicate, transfer-encoding-conflicting and over-limit
       Content-Length fail closed.
 - [x] Container runs as non-root UID 1000; input mount is documented read-only.
-- [ ] Release workflow generates CycloneDX plus cosign bundles, and Docker buildx
-      emits SBOM/provenance and keyless signature; verify the actual tagged v1.5
-      artifacts after the release workflow runs.
+- [x] Manual release workflow run `33905649508` generated Linux/macOS/Windows GUI
+      bundles, AppImage, CycloneDX 1.5 SBOM, verified SHA-256 checksums and seven
+      keyless cosign bundles without publishing a tag. The downloaded candidate and
+      clean-Ubuntu AppImage runtime were independently verified locally.
+- [ ] Verify Docker buildx SBOM/provenance/signature and the actual immutable v1.5
+      release assets when the approved release tag is created.
 - [x] Gitleaks found no secrets across 324 commits or the local ~174 MB build
       artifacts; persisted web errors remain redacted by regression tests.
 
@@ -260,7 +263,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
 - [x] `make build-wheel` produced `yt_uniquifier-1.5.0-py3-none-any.whl`
-- [x] `make build` GUI artifact on local macOS; Linux/Windows CI artifacts pending
+- [x] `make build` GUI artifact on local macOS; Linux/macOS/Windows GUI archives and
+      embedded `1.5.0` versions passed manual release run `33905649508`.
 - [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
       and `/readyz` pass, shared resource-registry path is writable.
 - [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and

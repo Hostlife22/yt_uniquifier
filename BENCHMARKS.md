@@ -61,6 +61,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
 | Full local quality gate | 1699 passed, 55 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:30 | PGS, benchmark, VideoToolbox and fault-lab additions do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
 | Remote release-candidate matrix | commit `c0aaafd`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.23% | No-upscale, registered QA, admission-race and version-contract fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
+| Manual release assembly | commit `f477ff5`, run `33905649508`: Linux/macOS/Windows GUI bundles and AppImage passed embedded-version/runtime checks; downloaded 1.05 GB candidate passed ZIP integrity, all six SHA-256 entries and all seven keyless cosign-bundle verifications | The workflow can assemble a complete v1.5.0 candidate without publishing a tag; CycloneDX 1.5 contains 59 components and the AppImage independently reports `1.5.0` in clean Ubuntu amd64 |
 | CI-equivalent coverage | 1497 passed, 12 expected skips, 198 deselected; 81.23% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
 
 The no-upscale and raw/registered metric contracts from GitHub RFC #11 and #12 are

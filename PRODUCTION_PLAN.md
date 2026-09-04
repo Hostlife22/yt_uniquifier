@@ -503,8 +503,10 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   Frozen Linux/macOS/Windows and AppImage versions are checked before upload. Docker
   buildx emits SBOM/provenance and signs the digest. `actionlint`
   passes after shell-safe artifact discovery fixes. Gitleaks found no secrets in 324
-  commits or ~174 MB local artifacts. Actual v1.5 tag artifacts remain `NOT VERIFIED`
-  until the release workflow runs.
+  commits or ~174 MB local artifacts. Manual run `33905649508` passed every native
+  GUI/AppImage/assembly job at `f477ff5`; its downloaded candidate passed ZIP,
+  SHA-256, CycloneDX and all seven cosign-bundle checks locally. Actual immutable v1.5
+  tag assets remain `NOT VERIFIED` because no release tag was created intentionally.
 
 ## Phase 7 — Documentation
 
