@@ -22,6 +22,7 @@
       "enabled": true,
       "id": "video.fit_aspect",
       "params": {
+        "allow_upscale": true,
         "mode": "crop",
         "target_aspect": "16:9",
         "target_height": 2160,

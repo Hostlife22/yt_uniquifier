@@ -46,7 +46,7 @@ Every model below has its full JSON schema locked by
 | `Chapter` | `core/models.py` | `frozen=True`. |
 | `SourceMeta` | `core/models.py` | `frozen=True`. Stable serialized A/V/subtitle/chapter probe result. Auxiliary attachment/data/cover-art topology is intentionally private/internal so this corrective change does not alter the v1 schema. |
 | `EncoderCandidate` | `core/models.py` | `frozen=True`. `max_parallel ∈ [1, 64]`; includes AV1 software vendors `svtav1` and `libaom`. |
-| `TransformConfig` | `core/models.py` | `extra="forbid"`. `params: dict[str, object]` — the parameter dict is shape-checked at the transform's own `*Params` model, not here. |
+| `TransformConfig` | `core/models.py` | `extra="forbid"`. `params: dict[str, object]` — the parameter dict is shape-checked at the transform's own `*Params` model, not here. `video.fit_aspect.allow_upscale` is an additive boolean and defaults to `false`; shipped fixed-canvas profiles opt in explicitly ([RFC #11](https://github.com/Hostlife22/yt_uniquifier/issues/11)). |
 | `SegmentationConfig` | `core/models.py` | `extra="forbid"`. v0.8.0 added `mode="scene"` opt-in. |
 | `Profile` | `core/models.py` | `extra="forbid"`. The user-facing YAML schema; v1.3 adds `skip_watermark_check`. |
 | `Plan` | `core/models.py` | `frozen=True`. Carries `plan_hash` (resume key) + `run_seed` (NOT part of the hash). |

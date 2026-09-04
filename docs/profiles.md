@@ -94,6 +94,14 @@ mild quality-preserving transforms and a platform-appropriate
 where the source is landscape but the destination expects vertical /
 square frames — no manual ffmpeg recipe needed.
 
+The shipped destination profiles explicitly set `allow_upscale: true` because
+their names promise the resolution in the table. A custom `video.fit_aspect`
+transform defaults to `allow_upscale: false`: crop chooses the largest even
+target-aspect rectangle inside the source and configured caps, while pad modes
+may enlarge the canvas but never enlarge the source foreground. Set the flag to
+`true` only when a fixed delivery canvas is an explicit requirement; upscaling
+cannot restore source detail.
+
 | Name | Target | Mode | Resolution | LUFS | Notes |
 |------|--------|------|------------|------|-------|
 | `youtube_4k.yaml`        | 16:9 | `crop`     | 3840×2160 | -14 | YouTube 4K landscape master |
@@ -135,7 +143,7 @@ encode time.
 
 | ID | Kind | Notable params |
 |----|------|----------------|
-| `video.fit_aspect`      | video | `target_aspect` (`16:9` / `9:16` / `1:1` / `4:5` / `4:3`), `mode` (`crop` / `pad_blur` / `pad_black`), `target_width`, `target_height`, `blur_sigma` (0..80, only `pad_blur`), `pad_color` (only `pad_black`) — v0.7 R3 / F3, used by all platform-destination profiles |
+| `video.fit_aspect`      | video | `target_aspect` (`16:9` / `9:16` / `1:1` / `4:5` / `4:3`), `mode` (`crop` / `pad_blur` / `pad_black`), `target_width`, `target_height`, `allow_upscale` (default `false`), `blur_sigma` (0..80, only `pad_blur`), `pad_color` (only `pad_black`) — used by all platform-destination profiles |
 | `video.crop_resize`     | video | `max_strength` (0..0.10), `rng_seed` |
 | `video.rotate`          | video | `degrees` (-2..2), `fillcolor_sdr`, `fillcolor_pq` (HDR variant) |
 | `video.color_eq`        | video | `brightness`, `contrast`, `gamma`, `saturation` |

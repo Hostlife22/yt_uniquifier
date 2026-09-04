@@ -9,6 +9,7 @@ transforms:
     params:
       target_aspect: "9:16"
       mode: pad_blur
+      allow_upscale: true
       blur_sigma: 25.0
   - id: video.crop_resize
     enabled: true

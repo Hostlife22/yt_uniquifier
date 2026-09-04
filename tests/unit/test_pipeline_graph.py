@@ -137,6 +137,7 @@ def test_encoder_probe_uses_profile_canvas_and_hdr_pix_fmt(tmp_path: Path) -> No
                 "target_aspect": "16:9",
                 "target_width": 3840,
                 "target_height": 2160,
+                "allow_upscale": True,
             },
         )],
     )
@@ -380,7 +381,7 @@ def test_video_only_chain(tmp_path: Path) -> None:
     assert "format=yuv420p" in fc
 
 
-def test_fit_aspect_reasserts_exact_canvas_at_tail(tmp_path: Path) -> None:
+def test_fit_aspect_default_does_not_upscale_tail_canvas(tmp_path: Path) -> None:
     src = _src(tmp_path)
     plan = _plan(src, [
         TransformConfig(
@@ -389,6 +390,23 @@ def test_fit_aspect_reasserts_exact_canvas_at_tail(tmp_path: Path) -> None:
         ),
         TransformConfig(id="video.crop_resize", params={"max_strength": 0.02}),
     ])
+
+    built = FilterGraph(plan, tmp_path / "out.mp4").build()
+
+    assert "scale=1920:1080,format=yuv420p" in built.filter_complex
+
+
+def test_fit_aspect_explicit_upscale_reasserts_exact_canvas_at_tail(tmp_path: Path) -> None:
+    src = _src(tmp_path)
+    plan = _plan(src, [TransformConfig(
+        id="video.fit_aspect",
+        params={
+            "target_aspect": "16:9",
+            "target_width": 3840,
+            "target_height": 2160,
+            "allow_upscale": True,
+        },
+    )])
 
     built = FilterGraph(plan, tmp_path / "out.mp4").build()
 

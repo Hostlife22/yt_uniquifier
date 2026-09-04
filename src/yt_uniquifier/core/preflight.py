@@ -175,7 +175,7 @@ def _check_quality_risks(plan: Plan) -> list[PreflightFinding]:
 
     from yt_uniquifier.core.transforms.video_fit_aspect import (
         FitAspectParams,
-        _resolve_dims,
+        _resolve_dims_for_source,
     )
 
     findings: list[PreflightFinding] = []
@@ -189,37 +189,66 @@ def _check_quality_risks(plan: Plan) -> list[PreflightFinding]:
         except ValidationError:
             params = None
         if params is not None:
-            target_width, target_height = _resolve_dims(params)
             source_video = plan.source.video[0]
-            width_ratio = target_width / max(source_video.width, 1)
-            height_ratio = target_height / max(source_video.height, 1)
-            scale_factor = (
-                min(width_ratio, height_ratio)
-                if params.mode == "pad_black"
-                else max(width_ratio, height_ratio)
-            )
-            if scale_factor > 1.001:
-                explicit = (
-                    params.target_width is not None or params.target_height is not None
+            try:
+                target_width, target_height = _resolve_dims_for_source(
+                    params, source_video.width, source_video.height
                 )
+            except ValueError as exc:
                 findings.append(PreflightFinding(
-                    code=(
-                        "quality.upscale.explicit"
-                        if explicit
-                        else "quality.upscale.implicit"
-                    ),
-                    severity="info" if explicit else "warn",
-                    message=(
-                        f"video.fit_aspect scales {source_video.width}x{source_video.height} "
-                        f"toward {target_width}x{target_height} ({scale_factor:.2f}x); "
-                        "upscaling adds pixels but cannot restore source detail."
-                    ),
+                    code="quality.fit_aspect.no_valid_canvas",
+                    severity="fail",
+                    message=str(exc),
                     suggestion=(
-                        "Prefer the source resolution for quality-first output. "
-                        "Set target_width/target_height explicitly only when the "
-                        "delivery canvas requires upscaling."
+                        "Increase the configured dimension caps, choose a compatible "
+                        "aspect, or explicitly allow upscaling."
                     ),
                 ))
+                findings.append(PreflightFinding(
+                    code="quality.fit_aspect.resolved_canvas",
+                    severity="info",
+                    message=(
+                        "video.fit_aspect has no valid resolved canvas for "
+                        f"{source_video.width}x{source_video.height}."
+                    ),
+                    suggestion="Resolve the failed canvas finding before encoding.",
+                ))
+            else:
+                width_ratio = target_width / max(source_video.width, 1)
+                height_ratio = target_height / max(source_video.height, 1)
+                scale_factor = min(width_ratio, height_ratio)
+                if params.mode == "crop":
+                    scale_factor = max(width_ratio, height_ratio)
+                elif not params.allow_upscale:
+                    # Pad canvas pixels are not source-detail pixels. The
+                    # foreground builder caps both axes at their input size.
+                    scale_factor = min(scale_factor, 1.0)
+                findings.append(PreflightFinding(
+                    code="quality.fit_aspect.resolved_canvas",
+                    severity="info",
+                    message=(
+                        f"video.fit_aspect resolves {source_video.width}x{source_video.height} "
+                        f"to a {target_width}x{target_height} canvas with foreground scale "
+                        f"{scale_factor:.2f}x (allow_upscale={params.allow_upscale})."
+                    ),
+                    suggestion="Review the resolved delivery canvas before long-form encoding.",
+                ))
+                if scale_factor > 1.001:
+                    findings.append(PreflightFinding(
+                        code="quality.upscale.explicit",
+                        severity="info",
+                        message=(
+                            "video.fit_aspect scales "
+                            f"{source_video.width}x{source_video.height} toward "
+                            f"{target_width}x{target_height} ({scale_factor:.2f}x); "
+                            "upscaling adds pixels but cannot restore source detail."
+                        ),
+                        suggestion=(
+                            "Prefer the source resolution for quality-first output. "
+                            "Keep allow_upscale enabled only when a fixed delivery canvas "
+                            "is required."
+                        ),
+                    ))
 
     if {"video.fit_aspect", "video.crop_resize"} <= ids:
         findings.append(PreflightFinding(

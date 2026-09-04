@@ -9,6 +9,7 @@ transforms:
     params:
       target_aspect: "16:9"
       mode: crop
+      allow_upscale: true
       target_width: 3840
       target_height: 2160
   - id: video.crop_resize
