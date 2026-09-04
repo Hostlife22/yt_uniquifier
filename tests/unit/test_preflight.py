@@ -369,7 +369,9 @@ def test_quality_risk_warnings_cover_harmful_combinations(tmp_path: Path) -> Non
     findings = preflight(src, plan, plan.encoder)
     codes = _codes(findings)
 
-    assert "quality.upscale.implicit" in codes
+    assert "quality.upscale.implicit" not in codes
+    assert "quality.upscale.explicit" not in codes
+    assert "quality.fit_aspect.resolved_canvas" in codes
     assert "quality.multiple_resample" in codes
     assert "quality.noise_sharpen" in codes
     assert "quality.temporal_jitter" in codes
@@ -385,6 +387,7 @@ def test_explicit_upscale_is_reported_but_not_rejected(tmp_path: Path) -> None:
             "target_aspect": "16:9",
             "target_width": 3840,
             "target_height": 2160,
+            "allow_upscale": True,
         },
     )])
 

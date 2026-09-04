@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import needs_ffmpeg
+from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.gui.paths import profiles_dir
@@ -108,3 +109,60 @@ def test_every_shipped_profile_has_integration_coverage() -> None:
         "shipped platform profile(s) missing from _PLATFORM_PROFILES: "
         f"{sorted(missing)}"
     )
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("mode", "allow_upscale", "expected_wh"),
+    [
+        ("crop", False, (320, 180)),
+        ("crop", True, (640, 360)),
+        ("pad_black", False, (320, 320)),
+        ("pad_blur", False, (320, 320)),
+    ],
+)
+def test_custom_fit_aspect_requires_explicit_upscale_permission(
+    tiny_clip: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    mode: str,
+    allow_upscale: bool,
+    expected_wh: tuple[int, int],
+) -> None:
+    target_aspect = "1:1" if mode.startswith("pad_") else "16:9"
+    profile = Profile(
+        name=f"upscale-{mode}-{allow_upscale}",
+        transforms=[TransformConfig(
+            id="video.fit_aspect",
+            params={
+                "target_aspect": target_aspect,
+                "target_width": 640,
+                "target_height": 640 if target_aspect == "1:1" else 360,
+                "mode": mode,
+                "allow_upscale": allow_upscale,
+            },
+        )],
+        skip_watermark_check=True,
+    )
+    plan = build_plan(tiny_clip, profile, encoder_override="libx264")
+    output = tmp_path / f"upscale-{mode}-{allow_upscale}.mp4"
+
+    run_full(
+        plan,
+        RunOptions(work_dir=tmp_path / f"work-{mode}-{allow_upscale}", output=output),
+    )
+
+    assert _probe_resolution(output) == expected_wh
+    sar = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=sample_aspect_ratio",
+            "-of", "default=nw=1:nk=1", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    ).stdout.strip()
+    assert sar == "1:1"

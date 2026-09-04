@@ -8,6 +8,7 @@ transforms:
     params:
       target_aspect: "1:1"
       mode: crop
+      allow_upscale: true
   - id: video.crop_resize
     enabled: true
     params: {max_strength: 0.015, rng_seed: 42}

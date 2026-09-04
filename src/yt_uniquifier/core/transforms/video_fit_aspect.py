@@ -24,6 +24,7 @@ instagram_reels, instagram_square, linkedin_square.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Literal
 
@@ -66,6 +67,7 @@ class FitAspectParams(BaseModel):
     mode: FitMode = "crop"
     target_width: int | None = Field(default=None, gt=0, le=7680)
     target_height: int | None = Field(default=None, gt=0, le=7680)
+    allow_upscale: bool = False
     blur_sigma: float = Field(default=20.0, gt=0.0, le=80.0)
     pad_color: str = "black"
 
@@ -98,6 +100,48 @@ def _resolve_dims(p: FitAspectParams) -> tuple[int, int]:
     return default_w, default_h
 
 
+def _resolve_dims_for_source(
+    p: FitAspectParams,
+    source_width: int,
+    source_height: int,
+) -> tuple[int, int]:
+    """Resolve an exact even canvas without enlarging source detail.
+
+    Crop chooses the largest target-aspect rectangle inside both the source and
+    configured caps. Pad chooses the smallest target-aspect canvas containing the
+    source, falling back to the largest capped canvas when downscaling is required.
+    A factor of two keeps both dimensions even for every shipped integer aspect.
+    """
+    target_width, target_height = _resolve_dims(p)
+    if p.allow_upscale:
+        return target_width, target_height
+    if source_width < 2 or source_height < 2:
+        raise ValueError("source dimensions must both be at least two pixels")
+    aspect_width, aspect_height = (int(value) for value in p.target_aspect.split(":"))
+    cap_factor = min(target_width // aspect_width, target_height // aspect_height)
+    cap_factor -= cap_factor % 2
+    if p.mode == "crop":
+        source_factor = min(
+            source_width // aspect_width,
+            source_height // aspect_height,
+        )
+        factor = min(cap_factor, source_factor)
+        factor -= factor % 2
+    else:
+        required_factor = max(
+            math.ceil(source_width / aspect_width),
+            math.ceil(source_height / aspect_height),
+        )
+        required_factor += required_factor % 2
+        factor = min(required_factor, cap_factor)
+    if factor < 2:
+        raise ValueError(
+            f"{source_width}x{source_height} cannot produce a valid even "
+            f"{p.target_aspect} canvas within {target_width}x{target_height}"
+        )
+    return aspect_width * factor, aspect_height * factor
+
+
 def _build_fit_aspect(
     params: BaseModel,
     alloc: LabelAllocator,
@@ -124,11 +168,15 @@ def _build_fit_aspect(
     if p.mode == "pad_black":
         # scale-to-fit (force_original_aspect_ratio=decrease) then pad
         # the remaining area with a solid color. Preserves every pixel.
+        scale_width = str(w) if p.allow_upscale else f"'min(iw,{w})'"
+        scale_height = str(h) if p.allow_upscale else f"'min(ih,{h})'"
+        divisibility = "" if p.allow_upscale else ":force_divisible_by=2"
         return FilterChain(
             in_label=in_lbl,
             out_label=out,
             filter_str=(
-                f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                f"scale={scale_width}:{scale_height}:"
+                f"force_original_aspect_ratio=decrease{divisibility}:flags=lanczos,"
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={p.pad_color}"
             ),
         )
@@ -141,11 +189,15 @@ def _build_fit_aspect(
     fg_in = alloc.next("v")
     bg_out = alloc.next("v")
     fg_out = alloc.next("v")
+    fg_width = str(w) if p.allow_upscale else f"'min(iw,{w})'"
+    fg_height = str(h) if p.allow_upscale else f"'min(ih,{h})'"
+    fg_divisibility = "" if p.allow_upscale else ":force_divisible_by=2"
     filt = (
         f"[{IN_PLACEHOLDER}]split=2[{bg_in}][{fg_in}];"
         f"[{bg_in}]scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={w}:{h},gblur=sigma={p.blur_sigma:.2f}[{bg_out}];"
-        f"[{fg_in}]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos[{fg_out}];"
+        f"[{fg_in}]scale={fg_width}:{fg_height}:"
+        f"force_original_aspect_ratio=decrease{fg_divisibility}:flags=lanczos[{fg_out}];"
         f"[{bg_out}][{fg_out}]overlay=(W-w)/2:(H-h)/2[{out}]"
     )
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)

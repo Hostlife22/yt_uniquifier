@@ -16,6 +16,7 @@ from yt_uniquifier.core.transforms.base import LabelAllocator
 from yt_uniquifier.core.transforms.video_fit_aspect import (
     FitAspectParams,
     _resolve_dims,
+    _resolve_dims_for_source,
 )
 
 
@@ -62,6 +63,36 @@ def test_both_overrides_pass_through() -> None:
     assert _resolve_dims(p) == (512, 512)
 
 
+def test_no_upscale_is_the_default() -> None:
+    assert FitAspectParams(target_aspect="16:9").allow_upscale is False
+
+
+@pytest.mark.parametrize(
+    ("mode", "source", "expected"),
+    [
+        ("crop", (640, 360), (640, 360)),
+        ("crop", (640, 480), (640, 360)),
+        ("crop", (360, 640), (352, 198)),
+        ("pad_black", (640, 360), (640, 360)),
+        ("pad_black", (640, 480), (864, 486)),
+        ("pad_blur", (360, 640), (1152, 648)),
+        ("pad_black", (3840, 2160), (1920, 1080)),
+    ],
+)
+def test_source_aware_no_upscale_canvas(
+    mode: str,
+    source: tuple[int, int],
+    expected: tuple[int, int],
+) -> None:
+    params = FitAspectParams(target_aspect="16:9", mode=mode)  # type: ignore[arg-type]
+    assert _resolve_dims_for_source(params, *source) == expected
+
+
+def test_explicit_upscale_preserves_configured_canvas() -> None:
+    params = FitAspectParams(target_aspect="16:9", allow_upscale=True)
+    assert _resolve_dims_for_source(params, 640, 360) == (1920, 1080)
+
+
 # ---- crop mode ----
 def test_crop_mode_vertical(spec) -> None:
     p = FitAspectParams(target_aspect="9:16", mode="crop")
@@ -96,7 +127,7 @@ def test_crop_mode_widescreen_4k(spec) -> None:
 
 # ---- pad_black mode ----
 def test_pad_black_default_color(spec) -> None:
-    p = FitAspectParams(target_aspect="16:9", mode="pad_black")
+    p = FitAspectParams(target_aspect="16:9", mode="pad_black", allow_upscale=True)
     c = spec.build(p, LabelAllocator(), "v0")
     assert c.filter_str == (
         "scale=1920:1080:force_original_aspect_ratio=decrease:flags=lanczos,"
@@ -121,7 +152,9 @@ def test_pad_color_rejects_injection() -> None:
 
 # ---- pad_blur mode ----
 def test_pad_blur_uses_split_and_overlay(spec) -> None:
-    p = FitAspectParams(target_aspect="9:16", mode="pad_blur", blur_sigma=15.0)
+    p = FitAspectParams(
+        target_aspect="9:16", mode="pad_blur", blur_sigma=15.0, allow_upscale=True
+    )
     c = spec.build(p, LabelAllocator(), "v0")
     # Multi-stage filter requiring split + overlay + __IN__ placeholder
     # (so pipeline._wrap_chain_str doesn't double-prefix the in-label).
@@ -142,6 +175,15 @@ def test_pad_blur_allocates_five_labels(spec) -> None:
     spec.build(FitAspectParams(target_aspect="9:16", mode="pad_blur"), alloc, "v0")
     # After one build, label counter should be at v5.
     assert alloc.next("v") == "v6"
+
+
+@pytest.mark.parametrize("mode", ["pad_black", "pad_blur"])
+def test_pad_foreground_never_upscales_by_default(spec, mode: str) -> None:
+    params = FitAspectParams(target_aspect="1:1", mode=mode)  # type: ignore[arg-type]
+    chain = spec.build(params, LabelAllocator(), "v0")
+    assert "min(iw,1080)" in chain.filter_str
+    assert "min(ih,1080)" in chain.filter_str
+    assert "force_divisible_by=2" in chain.filter_str
 
 
 # ---- param validation ----
