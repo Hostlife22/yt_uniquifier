@@ -844,6 +844,14 @@ def build_main_audio_command(
         )
         a_label = chain.out_label
 
+    # Stateful filters can return every sample with a discontinuous output PTS.
+    # The final mux trims against the source timeline, so an artificial gap
+    # would make it discard valid tail samples. Rebuild a contiguous timeline
+    # from the actual sample count after the complete audio chain.
+    contiguous_label = alloc.next("a")
+    a_chains.append(_wrap_chain_str(a_label, "asetpts=N/SR/TB", contiguous_label))
+    a_label = contiguous_label
+
     filter_complex = ";".join(a_chains)
     args: list[str] = [
         ffmpeg_bin(),
@@ -1014,6 +1022,12 @@ def build_main_audio_command_windowed(
     else:
         final_label = accumulator
         all_chains = window_chains + acrossfade_chains
+
+    contiguous_label = alloc.next("a")
+    all_chains.append(
+        _wrap_chain_str(final_label, "asetpts=N/SR/TB", contiguous_label)
+    )
+    final_label = contiguous_label
 
     filter_complex = ";".join(all_chains)
     args: list[str] = [

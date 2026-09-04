@@ -60,6 +60,8 @@ def test_profile_loudness_target_is_used_when_transform_has_no_override(
     command, _ = build_main_audio_command(plan, tmp_path / "audio.m4a")
 
     assert "loudnorm=I=-16.0" in command.filter_complex
+    assert "asetpts=N/SR/TB" in command.filter_complex
+    assert command.filter_complex.endswith(f"[{command.output_audio_label}]")
 
 
 def test_loudnorm_pass_one_measures_preceding_audio_transforms(
@@ -137,6 +139,8 @@ def test_window_overlap_equals_crossfade_duration(tmp_path: Path) -> None:
     assert "atrim=start=0.0000:end=60.0500" in command.filter_complex
     assert "atrim=start=59.9500:end=120.0000" in command.filter_complex
     assert "acrossfade=d=0.1" in command.filter_complex
+    assert "asetpts=N/SR/TB" in command.filter_complex
+    assert command.filter_complex.endswith(f"[{command.output_audio_label}]")
 
 
 def test_sscd_evaluator_returns_direct_similarity(

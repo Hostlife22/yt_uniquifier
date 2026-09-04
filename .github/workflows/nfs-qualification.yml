@@ -1,0 +1,30 @@
+name: NFS qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nfs-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fault-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run two-client NFSv4 fault matrix
+        run: tools/docker_nfs_fault_smoke.sh
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nfs-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .nfs-qualification/
+          if-no-files-found: warn
+          retention-days: 30

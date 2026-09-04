@@ -26,8 +26,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Chapters сохраняются согласно policy на MKV→MP4 regression fixture.
 - [x] Selected multi-audio/subtitle language, title и supported dispositions
       сохраняются и валидируются вместе с supported auxiliary streams.
-- [ ] SRT/ASS→MP4/MKV/MOV и image-subtitle preflight проверены; real PGS
-      roundtrip остаётся NOT VERIFIED из-за отсутствия fixture encoder.
+- [x] SRT/ASS→MP4/MKV/MOV codec conversion and language/title retention verified.
+- [ ] Image-subtitle preflight/roundtrip verified with a real PGS fixture.
 - [x] MKV attachments, MOV `tmcd` и MP4 JPEG/PNG `attached_pic` сохраняются;
       несовместимые attachment/data/cover-art combinations явно rejected.
 - [x] SAR/DAR соответствует declared crop transform; square pixels не становятся
@@ -81,6 +81,9 @@ release blockers, поэтому checklist намеренно не отмече�
       preserve mono, stereo and 5.1 channel counts in the real FFmpeg matrix.
 - [x] Synthetic impulses before/on/after two window crossfades retain exactly one
       event each within 30 ms, with no repeat/drop or accumulated duration shift.
+- [x] Exact final decoded frame count, normalized 48 kHz audio sample count and
+      per-stream end delta are bounded across MP4/MOV/MKV; post-transform `asetpts`
+      prevents loudnorm PTS gaps from truncating the AAC tail.
 - [ ] Natural speech/music listening tests find no click or audible tonal transition.
 
 ## 6. Profiles and transforms
@@ -157,8 +160,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Segment encode, concat and sanitizer use the same bounded-log/watchdog runner;
       no fixed one-hour concat/sanitizer termination remains.
 - [ ] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
-      shell-grandchild and watchdog paths pass on this Mac, remote Linux/Windows
-      runner qualification remains `NOT VERIFIED`.
+      shell-grandchild and watchdog paths pass on this Mac, and the same integration
+      test is wired into every native CI OS; remote Linux/Windows result remains
+      `NOT VERIFIED` until the pushed workflow completes.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [x] Run/plan/job/segment correlation IDs appear in structured logs/events.
 - [x] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
@@ -212,11 +216,14 @@ release blockers, поэтому checklist намеренно не отмече�
       authorize publication.
 - [ ] Reaped job retains stable work/resume identity on another host.
 - [ ] Shared filesystem/NFS configuration is qualified under concurrent lease/reap and
-      final-output reservation; foreign-host stale owners intentionally fail closed.
+      final-output reservation; an ephemeral two-client NFSv4 fault lab is available,
+      but this Mac's Docker engine failed during the first hard-mount partition attempt
+      and the corrected soft-timeout rerun is `NOT VERIFIED`. Production hard mounts
+      and foreign-host stale-owner behavior remain deployment gates.
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1627 passed`, `15 skipped`);
+- [x] Ruff, strict mypy and full local test gate pass (`1639 passed`, `47 skipped`);
       local CI-equivalent core branch coverage is `82.35%` (`1472 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
@@ -240,8 +247,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1627 passed,
-      15 expected hardware/optional skips)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1639 passed,
+      47 expected hardware-selection/optional skips)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -252,12 +259,15 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and
       QEMU-emulated `linux/arm64` on Docker Desktop/macOS; native Linux CI remains
       the release gate.
+- [x] Rights-attested natural-content corpus manifest, validation and executable
+      benchmark/QA matrix are prepared under `validation-corpus/`; real media results
+      remain `NOT VERIFIED` until licensed files are supplied locally.
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1627 passed, 15 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1639 passed, 47 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
 - [x] CI-equivalent non-integration branch coverage gate: 82.35% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case

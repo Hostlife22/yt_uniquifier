@@ -1,0 +1,35 @@
+schema_version: 1
+
+matrix:
+  profiles:
+    - ../src/yt_uniquifier/profiles/soft.yaml
+    - ../src/yt_uniquifier/profiles/medium.yaml
+  encoders:
+    - libx264
+  workers: 1
+
+cases:
+  - id: sdr-dialogue-1080p
+    source: media/sdr-dialogue-1080p.mkv
+    rights_status: licensed
+    rights_reference: internal-license-record-001
+    media_class: sdr
+    review_cues:
+      - dialogue lip sync at 00:02:10
+      - skin tones at 00:05:30
+  - id: hdr10-dark-highlight
+    source: media/hdr10-dark-highlight.mkv
+    rights_status: owned
+    rights_reference: internal-production-record-002
+    media_class: hdr10
+    review_cues:
+      - shadow detail at 00:01:00
+      - specular highlight at 00:03:20
+  - id: hlg-motion-music
+    source: media/hlg-motion-music.mov
+    rights_status: licensed
+    rights_reference: internal-license-record-003
+    media_class: hlg
+    review_cues:
+      - fast motion at 00:00:45
+      - stereo image and true peak at 00:04:00

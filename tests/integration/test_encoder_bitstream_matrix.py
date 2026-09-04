@@ -6,15 +6,17 @@ import json
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 from tests.conftest import needs_ffmpeg
-from yt_uniquifier.core.errors import EncoderError
+from yt_uniquifier.core.errors import EncoderError, PreflightFailure
 from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
+from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
 _HARDWARE_ENCODERS: dict[str, tuple[str, str, str]] = {
@@ -82,6 +84,7 @@ def _encode(
     encoder: str,
     codec: str,
     required: bool = False,
+    keep_hdr: bool = False,
 ) -> Path:
     if not _encoder_is_listed(encoder):
         if required:
@@ -92,6 +95,7 @@ def _encode(
         transforms=[],
         target_codec=codec,  # type: ignore[arg-type]
         output_container="mp4",
+        keep_hdr=keep_hdr,
         skip_watermark_check=True,
     )
     try:
@@ -108,6 +112,97 @@ def _encode(
             output=output,
             target_segment_sec=600.0,
         ),
+    )
+    return output
+
+
+def _frame_pts(path: Path) -> list[float]:
+    payload = json.loads(subprocess.run(
+        [
+            ffprobe_bin(), "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "frame=best_effort_timestamp_time",
+            "-of", "json", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout)
+    return [float(frame["best_effort_timestamp_time"]) for frame in payload["frames"]]
+
+
+def _requested_param(encoder: str) -> object:
+    return pytest.param(
+        encoder,
+        marks=pytest.mark.skipif(
+            encoder not in _REQUESTED_HARDWARE_ENCODERS,
+            reason=f"{encoder} was not requested for this hardware runner",
+        ),
+    )
+
+
+@pytest.fixture
+def hlg_bitstream_source(tmp_path: Path) -> Path:
+    output = tmp_path / "hlg-source.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=3",
+            "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=3",
+            "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le",
+            "-x265-params",
+            "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited",
+            "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+            "-colorspace", "bt2020nc", "-color_range", "tv",
+            "-c:a", "aac", "-shortest", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    return output
+
+
+@pytest.fixture
+def hdr10_static_bitstream_source(tmp_path: Path) -> Path:
+    output = tmp_path / "hdr10-static-source.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=2",
+            "-vf", "format=yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast",
+            "-x265-params",
+            (
+                "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
+                "range=limited:master-display=G(8500,39850)B(6550,2300)"
+                "R(35400,14600)WP(15635,16450)L(10000000,1):max-cll=1000,400"
+            ),
+            "-pix_fmt", "yuv420p10le", "-c:a", "aac", "-shortest", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    return output
+
+
+@pytest.fixture
+def vfr_bitstream_source(tmp_path: Path) -> Path:
+    output = tmp_path / "vfr-source.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=60:duration=6",
+            "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=6",
+            "-vf", "select='if(lt(t,2),not(mod(n,2)),if(lt(t,4),not(mod(n,3)),1))'",
+            "-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*1)",
+            "-c:a", "aac", "-shortest", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
     )
     return output
 
@@ -285,16 +380,7 @@ def test_requested_hardware_encoder_names_are_supported() -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "encoder",
-    [
-        pytest.param(
-            encoder,
-            marks=pytest.mark.skipif(
-                encoder not in _REQUESTED_HARDWARE_ENCODERS,
-                reason=f"{encoder} was not requested for this hardware runner",
-            ),
-        )
-        for encoder in _HARDWARE_ENCODERS
-    ],
+    [_requested_param(encoder) for encoder in _HARDWARE_ENCODERS],
 )
 def test_requested_hardware_bitstream_contract(
     bitstream_source: Path,
@@ -342,3 +428,155 @@ def test_requested_hardware_bitstream_contract(
         ).stderr
         idr_count = len(re.findall(r"nal_unit_type\s+01(?:0011|0100) = (?:19|20)", headers))
         assert idr_count == len(keyframes)
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "encoder",
+    [
+        _requested_param(encoder)
+        for encoder, (_codec, _profile, _tag) in _HARDWARE_ENCODERS.items()
+    ],
+)
+def test_requested_hardware_vfr_preserves_decoded_timestamps(
+    vfr_bitstream_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    encoder: str,
+) -> None:
+    codec = _HARDWARE_ENCODERS[encoder][0]
+    output = _encode(
+        vfr_bitstream_source,
+        tmp_path,
+        encoder=encoder,
+        codec=codec,
+        required=True,
+    )
+    source_pts = _frame_pts(vfr_bitstream_source)
+    output_pts = _frame_pts(output)
+
+    assert len(source_pts) == 220
+    assert len(output_pts) == len(source_pts)
+    source_zero = source_pts[0]
+    output_zero = output_pts[0]
+    assert max(
+        abs((actual - output_zero) - (expected - source_zero))
+        for expected, actual in zip(source_pts, output_pts, strict=True)
+    ) <= 0.002
+    deltas = [right - left for left, right in pairwise(output_pts)]
+    assert all(delta > 0 for delta in deltas)
+    for expected in (1 / 60, 1 / 30, 1 / 20):
+        assert any(abs(delta - expected) <= 0.002 for delta in deltas)
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "encoder",
+    [
+        _requested_param(encoder)
+        for encoder, (codec, _profile, _tag) in _HARDWARE_ENCODERS.items()
+        if codec == "hevc"
+    ],
+)
+def test_requested_hevc_hardware_preserves_hlg_contract(
+    hlg_bitstream_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    encoder: str,
+) -> None:
+    output = _encode(
+        hlg_bitstream_source,
+        tmp_path,
+        encoder=encoder,
+        codec="hevc",
+        required=True,
+        keep_hdr=True,
+    )
+    source_meta = probe(hlg_bitstream_source)
+    output_meta = probe(output)
+    video = output_meta.video[0]
+
+    assert video.pix_fmt == "yuv420p10le"
+    assert video.color.bit_depth == 10
+    assert video.color.transfer == "arib-std-b67"
+    assert video.color.primaries == "bt2020"
+    assert video.color.space == "bt2020nc"
+    assert video.color.color_range == "tv"
+    assert video.duration_sec == pytest.approx(source_meta.video[0].duration_sec, abs=0.05)
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "encoder",
+    [
+        _requested_param(encoder)
+        for encoder, (codec, _profile, _tag) in _HARDWARE_ENCODERS.items()
+        if codec == "hevc"
+    ],
+)
+def test_requested_hevc_hardware_rejects_unverified_static_hdr_metadata(
+    hdr10_static_bitstream_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    encoder: str,
+) -> None:
+    profile = Profile(
+        name=f"static-hdr-{encoder}",
+        transforms=[],
+        target_codec="hevc",
+        output_container="mp4",
+        keep_hdr=True,
+        skip_watermark_check=True,
+    )
+    plan = build_plan(hdr10_static_bitstream_source, profile, encoder_override=encoder)
+    output = tmp_path / f"static-hdr-{encoder}.mp4"
+
+    with pytest.raises(PreflightFailure, match="hdr.static_metadata.encoder_unverified"):
+        run_full(
+            plan,
+            RunOptions(
+                work_dir=tmp_path / f"work-static-hdr-{encoder}" / plan.plan_hash,
+                output=output,
+                target_segment_sec=600.0,
+            ),
+        )
+    assert not output.exists()
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "encoder",
+    [_requested_param(encoder) for encoder in _HARDWARE_ENCODERS],
+)
+def test_requested_hardware_supports_declared_parallel_sessions(
+    bitstream_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    encoder: str,
+) -> None:
+    codec = _HARDWARE_ENCODERS[encoder][0]
+    roots = [tmp_path / f"parallel-{encoder}-{slot}" for slot in range(2)]
+    for root in roots:
+        root.mkdir()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(
+                _encode,
+                bitstream_source,
+                root,
+                encoder=encoder,
+                codec=codec,
+                required=True,
+            )
+            for root in roots
+        ]
+        outputs = [future.result(timeout=120) for future in futures]
+
+    for output in outputs:
+        stream, frames = _probe_frames(output)
+        _assert_common_delivery_contract(stream, frames, codec=codec)

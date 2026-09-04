@@ -1,0 +1,4 @@
+media/**
+results/**
+!media/.gitkeep
+!results/.gitkeep

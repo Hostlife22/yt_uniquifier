@@ -50,6 +50,21 @@ def _decoded_mono_samples(path: Path, *, sample_rate: int = 48_000) -> array[flo
     return samples
 
 
+def _decoded_video_frame_count(path: Path) -> int:
+    value = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+            "-show_entries", "stream=nb_read_frames", "-of", "default=nw=1:nk=1",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.strip()
+    return int(value)
+
+
 def _loud_event_times(
     samples: array[float],
     *,
@@ -504,28 +519,38 @@ def test_mp4_attached_picture_survives_full_pipeline(
 
 @needs_ffmpeg
 @pytest.mark.integration
-def test_ass_subtitle_policy_for_mkv_and_mov(
-    ass_subtitle_source: Path, tmp_path: Path, isolated_cache: Path,
+@pytest.mark.parametrize(
+    ("container", "expected_codecs"),
+    [
+        ("mp4", {"mov_text", "tx3g"}),
+        ("mov", {"mov_text", "tx3g"}),
+        ("mkv", {"ass"}),
+    ],
+)
+def test_ass_subtitle_container_matrix(
+    ass_subtitle_source: Path,
+    tmp_path: Path,
+    isolated_cache: Path,
+    container: str,
+    expected_codecs: set[str],
 ) -> None:
     soft = load_profile(PROFILES_DIR / "soft.yaml")
-    expected_codecs = {"mkv": {"ass"}, "mov": {"mov_text", "tx3g"}}
-    for container in ("mkv", "mov"):
-        profile = soft.model_copy(update={
-            "name": f"ass-{container}",
-            "output_container": container,
-        })
-        plan = build_plan(ass_subtitle_source, profile, encoder_override="libx264")
-        output = tmp_path / f"ass-output.{container}"
-        run_full(plan, RunOptions(
-            work_dir=tmp_path / f"work-ass-{container}", output=output,
-            target_segment_sec=600,
-        ))
+    profile = soft.model_copy(update={
+        "name": f"ass-{container}",
+        "output_container": container,
+    })
+    plan = build_plan(ass_subtitle_source, profile, encoder_override="libx264")
+    output = tmp_path / f"ass-output.{container}"
+    run_full(plan, RunOptions(
+        work_dir=tmp_path / f"work-ass-{container}", output=output,
+        target_segment_sec=600,
+    ))
 
-        subtitle = probe(output).subtitle
-        assert len(subtitle) == 1
-        assert subtitle[0].codec in expected_codecs[container]
-        assert subtitle[0].language == "eng"
-        assert subtitle[0].title == "Styled captions"
+    subtitle = probe(output).subtitle
+    assert len(subtitle) == 1
+    assert subtitle[0].codec in expected_codecs
+    assert subtitle[0].language == "eng"
+    assert subtitle[0].title == "Styled captions"
 
 
 @needs_ffmpeg
@@ -555,7 +580,17 @@ def test_container_roundtrip_is_decodable_and_preserves_media_contract(
 
     _assert_fully_decodable(output)
     result = probe(output)
+    source_frames = _decoded_video_frame_count(media_contract_source)
+    output_frames = _decoded_video_frame_count(output)
+    source_samples = len(_decoded_mono_samples(media_contract_source))
+    output_samples = len(_decoded_mono_samples(output))
+    source_audio_start, source_audio_end = _audio_packet_bounds(media_contract_source)
     assert result.container == container
+    assert source_frames == 72
+    assert output_frames - source_frames == 0
+    # The transformed output is AAC at 48 kHz. Decoder-visible padding is
+    # bounded to one AAC access unit and must never accumulate per segment.
+    assert abs(output_samples - source_samples) <= 1024
     assert result.duration_sec == pytest.approx(3.0, abs=0.05)
     assert result.video[0].duration_sec == pytest.approx(3.0, abs=0.05)
     audio_start, audio_end = _audio_packet_bounds(output)
@@ -563,6 +598,8 @@ def test_container_roundtrip_is_decodable_and_preserves_media_contract(
     # decoded program content starts at zero and the tail stays within two frames.
     assert -0.05 <= audio_start <= 0.0
     assert audio_end == pytest.approx(3.0, abs=0.05)
+    assert abs(audio_start - source_audio_start) <= 0.05
+    assert abs(audio_end - source_audio_end) <= 0.05
     assert result.video[0].color.transfer == "bt709"
     assert result.video[0].color.primaries == "bt709"
     assert result.video[0].color.space == "bt709"

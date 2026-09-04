@@ -16,6 +16,7 @@ Example:
       --profile src/yt_uniquifier/profiles/cid_aware.yaml \\
       --out /tmp/bench_out.mp4 \\
       --encoder libx264 --workers 4 \\
+      --accept-watermark-risk \\
       --json /tmp/bench.json
 """
 
@@ -145,6 +146,11 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--encoder", default=None)
     ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument(
+        "--accept-watermark-risk",
+        action="store_true",
+        help="Attest that the benchmark input is owned/licensed content.",
+    )
     ap.add_argument("--work-dir", type=Path, default=Path(".bench_work"))
     ap.add_argument("--csv", type=Path, default=Path("benchmark.csv"))
     ap.add_argument(
@@ -188,8 +194,9 @@ def main() -> int:
                 output=args.out,
                 encoder_override=args.encoder,
                 keep_segments=False,
-                enforce_preflight=False,
+                enforce_preflight=True,
                 workers=args.workers,
+                accept_watermark_risk=args.accept_watermark_risk,
             ),
             on_event=on_event,
         )

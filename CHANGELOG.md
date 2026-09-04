@@ -25,9 +25,18 @@ the last tag.
 - Add an opt-in, manual self-hosted hardware qualification workflow for
   NVENC/QSV/AMF/VideoToolbox, with strict requested-encoder bitstream contracts and
   retained JUnit, encoded-media, FFprobe, FFmpeg and GPU-inventory evidence.
+- Extend hardware qualification with VFR frame/PTS preservation, HEVC HLG signalling,
+  fail-closed static HDR10 metadata policy and declared-session concurrency checks.
+- Add native process-tree cancellation coverage to every CI OS, an NFSv4 Docker
+  fault-injection lab, and a rights-attested natural-content corpus manifest/runner.
 
 ### Fixed
 
+- Normalize audio timestamps after the complete transform/loudnorm chain so final
+  duration limiting cannot truncate valid AAC tail samples after a filter-created PTS
+  discontinuity; container contracts now compare decoded frames, samples and ends.
+- Convert SRT and ASS subtitles across MP4, MOV and MKV according to each container's
+  codec policy while preserving language/title metadata.
 - Detect and redact POSIX, Windows drive, and UNC absolute paths independently of
   the collector host OS, preventing path disclosure in cross-platform worker logs.
 - Keep the base/dev CI matrix collectable without the optional web extra by

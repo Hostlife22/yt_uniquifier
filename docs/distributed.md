@@ -96,6 +96,23 @@ paths. Journal files are immutable after publication and owner-only (`0600`, fur
 restricted by `umask`); recovery deletes their directory entries rather than modifying
 their contents.
 
+## Local NFS fault-injection lab
+
+Docker on a Linux host can create an ephemeral NFSv4 server and two independent
+clients, then exercise concurrent leasing, a network partition with stale reaping,
+stale-owner publication fencing, and recovery after a crash between fence and publish:
+
+```bash
+tools/docker_nfs_fault_smoke.sh
+```
+
+Evidence is written to `.nfs-qualification/` and includes per-scenario JSON, Docker
+inspection and the client mount table. The lab uses a short `soft` timeout so a forced
+partition cannot wedge Docker cleanup. That is deliberately different from the
+recommended production `hard` mount above: passing the lab is a deterministic
+application/fencing gate, while the real production hosts must still be qualified
+with their actual `hard` mount, server, network and failure-recovery policy.
+
 ## Per-machine encoder variation
 
 By design, two workers may use **different** encoders (one libx264 on

@@ -20,6 +20,11 @@ required to exist and complete; it cannot turn into a skip. The output checks co
 - exact codec, level signalling and MP4 sample-entry tag;
 - Main/High profile and 8-bit 4:2:0 pixel format;
 - preserved frame count, cadence and BT.709/range signalling;
+- preserved 30/20/60 FPS VFR timestamp pattern and exact decoded frame count;
+- HEVC Main10 HLG/BT.2020/limited-range signalling where the encoder advertises HEVC;
+- fail-closed rejection of static HDR10 metadata on hardware paths that have not been
+  explicitly verified to retain ST2086/MaxCLL/MaxFALL;
+- two concurrent jobs when the encoder declares at least two sessions;
 - H.264 High/CABAC and closed half-FPS IDR GOP, with one-to-two consecutive
   B-frames for exact-count backends or the qualified one-to-three VideoToolbox range;
 - HEVC closed IDR and a maximum two-second GOP;
@@ -91,3 +96,9 @@ python tools/hardware_qualification_report.py \
 
 The `.qualification` directory is evidence, not a source-controlled fixture. Remove
 it after archiving the report and media where your release records are stored.
+
+On the qualified Intel Mac (Intel UHD 630 + Radeon Pro 5300M, FFmpeg 9.0.1), the
+extended matrix completed with **14 passed / 36 unrequested skips** for
+`h264_videotoolbox,hevc_videotoolbox`. The retained report contains 27 probed and
+hashed media artifacts. This qualifies only that exact Mac/FFmpeg combination;
+NVENC, QSV, AMF and Apple Silicon remain separate runner qualifications.

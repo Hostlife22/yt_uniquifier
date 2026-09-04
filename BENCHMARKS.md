@@ -44,10 +44,12 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Windowed audio boundary events | Six pulse markers before/on/after the 60 s and 120 s crossfades retained exactly once within 30 ms; 180 s duration stayed within one AAC-frame budget | Crossfade assembly does not drop, repeat or accumulate timing error on the synthetic divergent-EQ fixture |
 | libx264 H.264 upload structure | 24 FPS output: High Profile, CABAC, max B-run 2, four IDR GOP starts across 48 frames with max interval 12 | Software H.264 no longer relies on library GOP/B-frame defaults; other locally available codecs are covered by the separate matrix below |
 | Local HEVC/AV1 bitstream matrix | 5/5: libx265, SVT-AV1, libaom-AV1, H.264 and HEVC VideoToolbox; 144/144 frames, tagged BT.709, expected profiles/pixel formats and bounded GOPs | VideoToolbox HEVC profile is pinned to Main/Main10 by output depth; H.264 VideoToolbox produced CABAC/IDR and a one-frame B-run on this Intel Mac; GitHub Apple Silicon produced a three-frame run because VideoToolbox exposes frame reordering as a boolean |
-| Strict self-hosted qualification harness | Local mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 8 passed, 10 unrequested cases skipped in 81.28 s; JUnit plus 14 hashed/probed media artifacts collected; unavailable/unknown encoder negative controls failed as required | Explicitly requested hardware cannot skip; NVENC/QSV/AMF results remain `NOT VERIFIED` until the same workflow runs on those devices |
+| Strict self-hosted qualification harness | Extended local mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 14 passed, 36 unrequested cases skipped in 122.61 s; JUnit plus 27 hashed/probed media artifacts collected | Bitstream, exact VFR PTS/frame count, HEVC HLG, static-HDR10 fail-closed policy and two-session concurrency passed on this Intel Mac; NVENC/QSV/AMF remain `NOT VERIFIED` |
 | Debian 12 production container bitstream matrix | FFmpeg 5.1.9: libx265/SVT-AV1/libaom-AV1 3 passed; two unavailable VideoToolbox cases skipped | Current wheel and software encoder policy work on the shipped Linux runtime, including libaom constant-quality mode |
 | HEVC/AV1 two-second GOP synthetic delta | 6 s, 640x360, 24 FPS: keyframes 0/48/96; file-size change vs defaults: x265 +1.48%, SVT +0.96%, libaom +1.06%, HEVC VideoToolbox -3.57% | Small synthetic result supports predictable random access; natural-corpus size/quality impact remains required |
 | Multi-audio codec/container matrix | AAC main + Opus secondary across MP4/MOV/MKV | MP4/MOV transcode unsupported passthrough to AAC; MKV preserves Opus and stream metadata |
+| SRT/ASS container matrix | Both text formats passed MP4/MOV/MKV; MP4/MOV emit mov_text and MKV retains SubRip/ASS, with language/title intact | Text-subtitle policy is executable rather than documentation-only; real PGS remains pending |
+| Exact media deltas | 3 s MP4/MOV/MKV: 72/72 decoded video frames; normalized 48 kHz audio sample delta ≤1024 and packet-end delta ≤50 ms | Found and fixed a real loudnorm PTS discontinuity that previously cut 3581 decoded source-relative samples during final mux limiting |
 | Loudnorm mode observability | 44.1 kHz transformed fixture requested linear; FFmpeg reported dynamic; output remained -14.0 LUFS | Runtime mode and fallback reason are now retained instead of assuming measured input guarantees linear processing |
 | Seed/resume reproducibility | Fresh invocation seed differs, persisted seed is restored; retained segment/audio mtimes+hashes and decoded A/V SHA-256 remain equal | Resume does not reroll stochastic transforms or reprocess completed media |
 | HDR regression | HDR10 preserve, HLG preserve and HDR10→SDR: 4 passed | x265/zscale/tonemap paths remain qualified on this Mac |
@@ -56,7 +58,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1627 passed, 15 expected hardware/optional skips; Ruff + strict mypy (161 files) pass; 12:59 | Current production-hardening changes do not regress the complete Mac suite |
+| Full local quality gate | 1639 passed, 47 expected hardware/optional skips; Ruff + strict mypy (161 files) pass; 13:35 | Current production-hardening changes do not regress the complete Mac suite; additional skips are unrequested hardware qualification cells |
 | CI-equivalent coverage | 1472 passed, 1 expected skipped, 146 deselected; 82.35% branch-aware core coverage | Required 80% gate passes; v1.4.0 wheel builds successfully |
 
 The no-upscale and raw/registered metric contracts are proposed in GitHub RFC #11
@@ -349,6 +351,23 @@ These are diagnostic timings, not throughput claims. CI now isolates BuildKit ca
 per architecture and feeds both into the final manifest build. Native arm64 runner
 performance and the published GHCR manifest/attestations remain release-workflow
 verification items.
+
+## NFS fault-injection and natural corpus readiness — 2026-09-04
+
+The repository now contains a two-client NFSv4 lab for concurrent lease uniqueness,
+partition/reap/stale-commit fencing and crash-journal recovery. Its first Docker
+Desktop run used a production-like `hard` mount and wedged the Linux VM during forced
+network teardown. The harness was corrected to use a bounded `soft` mount for safe
+fault-lab cleanup while `docs/distributed.md` continues to require `hard` mounts in
+production. The corrected end-to-end result is **NOT VERIFIED on this Mac** until
+Docker Desktop recovers; native Linux and the actual deployment mount remain required.
+
+`validation-corpus/manifest.example.yaml` plus `tools/natural_corpus.py` validate
+relative media paths, explicit owned/licensed/public-domain status, non-empty rights
+references, SDR/HDR10/HLG classes, profiles and encoders. The runner records source
+SHA-256 and invokes the existing benchmark and QA pipelines per matrix cell. No media
+is committed and no natural-content result is claimed; those results remain
+**NOT VERIFIED** until the owner adds licensed fixtures.
 
 ## Production benchmark protocol
 

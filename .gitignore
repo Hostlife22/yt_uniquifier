@@ -24,6 +24,8 @@ htmlcov/
 # yt-uniquifier work artifacts
 .yt_uniq_work/
 .yt_uniq_calib/
+.qualification/
+.nfs-qualification/
 *.qa.json
 *.qa.html
 
