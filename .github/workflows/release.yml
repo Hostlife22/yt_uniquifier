@@ -161,15 +161,24 @@ jobs:
           test "${actual}" = "${expected}"
           codesign --verify --deep --strict --verbose=2 dist/yt-uniq-gui.app
 
-      - name: Verify embedded version (Windows)
+      - name: Verify embedded package version (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
           $expected = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
-          $actual = & "dist/yt-uniq-gui/yt-uniq-gui.exe" --version
-          if ($actual.Trim() -ne "$expected") {
+          $metadata = Get-ChildItem "dist/yt-uniq-gui" -Recurse -Filter "METADATA" |
+            Where-Object {
+              Select-String -Path $_.FullName -Pattern '^Name: yt-uniquifier$' -Quiet
+            } |
+            Select-Object -First 1
+          if (-not $metadata) {
+            throw "Bundled yt-uniquifier package metadata was not found"
+          }
+          $versionLine = Get-Content $metadata.FullName |
+            Where-Object { $_ -match '^Version: ' } |
+            Select-Object -First 1
+          $actual = ($versionLine -split ':', 2)[1].Trim()
+          if ($actual -ne "$expected") {
             throw "Embedded version mismatch: expected $expected, got $actual"
           }
 
