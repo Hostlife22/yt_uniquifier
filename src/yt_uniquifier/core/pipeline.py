@@ -66,7 +66,7 @@ BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
 # Increment whenever an internal encode policy changes in a way that makes existing
 # completed segments unsafe to reuse under the same package development version.
-_ENCODE_POLICY_REVISION = "youtube-h264-structure-v1"
+_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v2"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:
@@ -1102,16 +1102,21 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
     gpu_q = max(0, min(51, gpu_q))
     gpu_q_s = str(gpu_q)
     if enc.vendor == "nvenc":
-        return [
+        result = [
             "-c:v", name, "-preset", "p6", "-rc", "vbr", "-cq", gpu_q_s,
             "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
         ]
+        return result + _long_gop_args(plan)
     if enc.vendor == "qsv":
-        return ["-c:v", name, "-global_quality", gpu_q_s, "-look_ahead", "1"]
+        result = ["-c:v", name, "-global_quality", gpu_q_s, "-look_ahead", "1"]
+        return result + _long_gop_args(plan)
     if enc.vendor == "amf":
-        return ["-c:v", name, "-rc", "cqp", "-qp_i", gpu_q_s, "-qp_p", gpu_q_s]
+        result = [
+            "-c:v", name, "-rc", "cqp", "-qp_i", gpu_q_s, "-qp_p", gpu_q_s,
+        ]
+        return result + _long_gop_args(plan)
     if enc.vendor == "videotoolbox":
-        return [
+        result = [
             "-c:v", name, "-b:v", str(mb),
             "-maxrate", str(int(mb * 1.5)), "-bufsize", str(mb * 2),
             # A capability probe must not pass by silently falling back to
@@ -1120,13 +1125,21 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
             # to be backed by hardware for this job's resolution/pixel format.
             "-allow_sw", "0",
         ]
+        if enc.codec == "h264":
+            return result + _h264_upload_structure_args(plan)
+        if enc.codec == "hevc":
+            profile = "main10" if _segment_pix_fmt(plan) == "yuv420p10le" else "main"
+            return result + ["-profile:v", profile, "-flags", "+cgop"] + _long_gop_args(
+                plan
+            )
+        return result + _long_gop_args(plan)
     if enc.vendor == "svtav1":
         # SVT-AV1 preset 0=slowest/best, 13=fastest. preset 8 is the
         # documented "balanced" point and the libsvtav1 ffmpeg default.
         return [
             "-c:v", name, "-preset", "8", "-crf", str(crf),
             "-b:v", "0", "-maxrate", str(mb), "-bufsize", str(mb * 2),
-        ]
+        ] + _long_gop_args(plan)
     if enc.vendor == "libaom":
         # libaom-av1 is CPU-bound (~10× slower than libx264) — cpu-used 4
         # is the documented "good" preset that trades ~5% quality for
@@ -1138,34 +1151,55 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
             "-c:v", name, "-cpu-used", "4", "-row-mt", "1",
             "-tile-columns", "2", "-tile-rows", "1",
             "-crf", str(crf), "-b:v", "0",
-            "-maxrate", str(mb), "-bufsize", str(mb * 2),
-        ]
+        ] + _long_gop_args(plan)
     result = [
         "-c:v", name, "-preset", "medium", "-crf", str(crf),
         "-maxrate", str(mb), "-bufsize", str(mb * 2),
     ]
     if enc.vendor == "x264" and enc.codec == "h264":
-        result += _libx264_upload_structure_args(plan)
+        result += _h264_upload_structure_args(plan)
+    if enc.vendor == "x265" and enc.codec == "hevc":
+        result += ["-flags", "+cgop"] + _long_gop_args(plan)
     if enc.vendor in {"x264", "x265"}:
         color_params = _x26x_color_params(plan, include_static_hdr=enc.vendor == "x265")
+        if enc.vendor == "x265":
+            color_params.insert(0, "open-gop=0")
         if color_params:
             result += [f"-{enc.vendor}-params", ":".join(color_params)]
     return result
 
 
-def _libx264_upload_structure_args(plan: Plan) -> list[str]:
+def _source_fps(plan: Plan) -> float:
+    fps = plan.source.video[0].fps if plan.source.video else 0.0
+    return fps if math.isfinite(fps) and fps > 0 else 30.0
+
+
+def _long_gop_args(plan: Plan) -> list[str]:
+    """Bound HEVC/AV1 random-access intervals to two seconds.
+
+    YouTube's half-frame-rate upload recommendation is H.264-specific. HEVC and
+    AV1 instead use a conservative two-second maximum GOP as an internal seek,
+    segmentation and recovery policy. Hardware backends remain unqualified until
+    their emitted bitstreams are checked on the matching physical devices.
+    """
+    if plan.encoder.codec not in {"hevc", "av1"}:
+        return []
+    return ["-g", str(max(1, math.floor(_source_fps(plan) * 2 + 0.5)))]
+
+
+def _h264_upload_structure_args(plan: Plan) -> list[str]:
     """Return the explicit H.264 structure recommended for YouTube uploads.
 
     YouTube documents High Profile, CABAC, two consecutive B-frames and a closed
     GOP containing half the frame rate.  ``-g`` is a frame count, so fractional
     rates are rounded to the nearest whole frame while retaining native cadence.
-    Hardware encoders are deliberately excluded until each backend proves that it
-    actually honours the requested structure rather than merely accepting argv.
+    This is used by libx264 and by the locally bitstream-qualified VideoToolbox
+    path. Other hardware vendors remain excluded until they prove that they honour
+    the requested structure rather than merely accepting argv. VideoToolbox can
+    emit one consecutive B-frame on hardware even when the requested maximum is two;
+    the qualification matrix records that backend-specific result explicitly.
     """
-    fps = plan.source.video[0].fps if plan.source.video else 0.0
-    if not math.isfinite(fps) or fps <= 0:
-        fps = 30.0
-    gop_frames = max(1, math.floor(fps / 2 + 0.5))
+    gop_frames = max(1, math.floor(_source_fps(plan) / 2 + 0.5))
     return [
         "-profile:v", "high",
         "-coder", "cabac",

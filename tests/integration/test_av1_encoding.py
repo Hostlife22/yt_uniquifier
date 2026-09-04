@@ -26,6 +26,7 @@ import pytest
 
 from tests.conftest import needs_ffmpeg
 from yt_uniquifier.core.encoder import detect_encoders
+from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
@@ -33,7 +34,7 @@ from yt_uniquifier.core.profile_loader import load_profile
 PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
 
 
-def _has_libsvtav1() -> bool:
+def _has_encoder(name: str) -> bool:
     """Cheap, side-effect-free check: does this ffmpeg build know the
     encoder name?  We don't run detect_encoders() here because it has
     its own cache contract and the pytest-level skip wants a fast
@@ -48,12 +49,17 @@ def _has_libsvtav1() -> bool:
         )
     except (subprocess.SubprocessError, OSError):
         return False
-    return "libsvtav1" in proc.stdout
+    return name in proc.stdout
 
 
 needs_av1 = pytest.mark.skipif(
-    not _has_libsvtav1(),
+    not _has_encoder("libsvtav1"),
     reason="libsvtav1 not available in this ffmpeg build",
+)
+
+needs_libaom = pytest.mark.skipif(
+    not _has_encoder("libaom-av1"),
+    reason="libaom-av1 not available in this ffmpeg build",
 )
 
 
@@ -159,6 +165,40 @@ def test_youtube_av1_profile_end_to_end(
         f"output duration {out_meta.duration_sec:.3f} drifted by "
         f"{duration_delta:.3f} s from source {src_meta.duration_sec:.3f}"
     )
+
+
+@needs_ffmpeg
+@needs_libaom
+@pytest.mark.integration
+def test_libaom_constant_quality_end_to_end(
+    short_av1_clip: Path, tmp_path: Path, isolated_cache: Path,
+) -> None:
+    """The advertised quality-first AV1 encoder must complete a real run.
+
+    libaom rejects maxrate/bufsize when ``-b:v 0`` selects constant-quality
+    mode. A name-only discovery probe previously hid that production failure.
+    """
+    out = tmp_path / "out_libaom.mp4"
+    profile = Profile(
+        name="libaom-cq",
+        transforms=[],
+        target_codec="av1",
+        output_container="mp4",
+        skip_watermark_check=True,
+    )
+    plan = build_plan(short_av1_clip, profile, encoder_override="libaom-av1")
+    run_full(
+        plan,
+        RunOptions(
+            work_dir=tmp_path / "work_libaom" / plan.plan_hash,
+            output=out,
+            target_segment_sec=600.0,
+        ),
+    )
+
+    output_meta = probe(out)
+    assert output_meta.video[0].codec == "av1"
+    assert abs(output_meta.duration_sec - probe(short_av1_clip).duration_sec) < 0.5
 
 
 @needs_ffmpeg

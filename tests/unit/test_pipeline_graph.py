@@ -231,7 +231,7 @@ def test_libx264_uses_explicit_youtube_upload_structure(
     assert args[args.index("-flags") + 1] == "+cgop"
 
 
-def test_hardware_h264_does_not_claim_unqualified_upload_structure(
+def test_videotoolbox_h264_requests_explicit_upload_structure(
     tmp_path: Path,
 ) -> None:
     source = _src(tmp_path)
@@ -248,9 +248,93 @@ def test_hardware_h264_does_not_claim_unqualified_upload_structure(
 
     args = pipeline_mod._encoder_args_for(plan)
 
+    assert args[args.index("-profile:v") + 1] == "high"
+    assert args[args.index("-coder") + 1] == "cabac"
+    assert args[args.index("-bf") + 1] == "2"
+    assert args[args.index("-g") + 1] == "12"
+    assert args[args.index("-flags") + 1] == "+cgop"
+
+
+def test_unqualified_h264_hardware_keeps_backend_defaults(tmp_path: Path) -> None:
+    source = _src(tmp_path)
+    profile = Profile(name="nvenc-h264", target_codec="h264")
+    encoder = EncoderCandidate(
+        name="h264_nvenc", vendor="nvenc", codec="h264", works=True,
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = pipeline_mod._encoder_args_for(plan)
+
     assert "-profile:v" not in args
     assert "-bf" not in args
     assert "-g" not in args
+
+
+@pytest.mark.parametrize(
+    ("vendor", "name", "codec"),
+    [
+        ("x265", "libx265", "hevc"),
+        ("svtav1", "libsvtav1", "av1"),
+        ("libaom", "libaom-av1", "av1"),
+        ("nvenc", "hevc_nvenc", "hevc"),
+        ("qsv", "av1_qsv", "av1"),
+        ("amf", "hevc_amf", "hevc"),
+        ("videotoolbox", "hevc_videotoolbox", "hevc"),
+    ],
+)
+def test_hevc_and_av1_use_two_second_max_gop(
+    tmp_path: Path,
+    vendor: str,
+    name: str,
+    codec: str,
+) -> None:
+    source = _src(tmp_path)
+    encoder = EncoderCandidate(
+        name=name,
+        vendor=vendor,  # type: ignore[arg-type]
+        codec=codec,  # type: ignore[arg-type]
+        works=True,
+    )
+    profile = Profile(name="long-gop", target_codec=codec)  # type: ignore[arg-type]
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = pipeline_mod._encoder_args_for(plan)
+
+    assert args[args.index("-g") + 1] == "48"
+
+
+@pytest.mark.parametrize(("hdr", "expected"), [(False, "main"), (True, "main10")])
+def test_hevc_videotoolbox_profile_matches_output_bit_depth(
+    tmp_path: Path,
+    hdr: bool,
+    expected: str,
+) -> None:
+    source = _src(tmp_path, hdr=hdr)
+    profile = Profile(name="vt-hevc", target_codec="hevc", keep_hdr=hdr)
+    encoder = EncoderCandidate(
+        name="hevc_videotoolbox", vendor="videotoolbox", codec="hevc", works=True,
+    )
+    plan = Plan(
+        source=source,
+        profile=profile,
+        encoder=encoder,
+        plan_hash=compute_plan_hash(source, profile, encoder),
+    )
+
+    args = pipeline_mod._encoder_args_for(plan)
+
+    assert args[args.index("-profile:v") + 1] == expected
+    assert args[args.index("-flags") + 1] == "+cgop"
 
 
 def test_encode_policy_revision_invalidates_resume_hash(
@@ -549,6 +633,11 @@ def test_av1_encoder_args_libaom(tmp_path: Path) -> None:
     args = pipeline_mod._encoder_args_for(plan)
     assert args[args.index("-c:v") + 1] == "libaom-av1"
     assert args[args.index("-crf") + 1] == "30"
+    assert args[args.index("-b:v") + 1] == "0"
+    # libaom rejects VBV maxrate/bufsize when target bitrate is zero. Keep
+    # quality-first AV1 in unconstrained constant-quality mode.
+    assert "-maxrate" not in args
+    assert "-bufsize" not in args
     # libaom-av1 specifics: cpu-used + row-mt + tiles.
     assert args[args.index("-cpu-used") + 1] == "4"
     assert args[args.index("-row-mt") + 1] == "1"

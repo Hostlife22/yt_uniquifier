@@ -19,7 +19,7 @@ contract, stream title/disposition validation, bounded persistent web run store 
 Post-fix verification на этом хосте (обновлено 2026-09-04):
 
 - Ruff и strict mypy: passed (`158` source files).
-- Canonical `make check`: `1601 passed, 2 skipped` на полностью установленном
+- Canonical `make check`: `1617 passed, 2 skipped` на полностью установленном
   optional environment (`10:54`, current Phase 6 hardening повтор).
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
@@ -45,8 +45,10 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
 - Fresh resume invocation восстанавливает persisted seed: готовые video/audio
   artifacts сохраняют mtime+hash, а decoded video/audio SHA-256 совпадают точно.
 - libx264 H.264 output at 24 FPS подтверждает High Profile, CABAC, max two
-  consecutive B-frames and closed 12-frame GOP; hardware/AV1/HEVC structure remains
-  `NOT VERIFIED`.
+  consecutive B-frames and closed 12-frame GOP. Local bitstream matrix additionally
+  confirms closed two-second HEVC GOPs for libx265/VideoToolbox and two-second AV1
+  GOPs for SVT-AV1/libaom; H.264 VideoToolbox emits High/CABAC/IDR with a one-frame
+  B-run on this Intel Mac. NVENC/QSV/AMF and AV1 VideoToolbox remain `NOT VERIFIED`.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
 - Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
@@ -71,7 +73,8 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   plugin sandbox tests проходят. Gitleaks не нашёл секретов в 324 commits и ~174 MB
   build artifacts; `actionlint` проходит для всех workflows.
 - Generic `libaom-av1` discovery больше не даёт false timeout: probe-only speed args
-  сократили локальный smoke с 15.63 s до 1.5–1.9 s без изменения production argv.
+  сократили локальный smoke с 15.63 s до 1.5–1.9 s. Реальный pipeline test также
+  выявил и исправил несовместимое сочетание `-b:v 0` с VBV options в production argv.
 - No-upscale и registered QA contract changes вынесены в RFC #11/#12; их код не
   вносится до обязательного comment window и maintainer decision.
 
@@ -489,8 +492,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | 1601 passed, 2 skipped на fully provisioned macOS environment |
-| Branch coverage gate | 82.36% (`1462 passed`, required 80%) |
+| Full `make check` | 1617 passed, 2 skipped на fully provisioned macOS environment |
+| Branch coverage gate | 82.35% (`1472 passed`, required 80%) |
 | Ruff | Passed |
 | Strict mypy (`158` source files) | Passed |
 | Wheel build | v1.4.0 wheel + clean import smoke passed |

@@ -14,6 +14,11 @@ the last tag.
 
 ### Fixed
 
+- Keep `libaom-av1` in valid constant-quality mode by no longer combining
+  `-b:v 0` with incompatible VBV `maxrate`/`bufsize` options.
+- Make HEVC/AV1 random access predictable with a two-second maximum GOP, closed
+  libx265/HEVC VideoToolbox GOPs, and bit-depth-matched VideoToolbox HEVC profiles;
+  H.264 VideoToolbox now explicitly requests High/CABAC/max-two-B/closed-GOP output.
 - Restore concat-seam diagnostics on the Ubuntu CI FFmpeg by using the compatible
   two-output `scale2ref` filter instead of the newer two-input `scale=rw:rh` form.
 - Reject HDR input before encoding when neither a verified HDR-preserve policy nor an

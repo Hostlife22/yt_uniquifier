@@ -34,10 +34,28 @@ The actual bitstream regression checks profile, B-frame runs, IDR cadence and CA
 Changing this internal encoder policy increments the plan-hash policy revision, so
 resume cannot combine segments encoded under different GOP rules.
 
-NVENC, QSV, AMF and H.264 VideoToolbox remain **NOT VERIFIED** for this exact
-structure. Accepting `-g`/`-bf` arguments is insufficient: a backend must prove the
-resulting bitstream. AV1/HEVC keep their encoder-native GOP policy because the cited
-YouTube recommendation is specifically for H.264.
+H.264 VideoToolbox requests the same structure and is locally verified for High,
+CABAC, closed half-FPS IDR cadence and bounded B-frames. The Intel Mac hardware emits
+one consecutive B-frame even when the requested maximum is two, so it is not claimed
+as byte-for-byte equivalent to libx264. NVENC, QSV and AMF remain **NOT VERIFIED**.
+Accepting `-g`/`-bf` arguments is insufficient: each backend must prove its output on
+matching physical hardware.
+
+## HEVC and AV1 random access
+
+YouTube's documented half-frame-rate upload GOP applies specifically to H.264. The
+project does not present that rule as an HEVC/AV1 upload requirement. Instead, HEVC
+and AV1 use an internal two-second maximum GOP to make seeking, segment recovery and
+downstream inspection predictable:
+
+- libx265 and HEVC VideoToolbox emit closed IDR GOPs;
+- SDR HEVC VideoToolbox explicitly uses Main/8-bit and HDR uses Main10/10-bit;
+- SVT-AV1 and libaom-AV1 emit Main-profile 4:2:0 output with the same GOP bound;
+- libaom constant-quality mode uses `-b:v 0` without incompatible VBV options.
+
+These paths are bitstream-tested on the qualified Intel Mac; the three software paths
+also pass in the Debian 12 production container. NVENC/QSV/AMF and AV1 VideoToolbox
+remain hardware-qualification items.
 
 ## Bitrate ceilings (h264)
 

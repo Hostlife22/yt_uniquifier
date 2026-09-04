@@ -108,15 +108,18 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Availability probe covers job codec, pixel format, bit depth, resolution and RC.
 - [x] Encoder cache includes FFmpeg/OS/GPU signature; an exact-job success is
       invalidated after a later runtime encode/device failure and must be reprobed.
-- [x] libx264/libx265/SVT-AV1 software paths verified locally.
+- [x] libx264/libx265/SVT-AV1/libaom-AV1 software paths verified locally; software
+      HEVC/AV1 bitstreams also pass in the Debian 12 production container.
 - [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
-      H.264 + HEVC VideoToolbox verified on this Intel Mac, other vendors unavailable.
+      H.264 + HEVC VideoToolbox are bitstream-verified on this Intel Mac, while
+      other vendors and AV1 VideoToolbox are unavailable.
 - [ ] Per-device concurrency measured; jobs routed to a device, not only counted.
 - [x] libx264 H.264 policy is explicit and bitstream-tested: High Profile, CABAC,
       max two B-frames and closed half-frame-rate GOP; plan hash invalidates old
       resume artifacts when the policy changes.
-- [ ] NVENC/QSV/AMF/VideoToolbox and AV1/HEVC GOP/profile/level behavior is
-      bitstream-qualified per advertised target.
+- [ ] NVENC/QSV/AMF and AV1 VideoToolbox GOP/profile/level behavior is
+      bitstream-qualified per advertised target. Local libx265/SVT-AV1/libaom and
+      H.264/HEVC VideoToolbox paths have explicit, real-output coverage.
 - [x] Hardware-first is not implicit in quality-first mode; `quality` is default and
       `balanced|speed` require an explicit environment policy.
 
@@ -208,8 +211,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local test gate pass (`1601 passed`, `2 skipped`);
-      local CI-equivalent core branch coverage is `82.36%` (`1462 passed`, one
+- [x] Ruff, strict mypy and full local test gate pass (`1617 passed`, `2 skipped`);
+      local CI-equivalent core branch coverage is `82.35%` (`1472 passed`, one
       expected skip), above the required 80%; remote commit gate remains required.
 - [x] CodeQL has zero open alerts before this change; post-push commit scan is a
       required final gate.
@@ -232,7 +235,7 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1601 passed, 2 skipped)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1617 passed, 2 skipped)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
@@ -246,9 +249,9 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1601 passed, 2 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1617 passed, 2 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
-- [x] CI-equivalent non-integration branch coverage gate: 82.36% (required: 80%).
+- [x] CI-equivalent non-integration branch coverage gate: 82.35% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
