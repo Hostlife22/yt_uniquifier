@@ -286,6 +286,16 @@ jobs:
           find . -maxdepth 1 -type f \
             \( -name '*.AppImage' -o -name '*.AppImage.zsync' \) -print
 
+      - name: Upload AppImage artifact for inspection
+        uses: actions/upload-artifact@v7
+        with:
+          name: yt-uniq-gui-AppImage
+          path: |
+            *.AppImage
+            *.AppImage.zsync
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Verify AppImage version and bundled tools
         env:
           QT_QPA_PLATFORM: offscreen
@@ -297,16 +307,6 @@ jobs:
           chmod +x "${appimage}"
           actual="$("${appimage}" --version)"
           test "${actual}" = "${expected}"
-
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: yt-uniq-gui-AppImage
-          path: |
-            *.AppImage
-            *.AppImage.zsync
-          retention-days: 14
-          if-no-files-found: error
 
   release:
     # Always assemble and verify a complete release candidate. Only the final

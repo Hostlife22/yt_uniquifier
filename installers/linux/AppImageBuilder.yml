@@ -4,7 +4,7 @@
 # `appimage-builder`. The recipe wraps the PyInstaller bundle
 # produced earlier in the same job and adds:
 #
-#   - A statically linked ffmpeg (johnvansickle.com nightly) so the
+#   - A pinned statically linked ffmpeg build so the
 #     AppImage is portable across glibc versions / distros without
 #     forcing the user to apt-install ffmpeg.
 #   - A .desktop entry + 256×256 icon so file managers / launchers
@@ -34,9 +34,8 @@ script:
   - rm -rf AppDir
   - mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
   - cp -r dist/yt-uniq-gui/. AppDir/usr/bin/
-  # Static ffmpeg — fetched from johnvansickle release tracker so the
-  # AppImage stays portable across glibc lines. Cached by the CI step
-  # that downloads it before invoking this recipe.
+  # Static ffmpeg — fetched and checksum-verified by the CI step before
+  # invoking this recipe so the AppImage stays portable across glibc lines.
   - cp .perf_cache/ffmpeg-static/ffmpeg AppDir/usr/bin/ffmpeg
   - cp .perf_cache/ffmpeg-static/ffprobe AppDir/usr/bin/ffprobe
   - chmod +x AppDir/usr/bin/ffmpeg AppDir/usr/bin/ffprobe
@@ -55,12 +54,47 @@ AppDir:
     # user runs `./yt-uniq-gui.AppImage some file with spaces.mp4`.
     exec_args: "$@"
 
+  # PyInstaller bundles Qt itself but deliberately leaves the Linux graphics
+  # and XCB ABI libraries to the host. AppImage users must not need to install
+  # those packages manually, so deploy the complete runtime closure here.
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: >-
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ noble
+          main restricted universe multiverse
+        key_url: >-
+          https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C
+      - sourceline: >-
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ noble-updates
+          main restricted universe multiverse
+      - sourceline: >-
+          deb [arch=amd64] http://security.ubuntu.com/ubuntu noble-security
+          main restricted universe multiverse
+    include:
+      - libdbus-1-3
+      - libegl1
+      - libfontconfig1
+      - libgl1
+      - libxkbcommon0
+      - libxcb-cursor0
+      - libxcb-icccm4
+      - libxcb-image0
+      - libxcb-keysyms1
+      - libxcb-randr0
+      - libxcb-render-util0
+      - libxcb-shape0
+      - libxcb-sync1
+      - libxcb-xfixes0
+      - libxcb-xkb1
+    exclude: []
+
   runtime:
     env:
-      # PyInstaller's bundled libs go in usr/bin/; AppImage's runtime
-      # cd's there before exec, so LD_LIBRARY_PATH does not need a
-      # second entry. PATH gets the bundled ffmpeg/ffprobe ahead of
-      # any system install.
+      # PyInstaller's bundled libs live in usr/bin while the APT-deployed
+      # graphics closure uses the conventional multiarch library paths.
+      APPDIR_LIBRARY_PATH: '${APPDIR}/usr/bin:${APPDIR}/usr/lib/x86_64-linux-gnu:${APPDIR}/lib/x86_64-linux-gnu'
+      # PATH gets the bundled ffmpeg/ffprobe ahead of any system install.
       PATH: '${APPDIR}/usr/bin:${PATH}'
       # PyQt6 platform-plugin discovery — point Qt at the libs that
       # PyInstaller staged so the AppImage does not need libxcb-* on
