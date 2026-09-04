@@ -45,6 +45,9 @@ the last tag.
 
 ### Fixed
 
+- Retry shared encoder admission when a concurrently released slot disappears
+  between atomic-create contention and inspection, instead of misreporting pool
+  corruption and aborting parallel segment processing.
 - Enforce the documented fail-fast policy for HDR-preserving
   `video.fit_aspect mode=pad_blur`; its `gblur` background is not validated in
   the HDR transfer domain, so operators must tonemap first or use crop/black-pad.

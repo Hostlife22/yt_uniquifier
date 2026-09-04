@@ -15,6 +15,7 @@ disk write access.
 from __future__ import annotations
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from yt_uniquifier.cli.app import app
@@ -55,8 +56,12 @@ def test_qa_help_exposes_explicit_registered_provenance() -> None:
     )
 
     assert result.exit_code == 0
-    assert "--plan-json" in result.output
-    assert "--registration-segment-sec" in result.output
+    # Typer/Rich styles each part of a long option separately.  ANSI escapes
+    # can therefore sit between the two hyphens on short CI terminals even
+    # though the rendered help visibly contains the correct option.
+    plain_help = unstyle(result.output)
+    assert "--plan-json" in plain_help
+    assert "--registration-segment-sec" in plain_help
 
 
 @pytest.mark.parametrize(

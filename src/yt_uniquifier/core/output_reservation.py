@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import socket
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -282,8 +283,24 @@ class RunAdmission:
                         os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                         0o600,
                     )
-                except (FileExistsError, PermissionError):
-                    if lock_path.is_symlink() or not lock_path.is_file():
+                except (FileExistsError, PermissionError) as exc:
+                    try:
+                        lock_mode = lock_path.lstat().st_mode
+                    except FileNotFoundError:
+                        # Another owner can release the slot between our O_EXCL
+                        # collision and the metadata check.  That is ordinary
+                        # contention, so retry the atomic create instead of
+                        # reporting a corrupt admission pool.
+                        if isinstance(exc, PermissionError):
+                            raise RunAdmissionError(
+                                f"could not access shared admission slot: {exc}"
+                            ) from exc
+                        continue
+                    except OSError as stat_exc:
+                        raise RunAdmissionError(
+                            f"could not inspect shared admission slot: {stat_exc}"
+                        ) from stat_exc
+                    if not stat.S_ISREG(lock_mode):
                         raise RunAdmissionError(
                             f"shared admission slot is not a regular file: {lock_path}"
                         ) from None

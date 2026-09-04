@@ -170,6 +170,40 @@ def test_shared_admission_enforces_capacity_and_reuses_released_slot(
     second.release()
 
 
+def test_shared_admission_retries_when_contended_slot_disappears(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent release after O_EXCL contention is not pool corruption."""
+    admission_dir = tmp_path / ".yt_uniquifier-admission"
+    admission_dir.mkdir()
+    (admission_dir / "capacity.json").write_text(json.dumps({
+        "schema_version": 1,
+        "capacity": 1,
+    }), encoding="utf-8")
+
+    real_open = os.open
+    collision_injected = False
+
+    def open_after_concurrent_release(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+    ) -> int:
+        nonlocal collision_injected
+        if Path(path).name == "slot-0000.lock" and not collision_injected:
+            collision_injected = True
+            raise FileExistsError(path)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", open_after_concurrent_release)
+    admission = RunAdmission.acquire(tmp_path, "run-after-release", 1)
+
+    assert collision_injected
+    assert admission.lock_path.is_file()
+    admission.release()
+
+
 def test_shared_admission_rejects_capacity_mismatch(tmp_path: Path) -> None:
     admission = RunAdmission.acquire(tmp_path, "run-a", 2)
     try:
