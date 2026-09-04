@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.models import Plan
 from yt_uniquifier.core.qa.corpus import Corpus
 from yt_uniquifier.core.qa.report import build_report, render_html, verdict, write_json
 
@@ -58,6 +60,24 @@ def qa_cmd(
         32, "--sscd-frames",
         help="Frame grid size used by --sscd (default 32, more = more precise + slower).",
     ),
+    plan_json: Path | None = typer.Option(
+        None,
+        "--plan-json",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help=(
+            "Exact serialized Plan provenance for registered metrics. Without it, "
+            "standalone QA reports only the unchanged raw metrics."
+        ),
+    ),
+    registration_segment_sec: float = typer.Option(
+        600.0,
+        "--registration-segment-sec",
+        min=1.0,
+        max=86400.0,
+        help="Segment target used by the original run represented by --plan-json.",
+    ),
 ) -> None:
     """Compute similarity metrics for an (input, output) pair."""
     if fast_qa:
@@ -67,9 +87,23 @@ def qa_cmd(
         if samples == 120:
             samples = 60
     try:
+        plan: Plan | None = None
+        if plan_json is not None:
+            try:
+                plan = Plan.model_validate_json(plan_json.read_text(encoding="utf-8"))
+            except (OSError, ValidationError) as exc:
+                raise YtUniquifierError(f"invalid --plan-json: {exc}") from exc
+            if input.stat().st_size != plan.source.size_bytes:
+                raise YtUniquifierError(
+                    "--plan-json source size does not match the supplied input"
+                )
+            plan = plan.model_copy(update={
+                "source": plan.source.model_copy(update={"path": input}),
+            })
         corpus = Corpus(corpus_dir) if vs_corpus else None
         report = build_report(
             input, output,
+            plan=plan,
             samples=samples,
             run_vmaf=not no_vmaf,
             run_audio_fp=not no_audio_fp,
@@ -78,6 +112,8 @@ def qa_cmd(
             vs_corpus=corpus,
             compute_sscd=sscd,
             sscd_frame_count=sscd_frames,
+            run_registered=plan is not None,
+            registration_target_segment_sec=registration_segment_sec,
         )
     except YtUniquifierError as exc:
         console.print(f"[red]error:[/red] {exc}")
@@ -102,6 +138,17 @@ def qa_cmd(
         console.print(f"  VMAF mean:        {report.vmaf_mean:.2f}")
     if report.ssim_mean is not None:
         console.print(f"  SSIM mean:        {report.ssim_mean:.4f}")
+    if report.vmaf_registered_mean is not None:
+        console.print(f"  VMAF registered:  {report.vmaf_registered_mean:.2f}")
+    if report.ssim_registered_mean is not None:
+        console.print(f"  SSIM registered:  {report.ssim_registered_mean:.4f}")
+    if report.sscd_registered_mean is not None:
+        console.print(f"  SSCD registered:  {report.sscd_registered_mean:.4f}")
+    if report.audio_fp_registered_hamming_per_frame is not None:
+        console.print(
+            "  Audio registered: "
+            f"{report.audio_fp_registered_hamming_per_frame:.2f} bits/frame"
+        )
     if report.audio_fp_similarity is not None:
         console.print(f"  Audio FP:         {report.audio_fp_similarity:.4f}")
     if report.cid_predict_self is not None:

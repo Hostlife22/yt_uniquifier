@@ -11,7 +11,12 @@ import pytest
 
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.media_validation import MediaInvariantFailure, MediaInvariantReport
-from yt_uniquifier.core.models import Plan, QAReport
+from yt_uniquifier.core.models import (
+    Plan,
+    QARegistration,
+    QARegistrationDetail,
+    QAReport,
+)
 from yt_uniquifier.core.qa import report as report_mod
 
 
@@ -125,6 +130,40 @@ def test_non_finite_quality_metric_cannot_pass() -> None:
     assert result.band == "red"
     assert result.quality == "fail"
     assert any("invalid VMAF" in reason for reason in result.quality_reasons)
+
+
+def test_registered_metrics_do_not_change_legacy_verdict() -> None:
+    registration = QARegistration(
+        reference_mode="plan_transformed",
+        plan_hash="ab" * 8,
+        run_seed=42,
+        video=QARegistrationDetail(
+            offset_sec=0.0,
+            drift_sec_per_hour=0.0,
+            compared_samples=100,
+            coverage_ratio=1.0,
+            confidence=1.0,
+        ),
+    )
+    baseline = report_mod.verdict(_report())
+    registered = report_mod.verdict(_report(
+        vmaf_registered_mean=10.0,
+        ssim_registered_mean=0.1,
+        registration=registration,
+    ))
+
+    assert registered == baseline
+
+
+def test_registered_metric_bounds_are_enforced() -> None:
+    with pytest.raises(ValueError):
+        _report(audio_fp_registered_hamming_per_frame=33.0)
+    with pytest.raises(ValueError):
+        QARegistrationDetail(
+            compared_samples=1,
+            coverage_ratio=1.1,
+            confidence=1.0,
+        )
 
 
 # --- build_report aggregation ------------------------------------------------
@@ -375,3 +414,31 @@ def test_render_html_writes_file(tmp_path: Path) -> None:
     assert "Correctness:" in html
     assert "Visual similarity:" in html
     assert r.input_md5 in html
+
+
+def test_render_html_separates_registered_metrics(tmp_path: Path) -> None:
+    registration = QARegistration(
+        reference_mode="plan_transformed",
+        plan_hash="cd" * 8,
+        run_seed=7,
+        audio=QARegistrationDetail(
+            offset_sec=0.1,
+            drift_sec_per_hour=0.2,
+            compared_samples=20,
+            coverage_ratio=0.9,
+            confidence=0.8,
+        ),
+    )
+    report = _report(
+        ssim_registered_mean=0.998,
+        audio_fp_registered_hamming_per_frame=2.0,
+        registration=registration,
+    )
+    destination = tmp_path / "registered.html"
+
+    report_mod.render_html(report, plan=None, dest=destination)
+    html = destination.read_text(encoding="utf-8")
+
+    assert "Raw source/output metrics" in html
+    assert "Plan-registered metrics" in html
+    assert "0.9980" in html

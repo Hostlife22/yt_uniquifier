@@ -2,6 +2,10 @@
 
 Status: proposed — [GitHub RFC #12](https://github.com/Hostlife22/yt_uniquifier/issues/12)
 
+Implementation status: prepared and locally qualified on
+`feat/rfc-12-registered-qa`; this does not constitute RFC acceptance and the branch
+must not merge before the required comment window and maintainer decision.
+
 SemVer classification: MINOR (additive QA fields and CLI options).
 
 ## Problem

@@ -79,7 +79,7 @@
 </div>
 
 <div class="section">
-  <h2>Similarity metrics</h2>
+  <h2>Raw source/output metrics</h2>
   <table>
     <tr>
       <th>pHash similarity <small>(1.0 = identical)</small></th>
@@ -120,6 +120,31 @@
     </tr>
   </table>
 </div>
+
+{% if report.registration %}
+<div class="section">
+  <h2>Plan-registered metrics</h2>
+  <p>
+    The visual reference replays the recorded transform plan and run seed into
+    lossless FFV1. These diagnostics are shown separately and do not change the
+    production verdict or the historical raw fields.
+  </p>
+  <table>
+    <tr><th>Reference mode</th><td><code>{{ report.registration.reference_mode }}</code></td></tr>
+    <tr><th>Plan / seed</th><td><code>{{ report.registration.plan_hash }}</code> / {{ report.registration.run_seed }}</td></tr>
+    <tr><th>Registered VMAF</th><td>{% if report.vmaf_registered_mean is not none %}{{ "%.2f"|format(report.vmaf_registered_mean) }}{% else %}<em>not available</em>{% endif %}</td></tr>
+    <tr><th>Registered SSIM</th><td>{% if report.ssim_registered_mean is not none %}{{ "%.4f"|format(report.ssim_registered_mean) }}{% else %}<em>not available</em>{% endif %}</td></tr>
+    <tr><th>Registered SSCD</th><td>{% if report.sscd_registered_mean is not none %}{{ "%.4f"|format(report.sscd_registered_mean) }}{% else %}<em>not available</em>{% endif %}</td></tr>
+    <tr><th>Registered audio Hamming</th><td>{% if report.audio_fp_registered_hamming_per_frame is not none %}{{ "%.2f"|format(report.audio_fp_registered_hamming_per_frame) }} bits/frame{% else %}<em>not available</em>{% endif %}</td></tr>
+    {% if report.registration.video %}
+    <tr><th>Video alignment</th><td>{{ report.registration.video.compared_samples }} samples, {{ "%.1f"|format(report.registration.video.coverage_ratio * 100) }}% coverage, confidence {{ "%.3f"|format(report.registration.video.confidence) }}{% if report.registration.video.offset_sec is not none %}, offset {{ "%+.3f"|format(report.registration.video.offset_sec) }} s{% endif %}{% if report.registration.video.note %}<br><small>{{ report.registration.video.note }}</small>{% endif %}</td></tr>
+    {% endif %}
+    {% if report.registration.audio %}
+    <tr><th>Audio alignment</th><td>{{ report.registration.audio.compared_samples }} frames, {{ "%.1f"|format(report.registration.audio.coverage_ratio * 100) }}% coverage, confidence {{ "%.3f"|format(report.registration.audio.confidence) }}{% if report.registration.audio.offset_sec is not none %}, offset {{ "%+.3f"|format(report.registration.audio.offset_sec) }} s{% endif %}{% if report.registration.audio.drift_sec_per_hour is not none %}, drift {{ "%+.3f"|format(report.registration.audio.drift_sec_per_hour) }} s/hour{% endif %}{% if report.registration.audio.note %}<br><small>{{ report.registration.audio.note }}</small>{% endif %}</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
 
 {% if plan %}
 <div class="section">

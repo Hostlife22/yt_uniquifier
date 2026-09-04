@@ -1,7 +1,7 @@
 # yt-uniquifier
 
 > Production-grade re-encoder with controlled, calibrated micro-transforms for
-> owned or licensed video content. **Current source version: v1.4.0** — stable API
+> owned or licensed video content. **Current source version: v1.5.0** — stable API
 > under SemVer, signed-ready Linux AppImage + unsigned macOS / Windows
 > bundles, WCAG 2.1 AA desktop GUI, optional FastAPI web UI + Docker image,
 > third-party plugin system, community profile marketplace, opt-in local

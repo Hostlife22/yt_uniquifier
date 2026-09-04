@@ -173,7 +173,8 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] Orchestrator enforces stream/duration/HDR correctness before success.
 - [x] Known QA topology/timestamp/decode correctness failures produce `INVALID`.
-- [ ] Raw and spatial/temporal registered quality metrics both reported.
+- [x] Raw and spatial/temporal registered quality metrics are both reported on the
+      RFC #12 implementation branch; merge awaits mandatory RFC acceptance.
 - [x] No low VMAF substitution and no pHash-as-quality fallback; SSIM is used only
       when VMAF is unavailable and retains its metric identity.
 - [x] Audio fingerprint uses ordered start/middle/tail windows for >600 s media and
@@ -181,7 +182,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] SSCD direction verified: higher cosine means higher similarity.
 - [x] SSCD midpoint frame extraction is batched into one cancellable FFmpeg runner
       process per file and returns the complete requested grid.
-- [ ] SSCD reports temporal coverage/confidence and supports registered comparison.
+- [x] SSCD reports bounded monotonic temporal coverage/confidence and supports a
+      cached registered comparison on the RFC #12 implementation branch.
 - [x] CLI/HTML similarity diagnostics are clearly separated from correctness/quality;
       structured JSON axis fields await an approved stable-schema RFC.
 - [x] Corpus IDs/content cache survive move and invalidate on content change; legacy
@@ -266,7 +268,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.4.0 main
 
-- [x] Fully provisioned `make check`: 1639 passed, 47 expected skips; fault-injection
+- [x] Fully provisioned `make check`: 1667 passed, 47 expected skips; fault-injection
       recovery matrix and three-round POSIX SIGKILL chaos gate passed on this Mac.
 - [x] CI-equivalent non-integration branch coverage gate: 82.35% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case

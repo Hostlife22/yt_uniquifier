@@ -1,4 +1,124 @@
 {
+  "$defs": {
+    "QARegistration": {
+      "additionalProperties": false,
+      "description": "Provenance and per-domain evidence for registered QA metrics.",
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QARegistrationDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plan_hash": {
+          "title": "Plan Hash",
+          "type": "string"
+        },
+        "reference_mode": {
+          "const": "plan_transformed",
+          "title": "Reference Mode",
+          "type": "string"
+        },
+        "run_seed": {
+          "title": "Run Seed",
+          "type": "integer"
+        },
+        "video": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QARegistrationDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "reference_mode",
+        "plan_hash",
+        "run_seed"
+      ],
+      "title": "QARegistration",
+      "type": "object"
+    },
+    "QARegistrationDetail": {
+      "additionalProperties": false,
+      "description": "Bounded alignment evidence for one registered QA media domain.",
+      "properties": {
+        "compared_samples": {
+          "minimum": 0,
+          "title": "Compared Samples",
+          "type": "integer"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "coverage_ratio": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coverage Ratio",
+          "type": "number"
+        },
+        "drift_sec_per_hour": {
+          "anyOf": [
+            {
+              "maximum": 3600.0,
+              "minimum": -3600.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drift Sec Per Hour"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "offset_sec": {
+          "anyOf": [
+            {
+              "maximum": 30.0,
+              "minimum": -30.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Offset Sec"
+        }
+      },
+      "required": [
+        "compared_samples",
+        "coverage_ratio",
+        "confidence"
+      ],
+      "title": "QARegistrationDetail",
+      "type": "object"
+    }
+  },
   "description": "Aggregated QA metrics for one (input, output) pair.",
   "properties": {
     "audio_fp_hamming_per_frame": {
@@ -51,6 +171,20 @@
       ],
       "default": null,
       "title": "Audio Fp Match Confidence"
+    },
+    "audio_fp_registered_hamming_per_frame": {
+      "anyOf": [
+        {
+          "maximum": 32.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audio Fp Registered Hamming Per Frame"
     },
     "audio_fp_similarity": {
       "anyOf": [
@@ -158,6 +292,17 @@
       "title": "Phash Similarity",
       "type": "number"
     },
+    "registration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QARegistration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "sscd_mean": {
       "anyOf": [
         {
@@ -197,6 +342,20 @@
       "default": null,
       "title": "Sscd Per Frame"
     },
+    "sscd_registered_mean": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sscd Registered Mean"
+    },
     "ssim_mean": {
       "anyOf": [
         {
@@ -209,6 +368,20 @@
       "default": null,
       "title": "Ssim Mean"
     },
+    "ssim_registered_mean": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ssim Registered Mean"
+    },
     "vmaf_mean": {
       "anyOf": [
         {
@@ -220,6 +393,20 @@
       ],
       "default": null,
       "title": "Vmaf Mean"
+    },
+    "vmaf_registered_mean": {
+      "anyOf": [
+        {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vmaf Registered Mean"
     },
     "weakest_chunk_sec": {
       "anyOf": [

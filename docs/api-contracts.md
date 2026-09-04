@@ -50,7 +50,7 @@ Every model below has its full JSON schema locked by
 | `SegmentationConfig` | `core/models.py` | `extra="forbid"`. v0.8.0 added `mode="scene"` opt-in. |
 | `Profile` | `core/models.py` | `extra="forbid"`. The user-facing YAML schema; v1.3 adds `skip_watermark_check`. |
 | `Plan` | `core/models.py` | `frozen=True`. Carries `plan_hash` (resume key) + `run_seed` (NOT part of the hash). |
-| `QAReport` | `core/models.py` | `frozen=True`. All ML/fingerprint metrics are `Optional` so omitting an extra leaves the report shape unchanged. |
+| `QAReport` | `core/models.py` | `frozen=True`. All ML/fingerprint metrics are `Optional`; v1.5 adds nullable plan-registered metric fields and nested bounded registration provenance while preserving all raw fields. |
 
 ### Dataclasses (`stable`)
 

@@ -289,6 +289,31 @@ class Segment(BaseModel):
     sha256: str | None = None
 
 
+class QARegistrationDetail(BaseModel):
+    """Bounded alignment evidence for one registered QA media domain."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    offset_sec: float | None = Field(default=None, ge=-30.0, le=30.0)
+    drift_sec_per_hour: float | None = Field(default=None, ge=-3600.0, le=3600.0)
+    compared_samples: int = Field(ge=0)
+    coverage_ratio: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    note: str | None = None
+
+
+class QARegistration(BaseModel):
+    """Provenance and per-domain evidence for registered QA metrics."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reference_mode: Literal["plan_transformed"]
+    plan_hash: str
+    run_seed: int
+    video: QARegistrationDetail | None = None
+    audio: QARegistrationDetail | None = None
+
+
 class QAReport(BaseModel):
     """Aggregated QA metrics for one (input, output) pair."""
 
@@ -335,3 +360,12 @@ class QAReport(BaseModel):
     sscd_mean: float | None = None
     sscd_min: float | None = None
     sscd_per_frame: list[float] | None = None
+    # RFC #12 — additive, plan-aware diagnostics. Existing raw metrics and
+    # verdict semantics remain unchanged.
+    vmaf_registered_mean: float | None = Field(default=None, ge=0.0, le=100.0)
+    ssim_registered_mean: float | None = Field(default=None, ge=-1.0, le=1.0)
+    sscd_registered_mean: float | None = Field(default=None, ge=-1.0, le=1.0)
+    audio_fp_registered_hamming_per_frame: float | None = Field(
+        default=None, ge=0.0, le=32.0,
+    )
+    registration: QARegistration | None = None

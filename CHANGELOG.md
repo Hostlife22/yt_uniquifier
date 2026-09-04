@@ -20,6 +20,13 @@ the last tag.
 
 ### Added
 
+- Add RFC #12 plan-registered VMAF, SSIM, SSCD and ordered audio-fingerprint
+  diagnostics without changing existing raw fields or verdict semantics. Automatic
+  run/batch QA replays the exact transform graph and segment seeds into a bounded
+  lossless reference; standalone CLI use requires an explicit serialized Plan.
+- Add bounded monotonic SSCD alignment, bounded audio offset/drift alignment,
+  content/tool/seed-keyed reference embedding caches, explicit coverage/confidence
+  provenance and separate raw/registered HTML sections.
 - Add a central HDR/audio/temporal/container compatibility graph, preflight
   enforcement for generic order/pair conflicts, and an operator reference covering
   the purpose, order, quality, speed, HDR and VFR behavior of all built-in transforms.

@@ -46,6 +46,19 @@ def test_subcommand_help_is_wired(command: str) -> None:
     assert result.output, f"empty help output for {command}"
 
 
+def test_qa_help_exposes_explicit_registered_provenance() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["qa", "--help"],
+        env={"COLUMNS": "240"},
+        terminal_width=240,
+    )
+
+    assert result.exit_code == 0
+    assert "--plan-json" in result.output
+    assert "--registration-segment-sec" in result.output
+
+
 @pytest.mark.parametrize(
     "group",
     [
