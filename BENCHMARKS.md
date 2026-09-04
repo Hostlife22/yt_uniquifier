@@ -59,8 +59,8 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
 | Full local quality gate | 1693 passed, 47 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:49 | Combined RFC #11/#12 integration, version-contract and production-hardening changes do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
-| Remote release-candidate matrix | commit `91c2091`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.25% | No-upscale, registered QA and admission-race fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
-| CI-equivalent coverage | 1494 passed, 12 expected skips, 198 deselected; 81.25% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
+| Remote release-candidate matrix | commit `c0aaafd`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.23% | No-upscale, registered QA, admission-race and version-contract fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
+| CI-equivalent coverage | 1497 passed, 12 expected skips, 198 deselected; 81.23% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
 
 The no-upscale and raw/registered metric contracts from GitHub RFC #11 and #12 are
 integrated in `main` under the documented repository-owner review-window override.

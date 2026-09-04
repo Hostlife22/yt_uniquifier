@@ -392,7 +392,7 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Status:** implemented in `main` under RFC #12 — existing raw metrics and verdicts
   remain stable; plan-aware FFV1 replay, local PTS reset, bounded audio/SSCD alignment,
   content/tool/plan/seed-keyed SSCD cache and explicit coverage/confidence are locally
-  verified. The six-cell native CI matrix passed at `91c2091`; licensed natural-content
+  verified. The six-cell native CI matrix passed at `c0aaafd`; licensed natural-content
   thresholds remain deliberately unverified.
 
 ### 5.3 Calibration v2 within current engine

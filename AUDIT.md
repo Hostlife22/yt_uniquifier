@@ -21,7 +21,7 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
 - Ruff и strict mypy: passed (`162` source files).
 - Combined RFC integration `make check`: `1693 passed, 47 expected skips` на полностью
   установленном optional environment; subsequent admission/CLI fixes passed the
-  six-cell remote Linux/macOS/Windows matrix at commit `91c2091`.
+  six-cell remote Linux/macOS/Windows matrix at commit `c0aaafd`.
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -458,10 +458,9 @@ encoder in preflight; vendor-specific driver-reset behavior remains `NOT VERIFIE
 
 ## Security findings
 
-CodeQL run для `91c2091` завершился, но выявил alert #13 в test-only
-monkeypatch: fallback `os.open` mode был `0o777`. В current candidate mode сужен до
-`0o600`, а workflow переведён на `codeql-action@v4`; closure должен подтвердить
-post-push scan.
+CodeQL v4 run `33893258792` для `c0aaafd` завершился успешно:
+test-only alert #13 закрыт как fixed после сужения fallback `os.open` mode
+с `0o777` до `0o600`; GitHub API подтверждает 0 open CodeQL alerts.
 Path validation и plugin capability/audit-hook defenses выглядят осмысленно.
 
 Оставшиеся operational risks:
@@ -502,7 +501,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | Gate | Result |
 |---|---|
 | Full `make check` | Combined RFC gate: 1693 passed, 47 expected hardware/optional skips on fully provisioned macOS |
-| Branch coverage gate | 81.25% (`1494 passed`, required 80%) on remote Ubuntu/Python 3.12 commit `91c2091` |
+| Branch coverage gate | 81.23% (`1497 passed`, required 80%) on remote Ubuntu/Python 3.12 commit `c0aaafd` |
 | Ruff | Passed |
 | Strict mypy (`162` source files) | Passed |
 | Wheel build | v1.5.0 wheel build passed |
@@ -527,9 +526,9 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | 1h/2h/3h+ synthetic | Passed with exact decoded frame counts; natural movie corpus NOT VERIFIED |
 | Crash/no-op resume | Passed; completed segment/audio bytes+mtime reused, persisted seed restored, decoded A/V SHA-256 equal |
 
-GitHub check на 2026-09-04: six-cell CI и CodeQL workflow для `91c2091`
-завершились успешно; RFC #11/#12 закрыты как completed. Выявленный
-alert #13 исправлен в current candidate и ожидает post-push closure.
+GitHub check на 2026-09-04: six-cell CI и CodeQL v4 для
+`c0aaafd` завершились успешно; RFC #11/#12 закрыты как completed;
+open CodeQL alerts — 0.
 
 Подробные приоритеты: `RISK_REGISTER.md`. План локальных исправлений без rewrite:
 `PRODUCTION_PLAN.md`. Измерения: `BENCHMARKS.md`.

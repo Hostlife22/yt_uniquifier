@@ -165,7 +165,7 @@ release blockers, поэтому checklist намеренно не отмече�
       no fixed one-hour concat/sanitizer termination remains.
 - [x] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
       shell-grandchild/watchdog paths pass locally and the six-cell native CI matrix
-      passed at commit `91c2091`.
+      passed at commit `c0aaafd`.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [x] Run/plan/job/segment correlation IDs appear in structured logs/events.
 - [x] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
@@ -228,11 +228,10 @@ release blockers, поэтому checklist намеренно не отмече�
 ## 12. Security and supply chain
 
 - [x] Ruff, strict mypy and combined-RFC full local test gate pass (`1693 passed`,
-      `47 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.25%`
-      (`1494 passed`, 12 expected skips), above the required 80%.
-- [ ] CodeQL workflow passed on `91c2091`, but alert #13 identified a permissive
-      fallback mode in a test helper. The helper is corrected and the workflow is
-      migrated to `codeql-action@v4`; require a clean post-push scan before release.
+      `47 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`
+      (`1497 passed`, 12 expected skips), above the required 80%.
+- [x] CodeQL v4 run `33893258792` passed on `c0aaafd`; alert #13 is fixed and the
+      GitHub API reports zero open code-scanning alerts.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
 - [x] Plugin manifest/sandbox/allowlist tests pass; pre-import disable documented.
@@ -274,7 +273,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 - [x] Fully provisioned combined-RFC `make check`: 1693 passed, 47 expected skips;
       fault-injection recovery matrix and three-round POSIX SIGKILL chaos gate passed.
-- [x] Remote non-integration branch coverage gate: 81.25% (required: 80%).
+- [x] Remote non-integration branch coverage gate: 81.23% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
       correctly skipped after exact job capability rejection.
 - [x] Ruff: passed.
