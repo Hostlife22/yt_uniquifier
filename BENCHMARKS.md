@@ -1,10 +1,10 @@
 # Benchmark Methodology and Baseline
 
 Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
-2026-09-04. Результаты относятся только к указанному локальному environment и не
+2026-09-05. Результаты относятся только к указанному локальному environment и не
 экстраполируются автоматически на фильмы/HDR/GPU.
 
-## Production acceptance delta — 2026-09-04 (post-v1.5.0 integration)
+## Production acceptance delta — 2026-09-05 (post-v1.5.0 integration)
 
 На Intel macOS с Homebrew FFmpeg 9.0.1 дополнительно подтверждено:
 
@@ -44,8 +44,8 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Audio layout/rate matrix | 24 real-FFmpeg cases: 7 effects × mono/stereo/5.1 plus 44.1/48/96 kHz | Tested effects preserve channel count; Haas stays stereo-only fail-closed; final rate is 48 kHz |
 | Windowed audio boundary events | Six pulse markers before/on/after the 60 s and 120 s crossfades retained exactly once within 30 ms; 180 s duration stayed within one AAC-frame budget | Crossfade assembly does not drop, repeat or accumulate timing error on the synthetic divergent-EQ fixture |
 | libx264 H.264 upload structure | 24 FPS output: High Profile, CABAC, max B-run 2, four IDR GOP starts across 48 frames with max interval 12 | Software H.264 no longer relies on library GOP/B-frame defaults; other locally available codecs are covered by the separate matrix below |
-| Local HEVC/AV1 bitstream matrix | 5/5: libx265, SVT-AV1, libaom-AV1, H.264 and HEVC VideoToolbox; 144/144 frames, tagged BT.709, expected profiles/pixel formats and bounded GOPs | VideoToolbox HEVC profile is pinned to Main/Main10 by output depth; H.264 VideoToolbox produced CABAC/IDR and a one-frame B-run on this Intel Mac; GitHub Apple Silicon produced a three-frame run because VideoToolbox exposes frame reordering as a boolean |
-| Strict self-hosted qualification harness | Extended local mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 22 passed, 36 unrequested cases skipped in 157.07 s; JUnit plus 39 hashed/probed media artifacts collected | Bitstream, 1080p/4K SDR, exact VFR PTS/frame count, HEVC HLG, static-HDR10 fail-closed policy, cancellation, fallback and two-session concurrency passed on this Intel Mac; NVENC/QSV/AMF remain `NOT VERIFIED` |
+| Local HEVC/AV1 bitstream matrix | 5/5: libx265, SVT-AV1, libaom-AV1, H.264 and HEVC VideoToolbox; 144/144 frames, tagged BT.709, expected profiles/pixel formats and bounded GOPs | VideoToolbox HEVC profile is pinned to Main/Main10 by output depth; H.264 VideoToolbox produced CABAC/IDR and a one-frame B-run on this Intel Mac; GitHub Apple Silicon produced a three-frame run and now receives explicit half-second IDR requests because its backend can accept `-g` yet exceed it under load |
+| Strict self-hosted qualification harness | Final run `33966394736` on `6aa0720`, mandatory selection `h264_videotoolbox,hevc_videotoolbox`: 22 passed, 36 unrequested cases skipped in 162.43 s; JUnit plus 39 hashed/probed media artifacts collected | Bitstream, 1080p/4K SDR, exact VFR PTS/frame count, HEVC HLG, static-HDR10 fail-closed policy, cancellation, fallback and two-session concurrency passed on this Intel Mac; ephemeral runner removed itself after the job; NVENC/QSV/AMF remain `NOT VERIFIED` |
 | Debian 12 production container bitstream matrix | FFmpeg 5.1.9: libx265/SVT-AV1/libaom-AV1 3 passed; two unavailable VideoToolbox cases skipped | Current wheel and software encoder policy work on the shipped Linux runtime, including libaom constant-quality mode |
 | HEVC/AV1 two-second GOP synthetic delta | 6 s, 640x360, 24 FPS: keyframes 0/48/96; file-size change vs defaults: x265 +1.48%, SVT +0.96%, libaom +1.06%, HEVC VideoToolbox -3.57% | Small synthetic result supports predictable random access; natural-corpus size/quality impact remains required |
 | Multi-audio codec/container matrix | AAC main + Opus secondary across MP4/MOV/MKV | MP4/MOV transcode unsupported passthrough to AAC; MKV preserves Opus and stream metadata |
@@ -60,8 +60,9 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
 | Full local quality gate | 1725 passed, 55 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 15:53 | HDR colour-domain, exact long-form audio-tail, resource-budget and fault-lab additions do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
-| Remote release-candidate matrix | commit `c0aaafd`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.23% | No-upscale, registered QA, admission-race and version-contract fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
-| Manual release assembly | commit `f477ff5`, run `33905649508`: Linux/macOS/Windows GUI bundles and AppImage passed embedded-version/runtime checks; downloaded 1.05 GB candidate passed ZIP integrity, all six SHA-256 entries and all seven keyless cosign-bundle verifications | The workflow can assemble a complete v1.5.0 candidate without publishing a tag; CycloneDX 1.5 contains 59 components and the AppImage independently reports `1.5.0` in clean Ubuntu amd64 |
+| Remote release-candidate matrix | commit `6aa0720`, run `33966344170`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; CodeQL run `33966344225` passed with zero open alerts | The Apple Silicon H.264 VideoToolbox IDR regression and all supported native CI OS contracts pass on the final tree; full vendor hardware qualification remains separate |
+| Scheduled performance replacement | commit `6aa0720`, run `33966849505`: 20 s `cid_aware` stereo fixture completed in 58.77 s with 431,932 KiB peak RSS; baseline 58.31 s / 430,976 KiB, deltas +0.8% / +0.2% | Verdict `within threshold`; regression issue step skipped. The old mono fixture failure was a correct Haas stereo preflight rejection, not a timing regression |
+| Manual release assembly | commit `3ec20ce`, run `33964477926`: Linux/macOS/Windows GUI bundles and AppImage passed embedded-version/runtime checks; downloaded candidate passed ZIP integrity, all six SHA-256 entries and all seven keyless cosign-bundle verifications | The workflow can assemble a complete v1.5.0 candidate without publishing a tag; CycloneDX 1.5 contains 59 components and the AppImage independently reports `1.5.0` in clean Ubuntu amd64 |
 | CI-equivalent coverage | 1497 passed, 12 expected skips, 198 deselected; 81.23% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
 
 The no-upscale and raw/registered metric contracts from GitHub RFC #11 and #12 are
@@ -115,8 +116,9 @@ contain no NaN/Inf/denormal samples, peak near -1.46 dBFS, do not exceed the sou
 maximum adjacent-sample jump, and produced no sustained out-of-phase interval in FFmpeg
 `aphasemeter`. Human speech/music listening remains `NOT VERIFIED`.
 
-Current-tree platform packaging/runtime smoke also passed: strict Intel VideoToolbox
-`22 passed / 36 unrequested skips` in 163.10 s with 39 probed/hashed media artifacts;
+Current-tree platform packaging/runtime smoke also passed: Actions hardware run
+`33966394736` on `6aa0720` reports strict Intel VideoToolbox
+`22 passed / 36 unrequested skips` in 162.43 s with 39 probed/hashed media artifacts;
 fresh Docker `linux/amd64` and QEMU `linux/arm64` images both completed build, A/V CLI
 encode, ffprobe codec check and `/healthz`. Compose runtime inspection confirmed
 `NanoCpus=4e9`, `Memory=12884901888`, `PidsLimit=512` and a healthy service.
@@ -305,7 +307,7 @@ Photometric-only `color_eq`/`noise` path не блокируется. Это saf
 | Rubber Band | Real FFmpeg variability integration — PASS |
 | SSCD model | Self >0.999; unrelated clip <0.95 — PASS |
 | 4K AV1 profiles | Real SVT-AV1/profile integration — PASS |
-| VideoToolbox hardware | H.264/HEVC 1080p/4K SDR, HLG Main10, VFR, 2 sessions, cancellation/fallback, `allow_sw=0` — PASS; static HDR10 metadata fail-closed |
+| VideoToolbox hardware | H.264/HEVC 1080p/4K SDR, HLG Main10, VFR, 2 sessions, cancellation/fallback, `allow_sw=0` — PASS; H.264 uses explicit half-second IDRs; static HDR10 metadata fail-closed |
 
 ## Synthetic long-form results — v1.4.0 candidate
 

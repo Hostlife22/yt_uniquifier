@@ -56,7 +56,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Undefined HDR→8-bit output policy and tonemap after another video transform
       fail before encode; HDR-preserving colour operations use explicit planar-float
       RGB linear light and return to the source matrix/10-bit format.
-- [ ] NVENC/QSV/AMF/VideoToolbox/x265/AV1 HDR capability tested per advertised target.
+- [ ] Full NVENC/QSV/AMF/VideoToolbox/x265/AV1 HDR capability tested per advertised
+      target; x265 HDR10/HLG and Intel HEVC VideoToolbox HLG pass, while static HDR10
+      VideoToolbox fails closed and the remaining vendor/natural matrix is open.
 
 ## 4. Containers and cadence
 
@@ -123,14 +125,20 @@ release blockers, поэтому checklist намеренно не отмече�
       HEVC/AV1 bitstreams also pass in the Debian 12 production container.
 - [x] Manual self-hosted hardware qualification fails closed for explicitly requested
       encoders and retains JUnit, encoded media, hashes, FFprobe/FFmpeg and GPU evidence;
-      its mandatory VideoToolbox mode passed on this Mac.
-- [ ] Advertised NVENC/QSV/AMF/VideoToolbox paths verified on real runner hardware;
-      H.264 + HEVC VideoToolbox are bitstream-verified on this Intel Mac, while
-      other vendors and AV1 VideoToolbox are unavailable.
-- [ ] Per-device concurrency measured; jobs routed to a device, not only counted.
+      final run `33966394736` on `6aa0720` passed 22 mandatory VideoToolbox tests,
+      retained 39 hashed/probed media artifacts and removed its ephemeral runner.
+- [x] H.264 + HEVC VideoToolbox are bitstream-verified on this Intel Mac for
+      SDR/HLG, CFR/VFR, 1080p/4K, GOP/profile/level, two sessions, cancellation and
+      fallback; hosted Apple Silicon H.264 passes the explicit half-second IDR contract.
+- [ ] Advertised NVENC/QSV/AMF and AV1 VideoToolbox paths verified on matching real
+      runner hardware; these devices are unavailable on the current Mac.
+- [ ] Per-device concurrency measured and jobs routed to a device, not only counted;
+      the two-session Intel VideoToolbox limit is measured, routing remains open.
 - [x] libx264 H.264 policy is explicit and bitstream-tested: High Profile, CABAC,
       max two B-frames and closed half-frame-rate GOP; plan hash invalidates old
       resume artifacts when the policy changes.
+- [x] H.264 VideoToolbox requests the same bounded GOP plus explicit half-second IDRs;
+      this prevents the 21-frame gap observed after Apple Silicon accepted `-g 12`.
 - [ ] NVENC/QSV/AMF and AV1 VideoToolbox GOP/profile/level behavior is
       bitstream-qualified per advertised target. Local libx265/SVT-AV1/libaom and
       H.264/HEVC VideoToolbox paths have explicit, real-output coverage.
@@ -174,7 +182,7 @@ release blockers, поэтому checklist намеренно не отмече�
       no fixed one-hour concat/sanitizer termination remains.
 - [x] Cancellation terminates complete process tree on Linux/macOS/Windows; POSIX
       shell-grandchild/watchdog paths pass locally and the six-cell native CI matrix
-      passed at commit `c0aaafd`.
+      passed in final run `33966344170` at commit `6aa0720`.
 - [x] Parallel first failure cancels sibling work even without external token.
 - [x] Run/plan/job/segment correlation IDs appear in structured logs/events.
 - [x] Metrics distinguish queued, active, failed, cancelled, resumed and completed work.
@@ -238,10 +246,12 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 12. Security and supply chain
 
-- [x] Ruff, strict mypy and full local production gate pass (`1699 passed`,
+- [x] Ruff, strict mypy and full local production gate pass (`1725 passed`,
       `55 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`
       (`1497 passed`, 12 expected skips), above the required 80%.
-- [x] CodeQL v4 run `33893258792` passed on `c0aaafd`; alert #13 is fixed and the
+- [x] Final six-cell CI run `33966344170` passed on `6aa0720` for
+      Linux/macOS/Windows with Python 3.11/3.12.
+- [x] CodeQL v4 run `33966344225` passed on `6aa0720`; alert #13 is fixed and the
       GitHub API reports zero open code-scanning alerts.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
@@ -250,7 +260,7 @@ release blockers, поэтому checklist намеренно не отмече�
       malformed, negative, duplicate, transfer-encoding-conflicting and over-limit
       Content-Length fail closed.
 - [x] Container runs as non-root UID 1000; input mount is documented read-only.
-- [x] Manual release workflow run `33905649508` generated Linux/macOS/Windows GUI
+- [x] Manual release workflow run `33964477926` generated Linux/macOS/Windows GUI
       bundles, AppImage, CycloneDX 1.5 SBOM, verified SHA-256 checksums and seven
       keyless cosign bundles without publishing a tag. The downloaded candidate and
       clean-Ubuntu AppImage runtime were independently verified locally.
@@ -266,13 +276,13 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] `make test-unit`
 - [x] `make test-integration`
 - [x] Full contracts/property/GUI/offscreen suite (`make check`:
-      1699 passed, 55 expected hardware-selection/optional skips)
+      1725 passed, 55 expected hardware-selection/optional skips)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
 - [x] `make build-wheel` produced `yt_uniquifier-1.5.0-py3-none-any.whl`
 - [x] `make build` GUI artifact on local macOS; Linux/macOS/Windows GUI archives and
-      embedded `1.5.0` versions passed manual release run `33905649508`.
+      embedded `1.5.0` versions passed manual release run `33964477926`.
 - [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
       and `/readyz` pass, shared resource-registry path is writable.
 - [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and
@@ -281,6 +291,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] One-command rights-attested current/proposed corpus runner is prepared under
       `validation-corpus/`; exact Plan, VMAF/SSIM/PSNR/LUFS/true peak/size/time/RAM and
       JSON/CSV/HTML output passed synthetic smoke. Licensed media remains `NOT VERIFIED`.
+- [x] Scheduled performance workflow on final `6aa0720` passed in run `33966849505`:
+      wall time +0.8% and peak RSS +0.2% against the prior same-runner baseline,
+      within the 15% hard threshold; no regression issue was created.
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
@@ -299,6 +312,8 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Подтверждённые local P0 correctness regressions исправлены.
 - [x] HDR10/HDR→SDR, Rubber Band и SSCD real model verified locally.
 - [x] Synthetic 1h/2h/3h, 4K AV1 и VideoToolbox H.264/HEVC smoke verified locally.
+- [x] Final `6aa0720` evidence: six-cell CI `33966344170`, CodeQL `33966344225`,
+      Intel hardware qualification `33966394736` and perf regression `33966849505`.
 - [ ] Полная advertised production matrix: **BLOCKED** для licensed 2 h/3 h+ long-form,
       NVENC/QSV/AMF, NFS cross-host и YouTube round-trip. HLG и VideoToolbox
       concurrency закрыты на текущем Intel Mac.

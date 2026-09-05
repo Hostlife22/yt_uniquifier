@@ -5,7 +5,7 @@ profile engine или QA system не создаются. План был сог�
 Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
-## Статус на 2026-09-04
+## Статус на 2026-09-05
 
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
@@ -23,8 +23,9 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
   licensed natural corpus ещё не готов.
 - **PARTIAL 2.4:** software CFR 23.976–60 и multi-segment VFR сохраняют decoded
   frames/cadence; non-zero input start PTS normalized; synthetic sparse long-GOP
-  seams, A/V impulses and PTS-based temporal jitter verified; hardware cadence и
-  natural long-GOP corpus pending.
+  seams, A/V impulses and PTS-based temporal jitter verified. H.264/HEVC
+  VideoToolbox cadence is qualified on the Intel Mac and hosted Apple Silicon H.264
+  passes the explicit IDR contract; NVENC/QSV/AMF and natural long-GOP corpus remain.
 - **VERIFIED locally:** HDR10/x265 and HDR→SDR, Rubber Band, real SSCD model, AV1 4K,
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
   crash/no-op resume, exact persisted-seed A/V reproducibility, SDR full/limited
@@ -316,13 +317,17 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   NVIDIA-aware cache key are active; a later segment runtime failure invalidates the
   exact-job success so the next preflight reprobes it; unverified `av1_vulkan` is
   disabled. The libx264 H.264 path requests an exact High/CABAC/max-2-B/closed
-  half-FPS structure. VideoToolbox requests High/CABAC/frame reordering/closed GOP;
+  half-FPS structure. VideoToolbox requests High/CABAC/frame reordering/closed GOP
+  plus explicit half-second IDRs because Apple Silicon can accept `-g` while
+  intermittently exceeding it under asynchronous load;
   its device-selected B-frame runs are bounded at one on qualified Intel hardware and
   three on GitHub Apple Silicon. libx265, SVT-AV1, libaom-AV1 and local HEVC
   VideoToolbox have real-output two-second GOP qualification. The internal plan-hash
   revision prevents mixed-policy resume. A manual trusted self-hosted hardware
   workflow now fails closed on explicitly requested encoders and retains bitstream
-  evidence. Intel VideoToolbox now additionally passes SDR/HLG, CFR/VFR, 1080p/4K,
+  evidence. Final run `33966394736` on `6aa0720` passed `22` applicable tests with
+  `36` unrequested-vendor skips. Intel VideoToolbox additionally passes SDR/HLG,
+  CFR/VFR, 1080p/4K,
   concurrent sessions, cancellation and simulated device-loss software fallback.
   Static HDR10 metadata fails closed. Per-GPU routing and actual NVENC/QSV/AMF plus
   AV1 VideoToolbox device runs remain open.
@@ -404,8 +409,8 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Status:** implemented in `main` under RFC #12 — existing raw metrics and verdicts
   remain stable; plan-aware FFV1 replay, local PTS reset, bounded audio/SSCD alignment,
   content/tool/plan/seed-keyed SSCD cache and explicit coverage/confidence are locally
-  verified. The six-cell native CI matrix passed at `c0aaafd`; licensed natural-content
-  thresholds remain deliberately unverified.
+  verified. The six-cell native CI matrix passed in run `33966344170` at `6aa0720`;
+  licensed natural-content thresholds remain deliberately unverified.
 
 ### 5.3 Calibration v2 within current engine
 
@@ -514,10 +519,13 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
   Frozen Linux/macOS/Windows and AppImage versions are checked before upload. Docker
   buildx emits SBOM/provenance and signs the digest. `actionlint`
   passes after shell-safe artifact discovery fixes. Gitleaks found no secrets in 324
-  commits or ~174 MB local artifacts. Manual run `33905649508` passed every native
-  GUI/AppImage/assembly job at `f477ff5`; its downloaded candidate passed ZIP,
+  commits or ~174 MB local artifacts. Manual run `33964477926` passed every native
+  GUI/AppImage/assembly job at `3ec20ce`; its downloaded candidate passed ZIP,
   SHA-256, CycloneDX and all seven cosign-bundle checks locally. Actual immutable v1.5
   tag assets remain `NOT VERIFIED` because no release tag was created intentionally.
+  Final commit `6aa0720` additionally passed six-cell CI `33966344170`, CodeQL
+  `33966344225`, hardware qualification `33966394736` and performance regression
+  `33966849505`.
 
 ## Phase 7 — Documentation
 

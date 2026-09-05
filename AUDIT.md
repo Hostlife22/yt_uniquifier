@@ -16,12 +16,13 @@ probe, bounded streaming FFmpeg logs и stall watchdog, static HDR10 metadata
 contract, stream title/disposition validation, bounded persistent web run store и
 уникальная identity каждого queue-worker процесса.
 
-Post-fix verification на этом хосте (обновлено 2026-09-04):
+Post-fix verification на этом хосте (обновлено 2026-09-05):
 
 - Ruff и strict mypy: passed (`162` source files).
-- Combined production integration `make check`: `1699 passed, 55 expected skips` на полностью
-  установленном optional environment; subsequent admission/CLI fixes passed the
-  six-cell remote Linux/macOS/Windows matrix at commit `c0aaafd`.
+- Combined production integration `make check`: `1725 passed, 55 expected skips` на
+  полностью установленном optional environment. Final commit `6aa0720` passed all
+  six Linux/macOS/Windows Python 3.11/3.12 jobs in Actions run `33966344170`;
+  CodeQL run `33966344225` passed with zero open alerts.
 - 30 s `soft`: `752/752` decoded video frames, video start `0.000 s`, audio
   `29.991 s @ 48 kHz`, `SAR 1:1`, loudness `-14.0 LUFS`, chapters/subtitles и
   выбранные audio tracks сохраняются.
@@ -55,9 +56,12 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   confirms closed two-second HEVC GOPs for libx265/VideoToolbox and two-second AV1
   GOPs for SVT-AV1/libaom; H.264 VideoToolbox emits High/CABAC/IDR with a one-frame
   B-run on this Intel Mac and a three-frame run on GitHub's Apple Silicon runner.
-  A manual trusted self-hosted workflow now retains strict per-device
-  JUnit/media/FFprobe evidence, but NVENC/QSV/AMF and AV1 VideoToolbox remain
-  `NOT VERIFIED` until that workflow runs on matching physical hardware.
+  Apple Silicon intermittently exceeded the accepted `-g 12` interval under load;
+  commit `6aa0720` adds an explicit half-second IDR request and both hosted macOS jobs
+  pass the real bitstream contract. Trusted self-hosted run `33966394736` on the Intel
+  Mac passed `22` mandatory tests with `36` unrequested-vendor skips in `162.43 s` and
+  retained JUnit plus `39` hashed/probed media artifacts. NVENC/QSV/AMF and AV1
+  VideoToolbox remain `NOT VERIFIED` until the same workflow runs on matching hardware.
 - Segmented software VFR: `220/220` frames across 30/20/60 FPS regions,
   monotonic output PTS, six segment seams and final A/V delta below `50 ms`.
 - Software CFR matrix 23.976–60 FPS сохраняет exact frame count и PTS через
@@ -89,8 +93,8 @@ Post-fix verification на этом хосте (обновлено 2026-09-04):
   semantics remain backward-compatible; registered VMAF/SSIM/SSCD/audio diagnostics
   are additive and retain explicit alignment coverage/confidence.
 
-Это не означает готовность всей заявленной matrix: real licensed/natural 1–3 h
-corpus, NVENC/QSV/AMF, hardware VFR, NFS/network partitions и YouTube
+Это не означает готовность всей заявленной matrix: licensed 2 h/3 h+ natural
+corpus, NVENC/QSV/AMF, their hardware VFR, production NFS/network partitions и YouTube
 ingestion/transcode остаются `NOT VERIFIED`. Synthetic и unit tests нельзя выдавать
 за доказательство этих платформенных сценариев.
 
@@ -350,7 +354,9 @@ corpus и static metadata через остальные hardware encoders ост
 tests на максимальных параметрах. Но FFmpeg предупреждает, что muxer и
 `avoid_negative_ts` могут менять timestamps даже в passthrough mode:
 [FFmpeg fps/timestamp documentation](https://ffmpeg.org/ffmpeg.html#toc-Advanced-options).
-Hardware encoder cadence остаётся **NOT VERIFIED**.
+H.264/HEVC VideoToolbox cadence verified на этом Intel Mac, а hosted Apple Silicon
+H.264 проходит IDR contract после явного half-second request. NVENC/QSV/AMF cadence
+остаётся **NOT VERIFIED**.
 
 ## QA и similarity audit
 
@@ -452,8 +458,8 @@ Availability probing реальным коротким encode — сильная
 | NVENC | H264/HEVC/AV1 candidates, heuristic parallel cap | 10-bit/profile/level/resolution/rate-control/session and per-GPU routing unverified |
 | QSV | H264/HEVC/AV1 candidates | Device initialization, 10-bit and filters unverified |
 | AMF | H264/HEVC/AV1 candidates | Pixel formats/rate-control/driver capabilities unverified |
-| VideoToolbox | H264/HEVC SDR/HLG, CFR/VFR, 1080p/4K, GOP/profile/level, two sessions, cancellation and fallback verified on this Intel Mac | Static HDR10 metadata fails closed; Apple Silicon/other driver matrices remain unverified |
-| libx264 | Reliable quality-policy default | GOP differs from YouTube guidance |
+| VideoToolbox | H264/HEVC SDR/HLG, CFR/VFR, 1080p/4K, GOP/profile/level, two sessions, cancellation and fallback verified on this Intel Mac; hosted Apple Silicon H.264 IDR contract passes | Static HDR10 metadata fails closed; complete Apple Silicon/other driver matrices remain unverified |
+| libx264 | Reliable quality-policy default; explicit High/CABAC/half-FPS closed GOP verified | Wider natural-content quality bands still required |
 | libx265 | Reliable quality-policy default | Wider natural HDR corpus still required |
 | AV1 | SVT-AV1 locally available | Vulkan auto-selection disabled until a real hardware-frame upload graph exists; other HW AV1 unavailable locally |
 
@@ -465,8 +471,8 @@ encoder in preflight; vendor-specific driver-reset behavior remains `NOT VERIFIE
 
 ## Security findings
 
-CodeQL v4 run `33893258792` для `c0aaafd` завершился успешно:
-test-only alert #13 закрыт как fixed после сужения fallback `os.open` mode
+CodeQL v4 run `33966344225` для final commit `6aa0720` завершился успешно.
+Test-only alert #13 закрыт как fixed после сужения fallback `os.open` mode
 с `0o777` до `0o600`; GitHub API подтверждает 0 open CodeQL alerts.
 Path validation и plugin capability/audit-hook defenses выглядят осмысленно.
 
@@ -507,8 +513,8 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 
 | Gate | Result |
 |---|---|
-| Full `make check` | Production gate: 1699 passed, 55 expected hardware/optional skips on fully provisioned macOS |
-| Branch coverage gate | 81.23% (`1497 passed`, required 80%) on remote Ubuntu/Python 3.12 commit `c0aaafd` |
+| Full `make check` | Production gate: 1725 passed, 55 expected hardware/optional skips on fully provisioned macOS |
+| Branch coverage gate | 81.23% (`1497 passed`, required 80%) on remote Ubuntu/Python 3.12; final six-cell run `33966344170` passed |
 | Ruff | Passed |
 | Strict mypy (`162` source files) | Passed |
 | Wheel build | v1.5.0 wheel build passed |
@@ -534,9 +540,10 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
 | 1h/2h/3h+ synthetic | Passed with exact decoded frame counts; natural movie corpus NOT VERIFIED |
 | Crash/no-op resume | Passed; completed segment/audio bytes+mtime reused, persisted seed restored, decoded A/V SHA-256 equal |
 
-GitHub check на 2026-09-04: six-cell CI и CodeQL v4 для
-`c0aaafd` завершились успешно; RFC #11/#12 закрыты как completed;
-open CodeQL alerts — 0.
+GitHub check на 2026-09-05 для final commit `6aa0720`: six-cell CI run
+`33966344170`, CodeQL run `33966344225`, Intel self-hosted hardware run
+`33966394736` и performance run `33966849505` завершились успешно; RFC #11/#12
+закрыты как completed; open CodeQL alerts — 0.
 
 Подробные приоритеты: `RISK_REGISTER.md`. План локальных исправлений без rewrite:
 `PRODUCTION_PLAN.md`. Измерения: `BENCHMARKS.md`.
