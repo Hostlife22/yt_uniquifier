@@ -51,10 +51,29 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
+        if: runner.os != 'macOS'
         uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python_version }}
           cache: pip
+
+      # setup-python's downloadable macOS builds are non-relocatable and require
+      # a root-owned /Users/runner/hostedtoolcache. Hardware runners instead use
+      # the requested, preinstalled interpreter owned by the runner operator.
+      - name: Select preinstalled Python on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          host_python="$(command -v "python${{ inputs.python_version }}")"
+          "$host_python" -c \
+            "import sys; assert sys.version_info[:2] == tuple(map(int, '${{ inputs.python_version }}'.split('.'))); print(sys.version)"
+          "$host_python" -m venv "$RUNNER_TEMP/ytuniq-hardware-venv"
+          echo "PYTHON_EXECUTABLE=$RUNNER_TEMP/ytuniq-hardware-venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Select setup-python interpreter
+        if: runner.os != 'macOS'
+        shell: bash
+        run: echo "PYTHON_EXECUTABLE=python" >> "$GITHUB_ENV"
 
       - name: Verify required host tools
         shell: bash
@@ -66,12 +85,12 @@ jobs:
       - name: Install package
         shell: bash
         run: |
-          python -m pip install --upgrade pip
+          "$PYTHON_EXECUTABLE" -m pip install --upgrade pip
           if [ -f requirements-lock.txt ]; then
-            pip install --require-hashes -r requirements-lock.txt
-            pip install -e ".[dev]" --no-deps
+            "$PYTHON_EXECUTABLE" -m pip install --require-hashes -r requirements-lock.txt
+            "$PYTHON_EXECUTABLE" -m pip install -e ".[dev]" --no-deps
           else
-            pip install -e ".[dev]"
+            "$PYTHON_EXECUTABLE" -m pip install -e ".[dev]"
           fi
 
       - name: Run real hardware bitstream contracts
@@ -79,7 +98,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p qualification-artifacts
-          pytest tests/integration/test_encoder_bitstream_matrix.py -vv \
+          "$PYTHON_EXECUTABLE" -m pytest tests/integration/test_encoder_bitstream_matrix.py -vv \
             --basetemp=qualification-artifacts/pytest-temp \
             --junitxml=qualification-artifacts/junit.xml
 
@@ -88,7 +107,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p qualification-artifacts
-          python tools/hardware_qualification_report.py \
+          "$PYTHON_EXECUTABLE" tools/hardware_qualification_report.py \
             --media-root qualification-artifacts \
             --output qualification-artifacts/report.json
 

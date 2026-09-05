@@ -72,6 +72,9 @@ the last tag.
 
 ### Fixed
 
+- Use the requested preinstalled interpreter on self-hosted macOS hardware
+  runners, because downloadable `setup-python` builds require the root-owned,
+  non-relocatable `/Users/runner/hostedtoolcache` path.
 - Generate the scheduled `cid_aware` performance fixture as explicit stereo and
   verify its channel contract before benchmarking; the mono fixture was correctly
   rejected by the Haas preflight and made the nightly workflow fail before timing.
