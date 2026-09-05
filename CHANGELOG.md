@@ -72,6 +72,9 @@ the last tag.
 
 ### Fixed
 
+- Generate the scheduled `cid_aware` performance fixture as explicit stereo and
+  verify its channel contract before benchmarking; the mono fixture was correctly
+  rejected by the Haas preflight and made the nightly workflow fail before timing.
 - Prevent severe green/orange HDR highlight casts by running preserved-PQ/HLG
   colour transforms in an explicit planar-float RGB linear-light domain and
   explicitly returning to the source BT.2020 matrix and 10-bit output format.

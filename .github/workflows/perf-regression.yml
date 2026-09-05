@@ -78,8 +78,11 @@ jobs:
             -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=20" \
             -f lavfi -i "sine=frequency=440:duration=20" \
             -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
-            -c:a aac -b:a 128k \
+            -c:a aac -b:a 128k -ac 2 \
             .perf/fixture_720p.mp4
+          test "$(ffprobe -v error -select_streams a:0 \
+            -show_entries stream=channels -of csv=p=0 \
+            .perf/fixture_720p.mp4)" = "2"
           ls -la .perf/
 
       - name: Run benchmark → JSON
