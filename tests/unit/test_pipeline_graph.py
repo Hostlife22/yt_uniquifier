@@ -254,6 +254,7 @@ def test_videotoolbox_h264_requests_explicit_upload_structure(
     assert args[args.index("-bf") + 1] == "2"
     assert args[args.index("-g") + 1] == "12"
     assert args[args.index("-flags") + 1] == "+cgop"
+    assert args[args.index("-force_key_frames") + 1] == "expr:gte(t,n_forced*0.5)"
 
 
 def test_unqualified_h264_hardware_keeps_backend_defaults(tmp_path: Path) -> None:

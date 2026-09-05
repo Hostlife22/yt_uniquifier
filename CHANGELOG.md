@@ -72,6 +72,9 @@ the last tag.
 
 ### Fixed
 
+- Force half-second H.264 keyframes on VideoToolbox in addition to the codec GOP
+  limit; Apple Silicon can accept `-g` while intermittently exceeding the requested
+  IDR interval under asynchronous load.
 - Use the requested preinstalled interpreter on self-hosted macOS hardware
   runners, because downloadable `setup-python` builds require the root-owned,
   non-relocatable `/Users/runner/hostedtoolcache` path.

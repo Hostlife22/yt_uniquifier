@@ -1191,7 +1191,13 @@ def _encoder_args_for(plan: Plan, *, crf_override: int | None = None) -> list[st
             "-allow_sw", "0",
         ]
         if enc.codec == "h264":
-            return result + _h264_upload_structure_args(plan)
+            return result + _h264_upload_structure_args(plan) + [
+                # Apple Silicon VideoToolbox can accept ``-g`` yet exceed the
+                # requested frame interval under asynchronous load.  An
+                # explicit half-second request keeps the emitted IDR cadence
+                # bounded while retaining ``-g`` as the codec-level maximum.
+                "-force_key_frames", "expr:gte(t,n_forced*0.5)",
+            ]
         if enc.codec == "hevc":
             profile = "main10" if _segment_pix_fmt(plan) == "yuv420p10le" else "main"
             return result + ["-profile:v", profile, "-flags", "+cgop"] + _long_gop_args(
