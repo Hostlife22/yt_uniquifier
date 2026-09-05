@@ -90,6 +90,12 @@ def wrap_linear(inner_filters: list[str], color: HDRInfo) -> str:
             f"zscale=transfer=linear:matrix=gbr:npl={npl}",
             "format=gbrpf32le",
             inner_joined,
+            # Older FFmpeg releases negotiate ``eq`` through planar YUV even
+            # when its input is float RGB.  Convert the complete inner stack
+            # back to the declared RGB working domain before zscale consumes
+            # it; otherwise libzimg 3.0.x sees YUV carrying an RGB matrix and
+            # aborts with "no path between colorspaces".
+            "format=gbrpf32le",
             (
                 f"zscale=transfer={target_transfer}:matrix={target_matrix}:"
                 f"npl={npl}"

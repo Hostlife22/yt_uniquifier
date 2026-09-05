@@ -59,6 +59,7 @@ def test_wrap_pq_inserts_zscale_roundtrip() -> None:
     )
     assert "eq=brightness=0.01" in out
     assert "noise=alls=3:allf=t+u" in out
+    assert out.count("format=gbrpf32le") == 2
 
 
 def test_wrap_prefixes_even_dim_guard() -> None:

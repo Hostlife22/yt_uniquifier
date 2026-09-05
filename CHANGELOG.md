@@ -75,6 +75,8 @@ the last tag.
 - Prevent severe green/orange HDR highlight casts by running preserved-PQ/HLG
   colour transforms in an explicit planar-float RGB linear-light domain and
   explicitly returning to the source BT.2020 matrix and 10-bit output format.
+  Reassert the RGB working format after filters that older FFmpeg versions
+  internally negotiate through YUV, avoiding libzimg 3.0.x conversion failure.
 - Pad/trim processed main audio to the exact declared 48 kHz video timeline after
   stateful tempo/loudness filters. A 95-minute natural-content run exposed 2848
   missing delivery-rate samples and a 146 ms A/V end gap that short fixtures hid.
