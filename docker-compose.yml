@@ -1,4 +1,4 @@
-# yt-uniquifier — NAS / homelab deployment template (v0.9.0 R4).
+# yt-uniquifier — bounded NAS / homelab deployment template (v1.5.0).
 #
 # Copy this file to your NAS, edit the volume paths, then:
 #   docker compose up -d
@@ -9,11 +9,18 @@
 
 services:
   yt-uniquifier:
-    image: yt-uniquifier:0.9.0
+    image: "yt-uniquifier:${YT_UNIQ_IMAGE_TAG:-1.5.0}"
     # Use ``build: .`` instead when iterating locally on the
     # Dockerfile. The published image lives at the tag you push to.
     # build: .
     restart: unless-stopped
+    # Hard container ceilings complement the application's run/encoder
+    # admission controls. Tune explicitly for the deployment host.
+    cpus: "${YT_UNIQ_CPU_LIMIT:-4.0}"
+    # Natural 1080p60 HDR/VMAF qualification peaked near 8.8 GiB RSS on
+    # Intel macOS; 12 GiB avoids making the documented default self-OOM.
+    mem_limit: "${YT_UNIQ_MEMORY_LIMIT:-12g}"
+    pids_limit: ${YT_UNIQ_PIDS_LIMIT:-512}
     ports:
       - "127.0.0.1:8080:8080"   # bind to loopback by default; reverse-
                                 # proxy via nginx/traefik for TLS + LAN
@@ -24,6 +31,7 @@ services:
       YT_UNIQ_WEB_OUTPUT_DIR: "/data/output"
       YT_UNIQ_WEB_WORK_DIR: "/data/work"
       YT_UNIQ_WEB_PROFILE_DIR: "/data/profiles"
+      YT_UNIQ_WEB_MAX_CONCURRENT_RUNS: "${YT_UNIQ_MAX_CONCURRENT_RUNS:-2}"
       # Uncomment to enable basic auth.
       # YT_UNIQ_WEB_USER: "${WEB_USER:-changeme}"
       # YT_UNIQ_WEB_PASS: "${WEB_PASS:-changeme}"

@@ -80,7 +80,7 @@ and when to pick which.
 | `medium.yaml`               | moderate processing                                               | natural quality band pending |
 | `aggressive.yaml`           | experimental visible/audible processing                           | mandatory operator review |
 | `legacy_ab.yaml`            | frame blend with a licensed B-video                               | experimental |
-| `medium_hdr.yaml`           | preserve PQ/HLG through a linear-light transform wrapper          | synthetic HDR passed; natural HDR pending |
+| `medium_hdr.yaml`           | preserve PQ/HLG through a float-RGB linear-light transform wrapper | synthetic and derived natural-scene HDR passed; native-camera HDR pending |
 | `cid_aware.yaml`            | legacy experimental high-change saved-job compatibility           | no external-system prediction |
 | `cid_aggressive.yaml`       | legacy maximum-change compatibility                               | not quality-first; mandatory review |
 | `cid_aware_hdr_to_sdr.yaml` | experimental HDR→SDR derivative                                   | synthetic tonemap passed; natural HDR pending |

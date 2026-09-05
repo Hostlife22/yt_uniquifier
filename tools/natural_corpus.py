@@ -36,6 +36,7 @@ class CorpusCase:
     rights_reference: str
     media_class: str
     review_cues: tuple[str, ...]
+    variant_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -184,6 +185,26 @@ def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
             isinstance(cue, str) and cue.strip() for cue in cue_values
         ):
             raise ValueError(f"review_cues must be a string list for case {case_id}")
+        selected_variants = value.get("variants")
+        if selected_variants is None:
+            case_variant_ids = tuple(variant.variant_id for variant in variants)
+        else:
+            if not isinstance(selected_variants, list) or not selected_variants:
+                raise ValueError(f"variants must be a non-empty list for case {case_id}")
+            case_variant_ids = tuple(
+                _safe_id(item, f"cases[{index}].variants")
+                for item in selected_variants
+            )
+            if len(set(case_variant_ids)) != len(case_variant_ids):
+                raise ValueError(f"duplicate variants for case {case_id}")
+            unknown_variants = set(case_variant_ids) - {
+                variant.variant_id for variant in variants
+            }
+            if unknown_variants:
+                raise ValueError(
+                    f"unknown variants for case {case_id}: "
+                    f"{', '.join(sorted(unknown_variants))}"
+                )
         cases.append(
             CorpusCase(
                 case_id=case_id,
@@ -193,6 +214,7 @@ def load_manifest(path: Path, *, require_media: bool = True) -> CorpusManifest:
                 rights_reference=rights_reference,
                 media_class=media_class,
                 review_cues=tuple(cue.strip() for cue in cue_values),
+                variant_ids=case_variant_ids,
             )
         )
     return CorpusManifest(
@@ -277,9 +299,34 @@ def _number(payload: dict[str, Any], key: str) -> float | int | None:
     return value if isinstance(value, (float, int)) and not isinstance(value, bool) else None
 
 
+def _required_metric_names(
+    *,
+    media_class: str,
+    keep_hdr: bool,
+    source_has_audio: bool,
+) -> tuple[str, ...]:
+    """Return only metrics that are meaningful in the cell's scoring domain."""
+    required = [
+        "registered_ssim",
+        "psnr_db",
+        "output_size_bytes",
+        "duration_sec",
+        "wall_sec",
+        "rss_peak_kb",
+    ]
+    # Standard VMAF is an SDR model. The registered implementation deliberately
+    # declines preserved PQ/HLG until a corpus-qualified HDR domain exists.
+    if media_class == "sdr" or not keep_hdr:
+        required.append("registered_vmaf")
+    if source_has_audio:
+        required.extend(("lufs_i", "true_peak_dbtp"))
+    return tuple(required)
+
+
 _CSV_FIELDS = (
     "case_id", "variant_id", "profile", "encoder", "status",
-    "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
+    "vmaf", "registered_vmaf", "ssim", "registered_ssim", "registered_sscd",
+    "psnr_db", "lufs_i", "true_peak_dbtp",
     "source_size_bytes", "output_size_bytes", "size_ratio",
     "duration_sec", "wall_sec", "rss_peak_kb",
 )
@@ -293,7 +340,10 @@ def _source_row(source: dict[str, Any]) -> dict[str, Any]:
         "encoder": "copy",
         "status": "baseline",
         "vmaf": 100.0,
+        "registered_vmaf": 100.0,
         "ssim": 1.0,
+        "registered_ssim": 1.0,
+        "registered_sscd": None,
         "psnr_db": None,
         "lufs_i": source.get("lufs_i"),
         "true_peak_dbtp": source.get("true_peak_dbtp"),
@@ -374,8 +424,9 @@ def _comparisons(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped.setdefault(str(cell["case_id"]), []).append(cell)
     result: list[dict[str, Any]] = []
     delta_fields = (
-        "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
-        "output_size_bytes", "wall_sec", "rss_peak_kb",
+        "vmaf", "registered_vmaf", "ssim", "registered_ssim", "registered_sscd",
+        "psnr_db", "lufs_i", "true_peak_dbtp", "output_size_bytes", "wall_sec",
+        "rss_peak_kb",
     )
     for case_id, case_cells in grouped.items():
         baseline = next(
@@ -408,11 +459,18 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
     sources: list[dict[str, Any]] = []
     failed = False
     for case in manifest.cases:
+        source_has_audio = True
         try:
-            source_duration: float | None = probe(case.source).duration_sec
+            source_meta = probe(case.source)
+            source_duration: float | None = source_meta.duration_sec
+            source_has_audio = bool(source_meta.audio)
         except Exception:  # noqa: BLE001 - benchmark failure remains cell-local evidence
             source_duration = None
-        source_lufs, source_true_peak, source_audio_note = _audio_metrics(case.source)
+        if source_has_audio:
+            source_lufs, source_true_peak, source_audio_note = _audio_metrics(case.source)
+        else:
+            source_lufs, source_true_peak = None, None
+            source_audio_note = "not applicable: source has no audio stream"
         sources.append({
             "case_id": case.case_id,
             "source": case.source_rel,
@@ -423,7 +481,9 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
             "true_peak_dbtp": source_true_peak,
             "audio_note": source_audio_note,
         })
-        for variant in manifest.variants:
+        for variant in (
+            item for item in manifest.variants if item.variant_id in case.variant_ids
+        ):
             profile_path = variant.profile
             profile = load_profile(profile_path)
             encoder = variant.encoder
@@ -484,7 +544,12 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
             output_audio_note: str | None = "audio metrics skipped because output is unavailable"
             if output.is_file():
                 psnr_db, psnr_note = _psnr(case.source, output)
-                output_lufs, output_true_peak, output_audio_note = _audio_metrics(output)
+                if source_has_audio:
+                    output_lufs, output_true_peak, output_audio_note = _audio_metrics(
+                        output
+                    )
+                else:
+                    output_audio_note = "not applicable: source has no audio stream"
             output_size = output.stat().st_size if output.is_file() else None
             source_size = case.source.stat().st_size
             metrics = {
@@ -509,9 +574,10 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
                     note for note in (psnr_note, output_audio_note) if note is not None
                 ],
             }
-            required_metrics = (
-                "vmaf", "ssim", "psnr_db", "lufs_i", "true_peak_dbtp",
-                "output_size_bytes", "duration_sec", "wall_sec", "rss_peak_kb",
+            required_metrics = _required_metric_names(
+                media_class=case.media_class,
+                keep_hdr=profile.keep_hdr,
+                source_has_audio=source_has_audio,
             )
             missing_metrics = [
                 field for field in required_metrics if metrics[field] is None
@@ -578,9 +644,10 @@ def main() -> int:
     except (OSError, ValueError, yaml.YAMLError) as exc:
         print(f"manifest invalid: {exc}", file=sys.stderr)
         return 2
+    selected_cells = sum(len(case.variant_ids) for case in manifest.cases)
     print(
         f"manifest valid: {len(manifest.cases)} case(s), "
-        f"{len(manifest.variants)} cell(s) per case"
+        f"{selected_cells} selected matrix cell(s)"
     )
     if args.command == "validate":
         return 0

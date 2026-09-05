@@ -18,6 +18,8 @@ cases:
     rights_status: licensed
     rights_reference: internal-license-record-001
     media_class: sdr
+    # Optional: select a compatible subset of matrix variants for this case.
+    variants: [current, proposed]
     review_cues:
       - dialogue lip sync at 00:02:10
       - skin tones at 00:05:30

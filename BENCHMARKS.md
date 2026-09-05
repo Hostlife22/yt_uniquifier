@@ -59,7 +59,7 @@ ingestion/transcode остаются `NOT VERIFIED`.
 | Web/plugin security | 57 plugin/web tests plus direct body-limit and SlowAPI regressions | Missing/malformed/negative/duplicate/conflicting/oversize lengths fail closed; sandbox/allowlist/path/rate boundaries are exercised |
 | Repository/artifact secrets | Gitleaks 8.30.1: 324 commits / 4.70 MB and local artifacts / 173.81 MB, zero findings | Repository and current build outputs pass the local secret gate |
 | Workflow static analysis | actionlint 1.7.12: pass | Release shell snippets use safe artifact discovery/globbing |
-| Full local quality gate | 1699 passed, 55 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 13:30 | PGS, benchmark, VideoToolbox and fault-lab additions do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
+| Full local quality gate | 1725 passed, 55 expected hardware/optional skips; Ruff + strict mypy (162 files) pass; 15:53 | HDR colour-domain, exact long-form audio-tail, resource-budget and fault-lab additions do not regress the complete Mac suite; skips are unrequested hardware qualification cells |
 | Remote release-candidate matrix | commit `c0aaafd`: 6/6 Linux/macOS/Windows Python 3.11/3.12 jobs passed; Ubuntu coverage 81.23% | No-upscale, registered QA, admission-race and version-contract fixes pass every supported native CI OS; hardware-vendor qualification remains separate |
 | Manual release assembly | commit `f477ff5`, run `33905649508`: Linux/macOS/Windows GUI bundles and AppImage passed embedded-version/runtime checks; downloaded 1.05 GB candidate passed ZIP integrity, all six SHA-256 entries and all seven keyless cosign-bundle verifications | The workflow can assemble a complete v1.5.0 candidate without publishing a tag; CycloneDX 1.5 contains 59 components and the AppImage independently reports `1.5.0` in clean Ubuntu amd64 |
 | CI-equivalent coverage | 1497 passed, 12 expected skips, 198 deselected; 81.23% branch-aware core coverage on Ubuntu/Python 3.12 | Required 80% gate passes on integrated `main`; v1.5.0 wheel and sdist build successfully |
@@ -79,6 +79,61 @@ RFC #12 integrated synthetic qualification on the current Intel Mac:
 
 These are deterministic synthetic regressions, not natural-content thresholds. Licensed
 speech/music/HDR viewing and listening remains `NOT VERIFIED`.
+
+## Checksum-pinned open-content qualification — 2026-09-05
+
+Для воспроизводимого локального smoke скачаны и проверены по exact byte size/SHA-256:
+Netflix Meridian (CC BY 4.0), Blender Foundation Tears of Steel (CC BY 3.0) и
+public-domain Night of the Living Dead. Publisher-labelled Meridian P3/PQ MP4 фактически
+не содержит читаемых HDR tags и является 8-bit H.264, поэтому PQ/HLG fixtures получены
+явной документированной 10-bit conversion и не выдаются за native-camera HDR masters.
+
+Короткая natural-scene matrix завершила все `6/6` cells с exit code 0:
+
+| Case / profile | Registered quality | Other measured results | Decision |
+|---|---:|---:|---|
+| SDR 60 s / `soft` | VMAF 97.431; SSIM 0.98949 | PSNR 23.88 dB; -14.64 LUFS; -1.47 dBTP; size 2.65×; 55.32 s | Current quality-first baseline |
+| SDR 60 s / `medium` | VMAF 96.925; SSIM 0.97607 | PSNR 22.78 dB; -14.62 LUFS; -1.44 dBTP; size 3.25×; 64.66 s | Not promoted: vs soft VMAF -0.506, SSIM -0.0134, size and wall time worse |
+| Derived HDR10 preserve / `medium_hdr` | SSIM 0.84198; ordinary VMAF N/A by policy | 10-bit PQ/BT.2020 + ST2086/CLL exact; PSNR 25.58 dB; 89.43 s; 1,302,872 KiB encode RSS | Preserve contract passes; metric band is not yet a release threshold |
+| Derived HLG preserve / `medium_hdr` | SSIM 0.93668; ordinary VMAF N/A by policy | 10-bit HLG/BT.2020 exact; PSNR 28.84 dB; 84.03 s; 1,251,080 KiB encode RSS | Preserve contract passes; native HDR corpus still needed |
+| Derived HDR10 → SDR | VMAF 78.774; SSIM 0.95870 | BT.709 output; PSNR 19.41 dB; size 0.57× | Experimental; below proposed VMAF band, do not promote |
+| Derived HLG → SDR | VMAF 79.221; SSIM 0.95876 | BT.709 output; PSNR 16.82 dB; size 0.49× | Experimental; below proposed VMAF band, do not promote |
+
+The first natural HDR preserve run exposed a severe green/orange cast in bright blinds
+and contours even though all metadata remained correct. Root cause was transfer-only
+linearisation in subsampled YUV. The corrected graph uses `gbrpf32le` linear light and
+an explicit BT.2020/10-bit return. Four-frame tone-mapped A/B contact sheets show neutral
+highlights after the fix; a real independent FFV1-vs-HEVC integration regression now
+requires registered SSIM > 0.95 on the synthetic contract. The natural HDR10 score moved
+from 0.83488 to 0.84198 and HLG from 0.93456 to 0.93668; those small metric changes also
+show why metadata or a single scalar score cannot replace viewing representative scenes.
+
+Natural stereo diagnostics on the SDR 60 s clip found 1440/1440 video frames for source,
+soft and medium. Decoded output audio differs from the source by 381 samples (soft) and
+485 samples (medium), both within one AAC-frame allowance; duration is 59.999 s. Outputs
+contain no NaN/Inf/denormal samples, peak near -1.46 dBFS, do not exceed the source's
+maximum adjacent-sample jump, and produced no sustained out-of-phase interval in FFmpeg
+`aphasemeter`. Human speech/music listening remains `NOT VERIFIED`.
+
+Current-tree platform packaging/runtime smoke also passed: strict Intel VideoToolbox
+`22 passed / 36 unrequested skips` in 163.10 s with 39 probed/hashed media artifacts;
+fresh Docker `linux/amd64` and QEMU `linux/arm64` images both completed build, A/V CLI
+encode, ffprobe codec check and `/healthz`. Compose runtime inspection confirmed
+`NanoCpus=4e9`, `Memory=12884901888`, `PidsLimit=512` and a healthy service.
+
+The 95-minute public-domain natural-film run completed 10 segments with `soft`,
+libx264 and two workers. It retained `171345/171345` decoded frames and produced
+824,065,641 bytes from a 596,645,320-byte source (`1.3812x`) in 1,806.7 s, with
+475,352 KiB measured peak process-tree RSS. The initial main-audio graph exposed a
+2,848-sample delivery-rate tail loss and a 146 ms output A/V end gap. After the exact
+48 kHz pad/trim fix, a full replacement audio encode and complete remux decode retained
+exactly 274,426,152 samples over 5,717.2115 s and reduced the end delta to 4.5 ms,
+while keeping 171,345 frames. Objective audio analysis measured -14.0 LUFS-I,
+-1.4 dBTP and zero NaN/Inf/denormal samples. The fixed complete orchestrator is covered
+by the real-FFmpeg sample regression and seven-boundary resume matrix; the 95-minute
+video was not needlessly re-encoded a second time because its bytes are unaffected by
+the audio-tail graph. Registered full-film VMAF/SSIM replay remains `NOT VERIFIED`:
+the lossless reference estimate exceeded the safe free-disk budget on this Mac.
 
 ## Какие решения принимает каждая метрика
 
@@ -285,6 +340,14 @@ VMAF ≥ 99 относительно чистого fixed-seed baseline; test з
 Это подтверждает локальный POSIX/synthetic путь, но не имитирует power loss, NFS или
 сбой hardware encoder.
 
+Полная phase matrix 2026-09-05 отдельно остановила всю process group через SIGKILL
+после probe, plan и первого durable segment, во время main audio, concat и полной
+decode validation, а также после durable publication до final validation. Все `7/7` fresh resumes
+завершились, полностью декодировали video+audio, сохранили все segment statuses
+`done` и точный recorded output path; после добавления exact frame/sample/end-delta
+assertions and the pre-validation publication boundary, wall time всей matrix —
+`66.14 s` (`7/7 passed`, while the long-form audio benchmark was also active).
+
 ## Calibration v2 probe smoke — 2026-09-03
 
 Проверено локально на этом Intel Mac с FFmpeg 9.0.1: synthetic 30 s, 640×360,
@@ -325,6 +388,17 @@ reclaimed dead same-host owner и сохранил foreign/malformed owner fail-
 `1432 passed`, `1 skipped`, `81.95%` branch-aware coverage. Wheel v1.4.0 собран.
 Локальный `linux/amd64` Docker image собран и запущен под UID 1000: `/healthz` и
 `/readyz` прошли, registry `/data/work/.resource-admission` доступен для записи.
+
+Повторная resource qualification 2026-09-05 добавила атомарный grow/shrink одного
+disk record под тем же cross-process mutex. Рост сверх unreserved free space и смена
+owner fail closed, ошибка `os.replace` сохраняет старый record, а shrink немедленно
+освобождает admission capacity. Workspace future-byte budget теперь обновляется после
+каждого completed segment по максимуму baseline и измеренного bytes/sec, затем падает
+до нуля перед concat; final-output reserve также растёт по измеренному encoded
+bytes/sec и освобождается после публикации до полной decode validation. Compose
+добавляет hard defaults: 4 CPU, 12 GiB RAM, 512 PID и 2 concurrent web runs. Первичный
+8 GiB proposal был отклонён после того, как natural 1080p60 HLG raw-VMAF pass достиг
+`9,209,112 KiB` RSS (~8.78 GiB) на этом Mac.
 
 ## Temporal/SSCD smoke — 2026-09-03
 
@@ -377,6 +451,12 @@ TCP/2049 with `iptables`, keeping Docker's control plane responsive. GitHub-host
 Ubuntu run `33881832592` passed the complete corrected matrix. This qualifies the
 application-level ephemeral lab only; `docs/distributed.md` still requires `hard`
 mounts in production, and native cross-host deployment qualification remains required.
+
+Повторный локальный запуск 2026-09-05 на Docker Desktop также прошёл: 80/80 unique
+leases между двумя NFSv4 clients, TCP/2049 partition + stale reap/resume, crash-journal
+recovery, SIGKILL after stage/journal/fence/publish, idempotent second recovery,
+malformed checkpoint и bounded-tmpfs ENOSPC. Артефакты сохранены в локальном ignored
+`.nfs-qualification/recheck-2026-09-05/`.
 
 `validation-corpus/manifest.example.yaml` plus `tools/natural_corpus.py` validate
 relative media paths, explicit owned/licensed/public-domain status, non-empty rights
@@ -435,7 +515,8 @@ release по [официальным upload settings](https://support.google.com
 
 ## NOT VERIFIED
 
-- Real licensed/natural 1 h / 2 h / 3 h+ movies and listening/visual inspection.
+- Natural 95-minute movie processing is verified; licensed 2 h / 3 h+ movies and
+  human listening/visual inspection remain unverified.
 - 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
 - HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
 - NVENC/QSV/AMF and AV1 VideoToolbox.

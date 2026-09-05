@@ -9,9 +9,10 @@ import os
 import secrets
 import shutil
 import socket
+import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from yt_uniquifier.core.models import SourceMeta
@@ -32,6 +33,7 @@ DISK_RESERVATION_SCHEMA = 1
 WORK_BYTES_OVERHEAD_FACTOR = 1.3
 DISK_SAFETY_FACTOR = 1.1
 DEFAULT_TARGET_BITRATE_BPS = 8_000_000
+DEFAULT_AUDIO_BITRATE_BPS = 256_000
 
 
 class DiskReservationError(RuntimeError):
@@ -64,12 +66,39 @@ def resource_pool_dir(key: str) -> Path:
     return resource_lock_root() / f"{slug[:32] or 'resource'}-{digest}"
 
 
-def estimate_encoded_bytes(source: SourceMeta) -> int:
-    """Estimate final encoded bytes from duration and the best known bitrate."""
-    bitrate = DEFAULT_TARGET_BITRATE_BPS
-    if source.video and source.video[0].bit_rate:
-        bitrate = source.video[0].bit_rate
+def estimate_audio_bytes(source: SourceMeta) -> int:
+    """Estimate every audio stream at no less than the delivery bitrate."""
+    def delivery_bitrate(stream_channels: int) -> int:
+        if stream_channels <= 1:
+            return 128_000
+        if stream_channels == 2:
+            return 384_000
+        if stream_channels <= 6:
+            return 512_000
+        return stream_channels * 128_000
+
+    bitrate = sum(
+        max(
+            stream.bit_rate or DEFAULT_AUDIO_BITRATE_BPS,
+            delivery_bitrate(stream.channels),
+        )
+        for stream in source.audio
+    )
     return int(max(0.0, source.duration_sec) * (bitrate / 8.0))
+
+
+def estimate_encoded_bytes(source: SourceMeta) -> int:
+    """Estimate final video plus audio bytes from the best known bitrates."""
+    # A highly compressed source can expand substantially when decoded,
+    # transformed and encoded at CRF/CQ.  Do not let a small source bitrate
+    # defeat the conservative pre-first-segment reservation; measured segment
+    # rates refine this estimate as soon as durable output exists.
+    source_bitrate = (
+        source.video[0].bit_rate if source.video and source.video[0].bit_rate else 0
+    )
+    bitrate = max(DEFAULT_TARGET_BITRATE_BPS, source_bitrate)
+    video_bytes = int(max(0.0, source.duration_sec) * (bitrate / 8.0))
+    return video_bytes + estimate_audio_bytes(source)
 
 
 def estimate_work_bytes(source: SourceMeta) -> int:
@@ -129,7 +158,13 @@ class DiskReservation:
     hostname: str
     reserved_bytes: int
     filesystem_id: str
+    probe_path: Path
     _released: bool = False
+    _update_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        repr=False,
+        compare=False,
+    )
 
     @classmethod
     def acquire(
@@ -226,6 +261,7 @@ class DiskReservation:
                 hostname=hostname,
                 reserved_bytes=required_bytes,
                 filesystem_id=filesystem_id,
+                probe_path=probe,
             )
         finally:
             mutex.release()
@@ -270,16 +306,111 @@ class DiskReservation:
             total += reserved
         return total
 
+    def resize(
+        self,
+        required_bytes: int,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> None:
+        """Atomically replace this reservation with a new future-byte budget.
+
+        Files already written by the run are reflected in ``disk_usage().free``;
+        callers therefore pass only the estimated bytes still to be written.
+        Growth is admitted against every *other* active reservation while shrink
+        updates make capacity available to concurrent runs immediately.
+        """
+        if required_bytes < 0:
+            raise ValueError("required_bytes must be >= 0")
+        with self._update_lock:
+            if self._released:
+                raise DiskReservationError("cannot resize a released reservation")
+            pool_dir = self.lock_path.parent.parent
+            mutex_owner = f"disk-resize-{self.pid}-{secrets.token_hex(8)}"
+            mutex = _acquire_mutex(pool_dir, mutex_owner, cancelled)
+            try:
+                owner = _read_owner(self.lock_path)
+                try:
+                    exact_owner = (
+                        owner is not None
+                        and str(owner["run_id"]) == self.run_id
+                        and int(owner["pid"]) == self.pid
+                        and str(owner["hostname"]) == self.hostname
+                        and str(owner["filesystem_id"]) == self.filesystem_id
+                        and int(owner["schema_version"]) == DISK_RESERVATION_SCHEMA
+                        and int(owner["reserved_bytes"]) == self.reserved_bytes
+                    )
+                except (KeyError, TypeError, ValueError):
+                    exact_owner = False
+                if not exact_owner:
+                    raise DiskReservationError(
+                        "disk reservation ownership changed during resize"
+                    )
+                assert owner is not None
+
+                active_bytes = self._active_reserved_bytes(
+                    self.lock_path.parent,
+                    self.filesystem_id,
+                    self.hostname,
+                )
+                other_reserved = max(0, active_bytes - self.reserved_bytes)
+                try:
+                    free = shutil.disk_usage(self.probe_path).free
+                except OSError as exc:
+                    raise DiskReservationError(
+                        f"could not query free disk bytes for {self.probe_path}: {exc}"
+                    ) from exc
+                if max(0, free - other_reserved) < required_bytes:
+                    raise InsufficientDiskReservation(
+                        required_bytes,
+                        free,
+                        other_reserved,
+                    )
+
+                payload = dict(owner)
+                payload["reserved_bytes"] = required_bytes
+                payload["updated_at"] = time.time()
+                replacement = self.lock_path.with_name(
+                    f".{self.lock_path.name}.{secrets.token_hex(8)}.tmp"
+                )
+                created = False
+                try:
+                    fd = os.open(
+                        replacement,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                    )
+                    created = True
+                    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                        json.dump(payload, handle, sort_keys=True)
+                        handle.write("\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(replacement, self.lock_path)
+                    created = False
+                except BaseException as exc:
+                    if created:
+                        with contextlib.suppress(OSError):
+                            replacement.unlink(missing_ok=True)
+                    if isinstance(exc, Exception):
+                        raise DiskReservationError(
+                            f"could not update disk reservation: {exc}"
+                        ) from exc
+                    raise
+                self.reserved_bytes = required_bytes
+            finally:
+                mutex.release()
+
     def release(self) -> None:
-        if self._released:
-            return
-        if _release_exact_owner(
-            self.lock_path,
-            run_id=self.run_id,
-            pid=self.pid,
-            hostname=self.hostname,
-        ):
-            self._released = True
+        with self._update_lock:
+            if self._released:
+                return
+            if _release_exact_owner(
+                self.lock_path,
+                run_id=self.run_id,
+                pid=self.pid,
+                hostname=self.hostname,
+            ):
+                self._released = True
 
     def __enter__(self) -> DiskReservation:
         return self

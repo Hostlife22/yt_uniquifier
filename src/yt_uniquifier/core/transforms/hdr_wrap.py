@@ -7,9 +7,10 @@ hybrid log-gamma). Running `eq=brightness=0.01` directly on a PQ stream
 breaks the curve: 0.01 in PQ-units is a huge brightness shift at the bottom
 of the range and invisible near the top.
 
-The fix: convert to a linear-light domain via `zscale=transfer=linear`,
-apply the ops, convert back via `zscale=transfer=<original>`. Requires ffmpeg
-built with zimg (`--enable-libzimg`).
+The fix: convert through planar float RGB into a linear-light domain via
+`zscale=transfer=linear:matrix=gbr`, apply the ops, then explicitly convert
+back to the original HDR transfer/matrix and 10-bit YUV. Requires ffmpeg built
+with zimg (`--enable-libzimg`).
 
 `needs_linear_wrap()` answers the predicate; `wrap_linear()` emits the
 filter-string fragment.
@@ -77,12 +78,23 @@ def wrap_linear(inner_filters: list[str], color: HDRInfo) -> str:
     # but reaches zscale uncorrected. Found 2026-05-31 on
     # medium_hdr × synth_hdr10 × libx265 once a real zimg ffmpeg
     # became available.
+    # Transfer-only conversion in a subsampled YUV matrix is not a valid
+    # linear-light working space: neutral/highlight chroma can become strongly
+    # green/orange after the return trip. Convert through planar float RGB,
+    # apply the value-domain filters there, then explicitly return to the
+    # source HDR matrix and the encoder's 10-bit 4:2:0 contract.
+    target_matrix = color.space if color.space in {"bt2020nc", "bt2020c"} else "bt2020nc"
     return ",".join(
         [
             "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            f"zscale=transfer=linear:npl={npl}",
+            f"zscale=transfer=linear:matrix=gbr:npl={npl}",
+            "format=gbrpf32le",
             inner_joined,
-            f"zscale=transfer={target_transfer}:npl={npl}",
+            (
+                f"zscale=transfer={target_transfer}:matrix={target_matrix}:"
+                f"npl={npl}"
+            ),
+            "format=yuv420p10le",
         ]
     )
 

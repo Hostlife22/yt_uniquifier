@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from yt_uniquifier.core import resource_budget as budget
-from yt_uniquifier.core.models import HDRInfo, SourceMeta, VideoStream
+from yt_uniquifier.core.models import AudioStream, HDRInfo, SourceMeta, VideoStream
 
 
 def _source(tmp_path: Path, *, duration: float = 10.0, bitrate: int = 8_000_000) -> SourceMeta:
@@ -51,6 +51,30 @@ def test_disk_estimates_share_one_bitrate_model(tmp_path: Path) -> None:
     assert budget.estimate_work_bytes(source) == 13_000_000
 
 
+def test_disk_estimates_include_all_audio_streams(tmp_path: Path) -> None:
+    source = _source(tmp_path).model_copy(update={
+        "audio": [
+            AudioStream(index=1, codec="aac", sample_rate=48_000, channels=2),
+            AudioStream(
+                index=2,
+                codec="aac",
+                sample_rate=48_000,
+                channels=6,
+                bit_rate=640_000,
+            ),
+        ],
+    })
+
+    assert budget.estimate_audio_bytes(source) == 1_280_000
+    assert budget.estimate_encoded_bytes(source) == 11_280_000
+
+
+def test_disk_estimate_does_not_trust_tiny_source_bitrate(tmp_path: Path) -> None:
+    source = _source(tmp_path, duration=10.0, bitrate=500_000)
+
+    assert budget.estimate_encoded_bytes(source) == 10_000_000
+
+
 def test_disk_reservations_sum_and_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -66,6 +90,69 @@ def test_disk_reservations_sum_and_release(
 
     replacement = budget.DiskReservation.acquire(tmp_path, "run-b", 50)
     replacement.release()
+
+
+def test_disk_reservation_resize_releases_and_reacquires_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixed_free(monkeypatch, 100)
+    first = budget.DiskReservation.acquire(tmp_path, "run-a", 60)
+    try:
+        first.resize(30)
+        second = budget.DiskReservation.acquire(tmp_path, "run-b", 60)
+        try:
+            with pytest.raises(budget.InsufficientDiskReservation):
+                first.resize(50)
+            assert first.reserved_bytes == 30
+            assert json.loads(first.lock_path.read_text(encoding="utf-8"))[
+                "reserved_bytes"
+            ] == 30
+        finally:
+            second.release()
+        first.resize(50)
+        assert first.reserved_bytes == 50
+    finally:
+        first.release()
+
+
+def test_disk_reservation_resize_fails_closed_if_owner_changed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixed_free(monkeypatch, 100)
+    reservation = budget.DiskReservation.acquire(tmp_path, "run-a", 30)
+    payload = json.loads(reservation.lock_path.read_text(encoding="utf-8"))
+    payload["run_id"] = "replacement-owner"
+    reservation.lock_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(budget.DiskReservationError, match="ownership changed"):
+        reservation.resize(20)
+
+    assert json.loads(reservation.lock_path.read_text(encoding="utf-8"))[
+        "run_id"
+    ] == "replacement-owner"
+
+
+def test_disk_reservation_resize_replace_failure_preserves_old_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixed_free(monkeypatch, 100)
+    reservation = budget.DiskReservation.acquire(tmp_path, "run-a", 30)
+
+    def fail_replace(_source: Path, _target: Path) -> None:
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(budget.DiskReservationError, match="could not update"):
+        reservation.resize(20)
+
+    assert reservation.reserved_bytes == 30
+    assert json.loads(reservation.lock_path.read_text(encoding="utf-8"))[
+        "reserved_bytes"
+    ] == 30
+    assert list(reservation.lock_path.parent.glob("*.tmp")) == []
 
 
 def test_concurrent_disk_admission_is_atomic(

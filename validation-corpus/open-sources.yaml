@@ -1,0 +1,41 @@
+schema_version: 1
+
+# Redistributable/public-domain natural content used only for engineering QA.
+# Keep exact hashes: upstream replacement must be reviewed as a new fixture.
+sources:
+  - id: tears-of-steel-1080p
+    filename: tears-of-steel-1080p.webm
+    title: Tears of Steel (official Blender Foundation release, 1080p derivative)
+    publisher: Blender Foundation / Wikimedia Commons
+    url: https://upload.wikimedia.org/wikipedia/commons/transcoded/1/10/Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm/Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm.1080p.vp9.webm
+    source_page: https://commons.wikimedia.org/wiki/File:Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm
+    license: CC BY 3.0
+    license_url: https://creativecommons.org/licenses/by/3.0/
+    expected_bytes: 310154047
+    sha256: 464dd8a402e6bac9399aa9c3a8ad9bd97fafbc045d3e140bacd2ed453ef54771
+    use: SDR dialogue, faces, skin, motion, music
+
+  - id: meridian-p3pq
+    filename: meridian-uhd-hdr-p3pq.mp4
+    title: Meridian UHD 4K 59.94 P3/PQ
+    publisher: Netflix Open Content
+    url: https://s3.amazonaws.com/download.opencontent.netflix.com/Meridian/Meridian_UHD4k5994_HDR_P3PQ.mp4
+    source_page: https://opencontent.netflix.com/
+    license: CC BY 4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    expected_bytes: 850587087
+    sha256: e14ff5ab8ce4cc90269e8ed45babcf6e25d7a073b71438b3e7ffee5901a7177e
+    use: P3/PQ natural-picture source for explicitly tagged HDR10/HLG derivatives
+    caveat: The distributed H.264 MP4 has no machine-readable color tags and is 8-bit.
+
+  - id: night-of-the-living-dead
+    filename: night-of-the-living-dead-1968.mp4
+    title: Night of the Living Dead (1968)
+    publisher: Internet Archive contributor
+    url: https://archive.org/download/night-of-the-living-dead-1968_202508/Night%20of%20the%20Living%20Dead%201968.mp4
+    source_page: https://archive.org/details/night-of-the-living-dead-1968_202508
+    license: Public Domain Mark 1.0
+    license_url: https://creativecommons.org/publicdomain/mark/1.0/
+    expected_bytes: 596645320
+    sha256: d0f702d6bfc70f35f1ef02cf159e58a1fcf8936a0783427eae32dec0adf973e4
+    use: 95-minute speech, music, dark scenes, long-form A/V qualification

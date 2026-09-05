@@ -50,9 +50,12 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Synthetic HLG: 10-bit, HLG/Rec.2020/limited range и A/V timeline verified на
       libx265 и HEVC VideoToolbox этого Mac.
 - [x] HDR10+/Dolby Vision policy explicit: dynamic metadata rejected early.
-- [ ] HDR→SDR zscale/tonemap output BT.709 verified on dark/highlight/skin content.
+- [ ] HDR→SDR zscale/tonemap output BT.709 is exercised on a checksum-pinned
+      natural-scene derived PQ/HLG corpus; native-camera licensed HDR and human
+      display review remain required before checking this production gate.
 - [x] Undefined HDR→8-bit output policy and tonemap after another video transform
-      fail before encode; HDR-preserving color operations use the linear-light wrap.
+      fail before encode; HDR-preserving colour operations use explicit planar-float
+      RGB linear light and return to the source matrix/10-bit format.
 - [ ] NVENC/QSV/AMF/VideoToolbox/x265/AV1 HDR capability tested per advertised target.
 
 ## 4. Containers and cadence
@@ -148,8 +151,10 @@ release blockers, поэтому checklist намеренно не отмече�
       real NFS/network-partition qualification remains open.
 - [x] Checkpoint lock is acquired before `--new-variant` mutates state and is released
       for checkpoint initialization, observer startup and processing failures.
-- [ ] Kill/crash at each full media phase resumes without reprocessing valid completed
-      segments; deterministic audio/concat/final-replace faults, POSIX random SIGKILL,
+- [x] Kill/crash at each full media phase resumes without reprocessing valid completed
+      segments; seven-boundary probe/plan/segment/audio/concat/validation/publication
+      process-group SIGKILL matrix, deterministic audio/concat/final-replace faults,
+      POSIX random SIGKILL,
       and all four distributed publication boundaries are covered, but reboot/power-loss
       and every encode phase boundary are not yet qualified.
 - [x] Corrupt/zero/truncated segment is reprocessed automatically.
@@ -157,7 +162,9 @@ release blockers, поэтому checklist намеренно не отмече�
       injections plus a real bounded ENOSPC tmpfs preserve prior artifacts and clean
       partials. Power-loss durability remains a separate deployment qualification.
 - [x] Synthetic 1 h, 2 h and 3 h tests pass with RAM/disk/elapsed results retained in
-      `BENCHMARKS.md`; natural licensed corpus remains required.
+      `BENCHMARKS.md`; a public-domain natural 95-minute film additionally preserves
+      171345 frames and, after exact audio-tail padding, 274426152 samples with a
+      4.5 ms A/V end delta. Licensed 2 h/3 h+ corpus remains required.
 
 ## 9. Runner and observability
 
@@ -207,8 +214,9 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Production exposure policy requires TLS/reverse proxy; Basic Auth over raw
       untrusted HTTP is explicitly prohibited and examples retain loopback publish.
 - [ ] Global bounded resource scheduler and CPU/GPU/disk quotas enabled; the web
-      run-count cap, encoder slots and estimated disk-byte reservations are shared
-      across local processes. Exact per-device routing, hard filesystem quotas,
+      run-count cap, encoder slots and measured-progress disk-byte reservations are
+      shared across local processes; reference Compose enforces CPU/RAM/PID ceilings.
+      Exact per-device routing, native hard filesystem/OS quotas,
       mixed-UID/visibility deployments and NFS remain open.
 - [x] Duplicate active output reservation returns conflict across web processes sharing
       a local filesystem; exact-owner release and dead same-host recovery are tested.
@@ -278,7 +286,7 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## Текущий статус post-v1.5.0 main
 
-- [x] Fully provisioned production `make check`: 1699 passed, 55 expected skips;
+- [x] Fully provisioned production `make check`: 1725 passed, 55 expected skips;
       fault-injection recovery matrix and three-round POSIX SIGKILL chaos gate passed.
 - [x] Remote non-integration branch coverage gate: 81.23% (required: 80%).
 - [x] Heavy GUI real-FFmpeg E2E: 2 passed; one 320×180 VideoToolbox case
@@ -291,6 +299,6 @@ release blockers, поэтому checklist намеренно не отмече�
 - [x] Подтверждённые local P0 correctness regressions исправлены.
 - [x] HDR10/HDR→SDR, Rubber Band и SSCD real model verified locally.
 - [x] Synthetic 1h/2h/3h, 4K AV1 и VideoToolbox H.264/HEVC smoke verified locally.
-- [ ] Полная advertised production matrix: **BLOCKED** для natural long-form,
+- [ ] Полная advertised production matrix: **BLOCKED** для licensed 2 h/3 h+ long-form,
       NVENC/QSV/AMF, NFS cross-host и YouTube round-trip. HLG и VideoToolbox
       concurrency закрыты на текущем Intel Mac.

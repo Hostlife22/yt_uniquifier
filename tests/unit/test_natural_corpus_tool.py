@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -97,7 +98,8 @@ def test_runner_reuses_existing_benchmark_and_qa_pipelines(
         elif command[1] == "qa":
             qa = Path(command[command.index("--json") + 1])
             qa.write_text(
-                '{"vmaf_mean": 95.0, "ssim_mean": 0.99, '
+                '{"vmaf_mean": 95.0, "vmaf_registered_mean": 96.0, '
+                '"ssim_mean": 0.99, "ssim_registered_mean": 0.995, '
                 '"output_duration_sec": 1.0}\n',
                 encoding="utf-8",
             )
@@ -164,6 +166,40 @@ def test_manifest_rejects_duplicate_variant_id(tmp_path: Path) -> None:
         load_manifest(_write_manifest(tmp_path, payload), require_media=False)
 
 
+def test_case_can_select_compatible_named_variants(tmp_path: Path) -> None:
+    profile = _local_profile(tmp_path)
+    payload = _manifest(Path(profile.name))
+    payload["matrix"] = {
+        "variants": [
+            {"id": "sdr", "profile": profile.name, "encoder": "libx264"},
+            {"id": "hdr", "profile": profile.name, "encoder": "libx265"},
+        ],
+    }
+    payload["cases"][0]["variants"] = ["sdr"]  # type: ignore[index]
+
+    manifest = load_manifest(_write_manifest(tmp_path, payload), require_media=False)
+
+    assert manifest.cases[0].variant_ids == ("sdr",)
+
+
+def test_case_rejects_unknown_variant(tmp_path: Path) -> None:
+    profile = _local_profile(tmp_path)
+    payload = _manifest(Path(profile.name))
+    payload["cases"][0]["variants"] = ["missing"]  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="unknown variants"):
+        load_manifest(_write_manifest(tmp_path, payload), require_media=False)
+
+
+def test_case_rejects_duplicate_variant_selection(tmp_path: Path) -> None:
+    profile = _local_profile(tmp_path)
+    payload = _manifest(Path(profile.name))
+    payload["cases"][0]["variants"] = ["current", "current"]  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="duplicate variants"):
+        load_manifest(_write_manifest(tmp_path, payload), require_media=False)
+
+
 def test_comparison_uses_current_as_baseline() -> None:
     cells = [
         {
@@ -186,3 +222,74 @@ def test_comparison_uses_current_as_baseline() -> None:
         "candidate_variant": "proposed",
         "deltas": {"vmaf": 4.0, "wall_sec": -2.0},
     }]
+
+
+def test_video_only_case_treats_audio_metrics_as_not_applicable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = _local_profile(tmp_path)
+    payload = _manifest(Path(profile.name))
+    source = tmp_path / "media" / "source.mkv"
+    source.parent.mkdir()
+    source.write_bytes(b"open video-only fixture")
+    manifest = load_manifest(_write_manifest(tmp_path, payload))
+
+    def fake_capture(command: list[str], log: Path) -> int:
+        log.write_text("ok\n", encoding="utf-8")
+        if Path(command[1]).name == "benchmark.py":
+            Path(command[command.index("--out") + 1]).write_bytes(b"encoded")
+            Path(command[command.index("--json") + 1]).write_text(
+                '{"wall_sec": 1.0, "rss_peak_kb": 100}\n', encoding="utf-8",
+            )
+        else:
+            Path(command[command.index("--json") + 1]).write_text(
+                '{"vmaf_mean": 95.0, "vmaf_registered_mean": 96.0, '
+                '"ssim_mean": 0.99, "ssim_registered_mean": 0.995, '
+                '"output_duration_sec": 1.0}\n',
+                encoding="utf-8",
+            )
+        return 0
+
+    monkeypatch.setattr(natural_corpus, "_capture", fake_capture)
+    monkeypatch.setattr(
+        natural_corpus,
+        "probe",
+        lambda _path: SimpleNamespace(duration_sec=1.0, audio=[]),
+    )
+    monkeypatch.setattr(natural_corpus, "_psnr", lambda *_args: (40.0, None))
+    monkeypatch.setattr(
+        natural_corpus,
+        "_audio_metrics",
+        lambda *_args: pytest.fail("video-only case must not measure audio"),
+    )
+
+    results = tmp_path / "results"
+    assert natural_corpus.run_manifest(manifest, results, with_sscd=False) == 0
+    summary = yaml.safe_load((results / "summary.json").read_text(encoding="utf-8"))
+    metrics = summary["cells"][0]["metrics"]
+    assert metrics["complete"] is True
+    assert metrics["lufs_i"] is None
+    assert metrics["true_peak_dbtp"] is None
+
+
+def test_metric_policy_uses_registered_domain_and_skips_hdr_vmaf() -> None:
+    assert natural_corpus._required_metric_names(
+        media_class="sdr", keep_hdr=False, source_has_audio=True,
+    ) == (
+        "registered_ssim",
+        "psnr_db",
+        "output_size_bytes",
+        "duration_sec",
+        "wall_sec",
+        "rss_peak_kb",
+        "registered_vmaf",
+        "lufs_i",
+        "true_peak_dbtp",
+    )
+    assert "registered_vmaf" not in natural_corpus._required_metric_names(
+        media_class="hdr10", keep_hdr=True, source_has_audio=False,
+    )
+    assert "vmaf" not in natural_corpus._required_metric_names(
+        media_class="hdr10", keep_hdr=False, source_has_audio=False,
+    )

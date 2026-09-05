@@ -91,8 +91,8 @@ def test_hdr_keep_wraps_color_run(tmp_path: Path) -> None:
     built = FilterGraph(plan, tmp_path / "out.mp4").build()
     fc = built.filter_complex
     # zscale wrap is present.
-    assert "zscale=transfer=linear:npl=100" in fc
-    assert "zscale=transfer=smpte2084:npl=100" in fc
+    assert "zscale=transfer=linear:matrix=gbr:npl=100" in fc
+    assert "zscale=transfer=smpte2084:matrix=bt2020nc:npl=100" in fc
     # color_eq and noise are inside the wrap (one comma-joined run).
     # crop_resize is NOT wrapped (geometry).
     assert "crop=iw*" in fc  # crop_resize geometry pre-wrap

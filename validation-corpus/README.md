@@ -4,6 +4,18 @@ This directory is a local-only launch point for benchmarks on media you own or a
 licensed to process. Media and results are ignored by Git. Rights evidence should
 stay in your controlled records; the manifest stores only an internal reference.
 
+For a reproducible open-content smoke corpus, `open-sources.yaml` pins the upstream
+page, license, size, and SHA-256 for each asset. Fetch or re-verify it with:
+
+```bash
+.venv/bin/python tools/fetch_open_validation_corpus.py
+.venv/bin/python tools/fetch_open_validation_corpus.py --verify-only
+```
+
+The Meridian MP4 is labelled P3/PQ by its publisher but has neither readable color
+tags nor a 10-bit pixel format. It must not be treated as a native HDR10 contract
+fixture. Any tagged HDR10/HLG derivative must record its exact conversion command.
+
 1. Copy `manifest.example.yaml` to `manifest.local.yaml`.
 2. Put source files under `media/` and replace every placeholder rights reference.
 3. Validate without media while preparing the manifest:

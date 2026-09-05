@@ -51,9 +51,12 @@ def test_no_wrap_bt709_marked_hdr() -> None:
 def test_wrap_pq_inserts_zscale_roundtrip() -> None:
     out = wrap_linear(["eq=brightness=0.01", "noise=alls=3:allf=t+u"], _hdr("smpte2084"))
     assert out.startswith(
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2,zscale=transfer=linear:npl=100,"
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+        "zscale=transfer=linear:matrix=gbr:npl=100,format=gbrpf32le,"
     )
-    assert out.endswith(",zscale=transfer=smpte2084:npl=100")
+    assert out.endswith(
+        ",zscale=transfer=smpte2084:matrix=bt2020nc:npl=100,format=yuv420p10le"
+    )
     assert "eq=brightness=0.01" in out
     assert "noise=alls=3:allf=t+u" in out
 
@@ -71,14 +74,17 @@ def test_wrap_prefixes_even_dim_guard() -> None:
     out = wrap_linear(["eq=contrast=1.02"], _hdr("smpte2084"))
     # Even-dim guard must precede zscale's linear-light entry.
     even_guard_idx = out.find("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-    zscale_linear_idx = out.find("zscale=transfer=linear")
+    zscale_linear_idx = out.find("zscale=transfer=linear:matrix=gbr")
     assert even_guard_idx == 0
     assert even_guard_idx < zscale_linear_idx
 
 
 def test_wrap_hlg_returns_to_hlg() -> None:
     out = wrap_linear(["eq=contrast=1.02"], _hdr("arib-std-b67"))
-    assert out.endswith(",zscale=transfer=arib-std-b67:npl=100")
+    assert out.endswith(
+        ",zscale=transfer=arib-std-b67:matrix=bt2020nc:npl=100,"
+        "format=yuv420p10le"
+    )
 
 
 def test_wrap_sdr_is_identity() -> None:

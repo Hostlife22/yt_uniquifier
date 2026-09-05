@@ -69,7 +69,7 @@ BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
 # Increment whenever an internal encode policy changes in a way that makes existing
 # completed segments unsafe to reuse under the same package development version.
-_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v2"
+_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v3"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:
@@ -82,6 +82,27 @@ def _main_audio_bitrate(plan: Plan) -> str:
     if channels <= 6:
         return "512k"
     return f"{channels * 128}k"
+
+
+def _main_audio_tail_filter(plan: Plan) -> str:
+    """Return an exact 48 kHz sample contract for the declared video timeline.
+
+    Stateful tempo and loudness filters may retain/drop a small tail when they
+    flush.  Container duration tolerances can hide that loss on short fixtures
+    and let it grow into visible A/V end drift on a feature-length input.  Move
+    into the delivery sample rate, pad if short and trim by sample count if
+    long; rebuilding PTS remains the final operation.
+    """
+    target_samples = max(
+        1,
+        round(expected_output_duration(plan) * OUTPUT_AUDIO_SAMPLE_RATE),
+    )
+    return (
+        f"aresample={OUTPUT_AUDIO_SAMPLE_RATE},"
+        f"apad=whole_len={target_samples},"
+        f"atrim=end_sample={target_samples},"
+        "asetpts=N/SR/TB"
+    )
 
 
 def _audio_transform_params(plan: Plan, tc: TransformConfig) -> Any:
@@ -873,7 +894,9 @@ def build_main_audio_command(
     # would make it discard valid tail samples. Rebuild a contiguous timeline
     # from the actual sample count after the complete audio chain.
     contiguous_label = alloc.next("a")
-    a_chains.append(_wrap_chain_str(a_label, "asetpts=N/SR/TB", contiguous_label))
+    a_chains.append(
+        _wrap_chain_str(a_label, _main_audio_tail_filter(plan), contiguous_label)
+    )
     a_label = contiguous_label
 
     filter_complex = ";".join(a_chains)
@@ -1049,7 +1072,11 @@ def build_main_audio_command_windowed(
 
     contiguous_label = alloc.next("a")
     all_chains.append(
-        _wrap_chain_str(final_label, "asetpts=N/SR/TB", contiguous_label)
+        _wrap_chain_str(
+            final_label,
+            _main_audio_tail_filter(plan),
+            contiguous_label,
+        )
     )
     final_label = contiguous_label
 

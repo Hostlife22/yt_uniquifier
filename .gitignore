@@ -27,6 +27,7 @@ htmlcov/
 .yt_uniq_work/
 .yt_uniq_calib/
 .qualification/
+.qualification-current/
 .nfs-qualification/
 *.qa.json
 *.qa.html

@@ -29,7 +29,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
   HLG, H.264/HEVC VideoToolbox smoke/concurrency, synthetic 1/2/3 h,
   crash/no-op resume, exact persisted-seed A/V reproducibility, SDR full/limited
   range, MP4/MOV/MKV AAC+Opus policy and APFS distributed fencing.
-- **NOT VERIFIED / planned:** natural long-form corpus and registered-metric thresholds,
+- **PARTIAL / planned:** public-domain natural 95-minute processing is qualified;
+  licensed 2 h/3 h+ corpus and registered full-film metric thresholds remain open,
   NVENC/QSV/AMF, hardware VFR, production cross-host NFS/network partitions and
   YouTube ingestion/transcode.
 
@@ -216,6 +217,11 @@ fail preflight.
 - **Tests:** HDR10/HLG with measured metadata on Linux zscale+x265 and HW runners.
 - **Risk:** Dolby Vision/dynamic HDR portability; reject unsupported cases initially.
 - **Expected result:** correct HDR or explicit `NOT SUPPORTED`, never accidental SDR.
+- **Status:** locally resolved for the software contract — static HDR10/HLG metadata,
+  x265 preservation and tonemap fail/allow policies are covered. A checksum-pinned
+  natural-scene derivative exposed and now regresses a real YUV-linearisation colour
+  cast; the preserve graph uses float planar RGB and explicit BT.2020/10-bit return.
+  Native-camera HDR viewing and vendor hardware metadata qualification remain open.
 
 ### 2.4 VFR and segmentation correctness
 
@@ -336,8 +342,11 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Expected result:** bounded RAM/disk/session use.
 - **Status:** partial — web admission uses atomic exact-owner slots; encoder waits are
   cancellable across local processes; disk records sum remaining workspace and final
-  concat estimates per filesystem device. Dead same-host owners are reclaimed and
-  malformed/foreign records fail closed. Hard filesystem quotas, exact GPU routing,
+  concat estimates per filesystem device and atomically resize workspace capacity
+  from measured completed artifacts. A/V estimates include retained audio and the
+  reference Compose enforces configurable CPU/RAM/PID ceilings. Dead same-host owners
+  are reclaimed and malformed/foreign records fail closed. Native hard filesystem/OS
+  quotas, exact GPU routing,
   mixed visibility/UID deployments, distributed backpressure and NFS qualification
   remain open.
 
@@ -437,10 +446,12 @@ stores relative timestamps. Hardware encoders and natural-content corpus remain
 - **Tests:** scheduled self-hosted long-form jobs and retained manifests/reports.
 - **Risk:** CI cost.
 - **Expected result:** completed segments reused and final output bitstream-correct.
-- **Status:** in progress — deterministic regressions now cover rejected concurrent
+- **Status:** locally resolved, external qualification remains — deterministic regressions cover rejected concurrent
   ownership, initialization cleanup, checkpoint `fsync` failure, atomic main-audio
   failure, concat failure and final replace failure. The POSIX chaos test covers
-  process-group SIGKILL/resume. A fresh invocation restores the persisted seed and
+  process-group SIGKILL/resume at all seven full-pipeline boundaries: after probe,
+  plan and segment, during audio, concat and complete validation, and immediately
+  after publication before final validation. A fresh invocation restores the persisted seed and
   reuses byte-identical completed video/audio artifacts; decoded A/V hashes match the
   original run exactly. A bounded real ENOSPC tmpfs preserves the last checkpoint;
   the Docker NFSv4 lab passes SIGKILL after stage/journal/fence/publish and idempotent

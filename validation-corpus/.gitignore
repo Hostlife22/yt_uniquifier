@@ -1,4 +1,5 @@
 media/**
 results/**
+manifest*.local.yaml
 !media/.gitkeep
 !results/.gitkeep

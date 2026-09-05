@@ -43,7 +43,8 @@ def test_long_audio_emits_multiple_windows(tmp_path: Path) -> None:
     cmd, _ = build_main_audio_command_windowed(plan, tmp_path / "a.m4a")
     fc = cmd.filter_complex
     # 180 s / 60 s = 3 windows.
-    assert fc.count("atrim=") == 3
+    # Three source windows plus the final exact-sample timeline trim.
+    assert fc.count("atrim=") == 4
     # 2 internal boundaries → 2 acrossfades.
     assert fc.count("acrossfade=") == 2
 

@@ -14,6 +14,8 @@ from yt_uniquifier.core.models import Profile
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.core.qa import ssim
+from yt_uniquifier.core.qa.registration import build_transformed_reference
 
 PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
 
@@ -173,6 +175,19 @@ def test_hdr_roundtrip_preserves_metadata(
     # Output must remain 10-bit.
     assert "10" in out_meta.video[0].pix_fmt
     assert out_meta.video[0].color.bit_depth == 10
+
+    # The lossy HEVC output and the independently rendered lossless reference
+    # must agree closely.  This catches pixel-format negotiation regressions:
+    # a transfer-only PQ roundtrip in subsampled YUV previously kept every HDR
+    # metadata field correct while producing severe green/orange highlights.
+    reference = build_transformed_reference(
+        plan,
+        tmp_path / "registered" / "reference.mkv",
+        target_segment_sec=600.0,
+    )
+    registered = ssim.compute(reference.path, out, reset_pts=True)
+    assert registered.score is not None, registered.note
+    assert registered.score > 0.95
 
 
 @pytest.fixture(scope="session")

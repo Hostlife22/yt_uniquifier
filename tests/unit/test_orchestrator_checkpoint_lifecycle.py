@@ -299,6 +299,71 @@ def test_disk_budget_scales_workspace_to_remaining_segments(
     assert len(reservations) == 2
 
 
+def test_workspace_disk_budget_uses_measured_progress_and_pending_audio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    segment_path = tmp_path / "segment.mkv"
+    segment_path.write_bytes(b"x" * 100)
+    segments = [
+        Segment(
+            idx=0,
+            start_sec=0.0,
+            end_sec=5.0,
+            status="done",
+            out_path=segment_path,
+        ),
+        Segment(idx=1, start_sec=5.0, end_sec=10.0, status="pending"),
+    ]
+
+    class ProgressStore:
+        def all_segments(self) -> list[Segment]:
+            return segments
+
+        def get_main_audio(self) -> None:
+            return None
+
+    class FakeReservation:
+        def __init__(self, target: str, reserved_bytes: int) -> None:
+            self.run_id = f"run:{target}"
+            self.reserved_bytes = reserved_bytes
+            self.requests: list[int] = []
+
+        def resize(self, required: int, **_kwargs: object) -> None:
+            self.requests.append(required)
+            self.reserved_bytes = required
+
+    workspace = FakeReservation("workspace", 1_000)
+    final = FakeReservation("final output", 1_000)
+    events: list[RunEvent] = []
+    monkeypatch.setattr(orchestrator, "estimate_work_bytes", lambda _source: 1_000)
+    monkeypatch.setattr(orchestrator, "estimate_audio_bytes", lambda _source: 100)
+    monkeypatch.setattr(orchestrator, "estimate_encoded_bytes", lambda _source: 500)
+
+    orchestrator._refresh_workspace_disk_budget(
+        _plan(tmp_path),
+        ProgressStore(),  # type: ignore[arg-type]
+        [workspace, final],  # type: ignore[list-item]
+        None,
+        events.append,
+    )
+
+    assert workspace.requests == [660]
+    assert final.requests == [550]
+    assert events[0].payload == {
+        "phase": "disk",
+        "message": "updated workspace reservation to 0.00 GiB from measured progress",
+        "reserved_bytes": 660,
+        "target": "workspace",
+    }
+    assert events[1].payload == {
+        "phase": "disk",
+        "message": "updated final output reservation to 0.00 GiB from measured progress",
+        "reserved_bytes": 550,
+        "target": "final output",
+    }
+
+
 def test_disk_budget_releases_partial_acquisition_on_rejection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

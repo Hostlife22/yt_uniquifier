@@ -59,7 +59,7 @@ The image deliberately does **not** install the `[ml]` extra
 container, bake your own:
 
 ```dockerfile
-FROM yt-uniquifier:1.4.0
+FROM yt-uniquifier:1.5.0
 USER root
 RUN pip install --no-cache-dir "yt-uniquifier[ml]"
 USER ytuniq
@@ -68,7 +68,7 @@ USER ytuniq
 ### Build
 
 ```bash
-docker build -t yt-uniquifier:1.4.0 .
+docker build -t yt-uniquifier:1.5.0 .
 ```
 
 The release workflow publishes one manifest for `linux/amd64` and `linux/arm64`.
@@ -92,7 +92,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
     -v $PWD/input:/data/input:ro \
     -v $PWD/output:/data/output \
     -v $PWD/work:/data/work \
-    yt-uniquifier:1.4.0
+    yt-uniquifier:1.5.0
 ```
 
 ### Run behind a same-host TLS reverse proxy
@@ -103,7 +103,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
     -e YT_UNIQ_WEB_PASS=hunter2 \
     -v $PWD/input:/data/input:ro \
     -v $PWD/output:/data/output \
-    yt-uniquifier:1.4.0
+    yt-uniquifier:1.5.0
 ```
 
 Configure nginx, Caddy, or Traefik to expose an `https://` endpoint and proxy
@@ -114,8 +114,15 @@ unless an external firewall provides an equivalent trusted boundary.
 
 A reference `docker-compose.yml` ships at the repo root with
 loopback bind, volume mounts for input/output/work/profiles, and
-the basic-auth env vars commented out. Copy to your NAS, edit
-the volume paths, `docker compose up -d`.
+the basic-auth env vars commented out. It also applies default hard ceilings of
+4 CPUs, 12 GiB RAM, 512 PIDs, and two concurrent web runs. The RAM default includes
+headroom above the observed ~8.8 GiB peak of a 1080p60 HDR/VMAF pass; lower-memory
+hosts should disable heavyweight QA or qualify a smaller explicit limit. Copy it to your NAS,
+edit the volume paths, tune `YT_UNIQ_CPU_LIMIT`, `YT_UNIQ_MEMORY_LIMIT`,
+`YT_UNIQ_PIDS_LIMIT`, and `YT_UNIQ_MAX_CONCURRENT_RUNS` for the host, then run
+`docker compose up -d`. Native installs must enforce equivalent hard CPU/RAM
+limits through the operating-system service manager; `--workers` alone is an
+encoder scheduler, not a memory ceiling.
 
 ## API surface
 

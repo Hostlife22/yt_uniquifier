@@ -109,14 +109,18 @@ wraps every *color-domain* transform (currently `video.color_eq` +
 `video.noise`) in a zscale roundtrip via `core/transforms/hdr_wrap.py`:
 
 ```
-zscale=transfer=linear:npl=100,
+zscale=transfer=linear:matrix=gbr:npl=100,
+format=gbrpf32le,
   eq=brightness=0.012:contrast=1.018:gamma=0.995:saturation=1.03,
   noise=alls=4:allf=t+u,
-zscale=transfer=smpte2084:npl=100
+zscale=transfer=smpte2084:matrix=bt2020nc:npl=100,
+format=yuv420p10le
 ```
 
 Linear-light is required so a "+1 % brightness" means the same thing at the
-top and bottom of the PQ curve. Geometry transforms (crop / rescale / rotate /
+top and bottom of the PQ curve. The explicit float RGB working format is also
+required: transfer-only processing in subsampled YUV can create severe chroma casts
+while leaving HDR metadata apparently correct. Geometry transforms (crop / rescale / rotate /
 speed) and temporal ones (temporal_jitter) operate in any domain and are not
 wrapped.
 

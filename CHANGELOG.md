@@ -20,6 +20,14 @@ the last tag.
 - Extend the licensed-corpus runner with named current/proposed variants, exact Plan
   provenance, required VMAF/SSIM/PSNR/LUFS/true-peak/size/time/RAM metrics and
   aggregate JSON/CSV/HTML reports runnable through `make production-benchmark`.
+- Allow each corpus case to select only compatible matrix variants, expose registered
+  metrics in every JSON/CSV/HTML aggregate, and treat audio metrics as not applicable
+  for genuine video-only HDR/HLG sources. Completeness gates now require metrics only
+  in a valid scoring domain instead of treating raw SDR VMAF as authoritative for
+  preserved PQ/HLG or HDR-to-SDR output.
+- Apply configurable hard CPU, RAM and PID ceilings in the reference Docker Compose
+  deployment in addition to the existing run/encoder admission controls; the 12 GiB
+  default retains headroom above the measured 1080p60 HDR/VMAF peak.
 - Make custom `video.fit_aspect` profiles source-aware and no-upscale by default;
   fixed-resolution shipped profiles retain their existing canvas through an explicit
   `allow_upscale: true` migration ([RFC #11](https://github.com/Hostlife22/yt_uniquifier/issues/11)).
@@ -59,8 +67,22 @@ the last tag.
   fail-closed static HDR10 metadata policy and declared-session concurrency checks.
 - Add native process-tree cancellation coverage to every CI OS, an NFSv4 Docker
   fault-injection lab, and a rights-attested natural-content corpus manifest/runner.
+- Add a pinned, checksum-verified CC/public-domain natural-content downloader and a
+  seven-boundary full-pipeline POSIX SIGKILL/resume qualification.
 
 ### Fixed
+
+- Prevent severe green/orange HDR highlight casts by running preserved-PQ/HLG
+  colour transforms in an explicit planar-float RGB linear-light domain and
+  explicitly returning to the source BT.2020 matrix and 10-bit output format.
+- Pad/trim processed main audio to the exact declared 48 kHz video timeline after
+  stateful tempo/loudness filters. A 95-minute natural-content run exposed 2848
+  missing delivery-rate samples and a 146 ms A/V end gap that short fixtures hid.
+- Recalculate shared workspace disk reservations from completed artifact sizes,
+  atomically expose released capacity after every segment, and include retained
+  audio delivery bitrate in final/work estimates instead of under-reserving mixed
+  A/V runs. Initial video reservations now retain an 8 Mbit/s floor so a highly
+  compressed source cannot fill the disk before the first measured update.
 
 - Retry shared encoder admission when a concurrently released slot disappears
   between atomic-create contention and inspection, instead of misreporting pool

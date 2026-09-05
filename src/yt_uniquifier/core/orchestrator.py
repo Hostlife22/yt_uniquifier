@@ -47,6 +47,7 @@ from yt_uniquifier.core.resource_budget import (
     DiskReservation,
     DiskReservationError,
     InsufficientDiskReservation,
+    estimate_audio_bytes,
     estimate_encoded_bytes,
     estimate_work_bytes,
 )
@@ -595,6 +596,13 @@ def _run_full_body(
             except OSError:
                 seg_sha256 = None
             store.mark(idx, "done", src_path=src, out_path=out, sha256=seg_sha256)
+            _refresh_workspace_disk_budget(
+                plan,
+                store,
+                disk_reservations,
+                cancel_token,
+                emit,
+            )
             emit(RunEvent(kind="log", payload={
                 "phase": "segment",
                 "segment": idx,
@@ -658,6 +666,11 @@ def _run_full_body(
             store.set_loudnorm(measurement)
         if main_audio is not None:
             store.set_main_audio(main_audio)
+
+    # Segment and audio artifacts already consume real filesystem space, so
+    # only future workspace writes belong in the shared reservation. Concat
+    # writes into the separately reserved output filesystem.
+    _resize_workspace_reservation(disk_reservations, 0, cancel_token, emit)
 
     # Concat + metadata. Defensive existence filter (A3 v0.5.5 belt-and-
     # suspenders): even after the resume-recovery block above, a worker
@@ -730,6 +743,16 @@ def _run_full_body(
                 "message": "encoder is already libx264 — skipping (no-op)",
             }))
 
+    # Publication bytes now occupy real space and no more final-output writes
+    # remain. Release the logical reservation before the potentially long full
+    # decode validation pass.
+    _resize_disk_reservation(
+        disk_reservations,
+        "final output",
+        0,
+        cancel_token,
+        emit,
+    )
     _validate_final_output(plan, options.output, emit, cancel_token)
     store.set_output(options.output)
 
@@ -765,7 +788,7 @@ def _reserve_run_disk_budget(
     encoded_estimate = estimate_encoded_bytes(plan.source)
     workspace_estimate = int(estimate_work_bytes(plan.source) * remaining_ratio)
     if plan.source.audio and store.get_main_audio() is None:
-        workspace_estimate = max(workspace_estimate, int(encoded_estimate * 0.1))
+        workspace_estimate += estimate_audio_bytes(plan.source)
 
     requirements = (
         ("workspace", options.work_dir, workspace_estimate),
@@ -811,6 +834,129 @@ def _reserve_run_disk_budget(
             reservation.release()
         raise PipelineError(f"disk reservation unavailable: {exc}") from exc
     return acquired
+
+
+def _refresh_workspace_disk_budget(
+    plan: Plan,
+    store: CheckpointStore,
+    reservations: list[DiskReservation],
+    cancel_token: CancelToken | None,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    """Replace the static workspace estimate with measured remaining work."""
+    segments = store.all_segments()
+    duration = max(plan.source.duration_sec, 0.001)
+    completed_duration = 0.0
+    completed_bytes = 0
+    remaining_duration = 0.0
+    for segment in segments:
+        segment_duration = max(0.0, segment.end_sec - segment.start_sec)
+        if segment.status == "done" and segment.out_path and segment.out_path.exists():
+            completed_duration += segment_duration
+            completed_bytes += segment.out_path.stat().st_size
+            if segment.src_path and segment.src_path.exists():
+                completed_bytes += segment.src_path.stat().st_size
+        else:
+            remaining_duration += segment_duration
+
+    baseline_rate = estimate_work_bytes(plan.source) / duration
+    measured_rate = (
+        completed_bytes / completed_duration if completed_duration > 0 else 0.0
+    )
+    future_bytes = math.ceil(max(baseline_rate, measured_rate) * remaining_duration)
+    if plan.source.audio and store.get_main_audio() is None:
+        future_bytes += estimate_audio_bytes(plan.source)
+    required = math.ceil(future_bytes * DISK_SAFETY_FACTOR)
+    _resize_disk_reservation(
+        reservations,
+        "workspace",
+        required,
+        cancel_token,
+        emit,
+    )
+
+    completed_video_bytes = sum(
+        segment.out_path.stat().st_size
+        for segment in segments
+        if segment.status == "done"
+        and segment.out_path is not None
+        and segment.out_path.exists()
+    )
+    measured_final = (
+        math.ceil((completed_video_bytes / completed_duration) * duration)
+        + estimate_audio_bytes(plan.source)
+        if completed_duration > 0
+        else 0
+    )
+    final_required = math.ceil(
+        max(estimate_encoded_bytes(plan.source), measured_final) * DISK_SAFETY_FACTOR
+    )
+    _resize_disk_reservation(
+        reservations,
+        "final output",
+        final_required,
+        cancel_token,
+        emit,
+    )
+
+
+def _resize_workspace_reservation(
+    reservations: list[DiskReservation],
+    required_bytes: int,
+    cancel_token: CancelToken | None,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    _resize_disk_reservation(
+        reservations,
+        "workspace",
+        required_bytes,
+        cancel_token,
+        emit,
+    )
+
+
+def _resize_disk_reservation(
+    reservations: list[DiskReservation],
+    target: str,
+    required_bytes: int,
+    cancel_token: CancelToken | None,
+    emit: Callable[[RunEvent], None],
+) -> None:
+    reservation = next(
+        (
+            item
+            for item in reservations
+            if item.run_id.endswith(f":{target}")
+        ),
+        None,
+    )
+    if reservation is None or reservation.reserved_bytes == required_bytes:
+        return
+    try:
+        reservation.resize(
+            required_bytes,
+            cancelled=(
+                cancel_token.is_cancelled if cancel_token is not None else None
+            ),
+        )
+    except InsufficientDiskReservation as exc:
+        available = max(0, exc.free - exc.already_reserved)
+        raise PipelineError(
+            "measured output growth exceeds unreserved disk capacity: "
+            f"need {exc.required / (1024 ** 3):.2f} GiB, "
+            f"have {available / (1024 ** 3):.2f} GiB"
+        ) from exc
+    except DiskReservationError as exc:
+        raise PipelineError(f"disk reservation update unavailable: {exc}") from exc
+    emit(RunEvent(kind="log", payload={
+        "phase": "disk",
+        "message": (
+            f"updated {target} reservation to "
+            f"{required_bytes / (1024 ** 3):.2f} GiB from measured progress"
+        ),
+        "reserved_bytes": required_bytes,
+        "target": target,
+    }))
 
 
 def _validate_final_output(

@@ -16,7 +16,10 @@ from yt_uniquifier.core.auxiliary_streams import get_auxiliary_streams
 from yt_uniquifier.core.errors import PreflightFailure
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
-from yt_uniquifier.core.pipeline import build_main_audio_command_windowed
+from yt_uniquifier.core.pipeline import (
+    build_main_audio_command,
+    build_main_audio_command_windowed,
+)
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
 from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormParams, measure
@@ -758,6 +761,46 @@ def test_windowed_audio_does_not_accumulate_crossfade_duration(
     # AAC uses 1024-sample frames: permit one encoded frame plus ffprobe
     # rounding, but no 0.1 s accumulation per window boundary.
     assert abs(_audio_duration(output) - 125.0) <= 0.03
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+def test_main_audio_tail_matches_declared_timeline_after_stateful_filters(
+    tmp_path: Path,
+    isolated_cache: Path,
+) -> None:
+    source = tmp_path / "stateful-audio-tail.mkv"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=size=160x90:rate=1:duration=60",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=60",
+            "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    profile = Profile(
+        name="stateful-audio-tail",
+        transforms=[
+            TransformConfig(
+                id="audio.pitch_tempo",
+                params={"pitch": 1.0004, "tempo": 1.0},
+            ),
+            TransformConfig(id="audio.loudnorm"),
+        ],
+    )
+    plan = build_plan(source, profile, encoder_override="libx264")
+    output = tmp_path / "stateful-audio-tail.m4a"
+
+    command, _ = build_main_audio_command(plan, output)
+    subprocess.run(command.args, check=True, capture_output=True, timeout=120)
+
+    assert len(_decoded_mono_samples(output)) == round(
+        plan.source.duration_sec * 48_000
+    )
 
 
 @needs_ffmpeg
