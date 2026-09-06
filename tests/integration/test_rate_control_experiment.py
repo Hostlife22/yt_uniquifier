@@ -27,10 +27,14 @@ def test_paired_experiment_and_assessment(
                    "rights_reference": "generated pytest tiny_clip", "media_class": "sdr"}],
     }), encoding="utf-8")
     results = tmp_path / "results"
-    run(manifest, results, seconds=0.5, repeats=1)
+    run(manifest, results, seconds=0.5, repeats=1, start_sec=0.25, vbv_multipliers=(2, 4))
     assess_existing(results)
     report = json.loads((results / "results.json").read_text())
-    assert report["complete"] and len(report["rows"]) == 2
+    assert report["complete"] and len(report["rows"]) == 4
+    assert {row["policy"] for row in report["rows"]} == {
+        "source_cap", "crf_only", "cap_x2", "cap_x4",
+    }
+    assert all(row["start_sec"] == 0.25 for row in report["rows"])
     assert report["calibration"]["proposed_production_thresholds"] is None
     evidence = json.loads((results / "assessment.json").read_text())
     assert all(item["frame_pts_contract"] == "passed" for item in evidence["decoded_contracts"])

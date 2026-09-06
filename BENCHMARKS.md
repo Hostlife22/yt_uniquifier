@@ -1,5 +1,38 @@
 # Benchmark Methodology and Baseline
 
+## Bounded-QA v6 rerun — in progress
+
+The fresh full-timeline run uses `manifest.long-v6.yaml`, commit `7d3a95f`,
+and a new `results/long-v6-bounded-qa/` directory. Do not substitute the historical
+baseline below for its pending results. Long-form pHash now retains compact hashes
+instead of decoded image lists; the image-cache estimate is capped at 64 MiB (not
+a total-process RSS limit). Reference generation can use a single-copy virtual
+FFV1 concat when the old two-copy estimate cannot fit, without reducing coverage.
+Measured file growth and a free-space reserve remain enforced. The fallback is
+restricted to unchanged-duration plans; retimed references keep the existing guard.
+
+Real FFmpeg regression checks compare physical/virtual reference pixels, decoded
+timestamps, SSIM and available VMAF, including directories containing quotes/spaces.
+The eventual three-hour report, not these short tests, must establish long-form
+RSS, disk use, quality and A/V correctness. Concurrent development tests on this
+Mac mean wall times are observational, not isolated performance comparisons.
+
+Expanded bitrate experiment (fresh result directory required):
+
+```sh
+.venv/bin/python -m tools.rate_control_experiment \
+  validation-corpus/manifest.rate-control-expanded.yaml \
+  --results validation-corpus/results/rate-control-expanded-v6 \
+  --start-sec 15 --seconds 12 --repeats 3 --vbv-multiplier 2 --vbv-multiplier 4
+.venv/bin/python -m tools.rate_control_experiment \
+  --results validation-corpus/results/rate-control-expanded-v6 --assess-existing
+```
+
+Five files represent four upstream titles (PQ/HLG share Meridian). Each window
+uses one identical transformed FFV1 reference and seed 42 for source cap, 2×/4×
+bounded caps and CRF-only. This is engineering evidence, not threshold calibration
+or permission to change defaults; repeated encodes are not independent content.
+
 ## Completed historical three-hour baseline — 2026-09-06
 
 The previously running job has finished, including full source/output decode.

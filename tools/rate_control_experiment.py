@@ -114,9 +114,36 @@ def without_vbv(args: list[str]) -> list[str]:
     return result
 
 
-def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int) -> None:
+def scaled_vbv(args: list[str], multiplier: float) -> list[str]:
+    """Experimental bounded arm; production encoder defaults are untouched."""
+    if not math.isfinite(multiplier) or not 1 < multiplier <= 32:
+        raise ValueError("VBV multiplier must be finite and in (1, 32]")
+    result = list(args)
+    for option in ("-maxrate", "-bufsize"):
+        if option not in result:
+            raise ValueError(f"bounded experiment requires {option}")
+        index = result.index(option) + 1
+        if index == len(result):
+            raise ValueError("missing VBV option value")
+        raw = result[index]
+        suffix = raw[-1] if raw[-1:] in {"k", "M"} else ""
+        amount = float(raw[:-1] if suffix else raw)
+        result[index] = f"{amount * multiplier:g}{suffix}"
+    return result
+
+
+def run(
+    manifest_path: Path, destination: Path, *, seconds: float, repeats: int,
+    start_sec: float = 0.0, vbv_multipliers: tuple[float, ...] = (),
+) -> None:
     if not 0 < seconds <= 30 or not 1 <= repeats <= 5:
         raise ValueError("use 0 < seconds <= 30 and 1 <= repeats <= 5")
+    if not math.isfinite(start_sec) or start_sec < 0:
+        raise ValueError("start_sec must be finite and nonnegative")
+    if len(set(vbv_multipliers)) != len(vbv_multipliers):
+        raise ValueError("duplicate VBV multiplier")
+    for multiplier in vbv_multipliers:
+        scaled_vbv(["-maxrate", "1k", "-bufsize", "2k"], multiplier)
     manifest = load_manifest(manifest_path)
     destination.mkdir(parents=True, exist_ok=False)
     rows: list[dict[str, Any]] = []
@@ -125,6 +152,7 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
         "ffmpeg": subprocess.check_output(["ffmpeg", "-version"], text=True).splitlines()[0],
         "method": "paired encoding-only against identical transformed FFV1 SDR reference",
         "acceptance": "NOT VERIFIED: no human labels or independent held-out corpus",
+        "start_sec": start_sec, "vbv_multipliers": vbv_multipliers,
     }
     for case in manifest.cases:
         for variant in manifest.variants:
@@ -138,7 +166,10 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
             plan = build_plan(case.source, profile, encoder_override="libx264")
             plan = plan.model_copy(update={"run_seed": 42})
             video = plan.source.video[0]
-            duration = min(seconds, plan.source.duration_sec)
+            if start_sec + seconds > plan.source.duration_sec:
+                raise ValueError("requested window extends beyond source duration")
+            duration = seconds
+            source_sha256 = _sha256(case.source)
             estimate = video.width * video.height * max(video.fps, 1) * duration * 6
             if shutil.disk_usage(destination).free < estimate + 2_000_000_000:
                 raise ValueError("insufficient reference disk budget")
@@ -148,7 +179,7 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
             base = build_video_segment_command(plan, case.source, cell / "output.mp4").args
             # Limit input decoding, keeping the same source clock and filter graph in all arms.
             input_index = base.index("-i")
-            base[input_index:input_index] = ["-t", str(duration)]
+            base[input_index:input_index] = ["-ss", str(start_sec), "-t", str(duration)]
             encoder_index = base.index("-c:v")
             encoder_length = len(_encoder_args_for(plan))
             reference_cmd = (
@@ -162,6 +193,11 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
             for repeat in range(repeats):
                 # Alternate order to reduce monotonic thermal/cache bias.
                 order = ["source_cap", "crf_only"]
+                bounded = {f"cap_x{value:g}": value for value in vbv_multipliers}
+                order.extend(bounded)
+                # Rotate all arms across repetitions, then reverse alternating runs.
+                shift = repeat % len(order)
+                order = order[shift:] + order[:shift]
                 if repeat % 2:
                     order.reverse()
                 for policy in order:
@@ -169,6 +205,8 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
                     command = base[:-1] + [str(output)]
                     if policy == "crf_only":
                         command = without_vbv(command)
+                    elif policy in bounded:
+                        command = scaled_vbv(command, bounded[policy])
                     log = output.with_suffix(".log")
                     if _capture(command, log):
                         raise RuntimeError(f"encode failed: {output.name}")
@@ -184,7 +222,8 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
                     rows.append({
                         "case": case.case_id, "variant": variant.variant_id,
                         "policy": policy, "repeat": repeat, "seconds": duration,
-                        "source_sha256": _sha256(case.source),
+                        "start_sec": start_sec,
+                        "source_sha256": source_sha256,
                         "rights_reference": case.rights_reference,
                         "vmaf": vm.score, "ssim": sm.score, "psnr_db": psnr,
                         "size_bytes": output.stat().st_size, **resources,
@@ -199,7 +238,8 @@ def run(manifest_path: Path, destination: Path, *, seconds: float, repeats: int)
     (destination / "results.json").write_text(
         json.dumps(report, indent=2, allow_nan=False), encoding="utf-8",
     )
-    fields = ["case", "variant", "policy", "repeat", "vmaf", "ssim", "psnr_db",
+    fields = ["case", "variant", "policy", "repeat", "start_sec", "seconds",
+              "vmaf", "ssim", "psnr_db",
               "size_bytes", "wall_sec", "rss_peak_kb"]
     with (destination / "results.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
@@ -217,6 +257,8 @@ if __name__ == "__main__":
     parser.add_argument("--results", type=Path, required=True)
     parser.add_argument("--seconds", type=float, default=6)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--start-sec", type=float, default=0.0)
+    parser.add_argument("--vbv-multiplier", type=float, action="append", default=[])
     parser.add_argument("--assess-existing", action="store_true")
     args = parser.parse_args()
     if args.assess_existing:
@@ -224,4 +266,5 @@ if __name__ == "__main__":
     elif args.manifest is None:
         parser.error("manifest is required for a new experiment")
     else:
-        run(args.manifest, args.results, seconds=args.seconds, repeats=args.repeats)
+        run(args.manifest, args.results, seconds=args.seconds, repeats=args.repeats,
+            start_sec=args.start_sec, vbv_multipliers=tuple(args.vbv_multiplier))
