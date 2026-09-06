@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -118,8 +119,9 @@ def test_manifest_rejects_source_path_escape(tmp_path: Path) -> None:
         load_manifest(manifest, require_media=False)
 
 
+@pytest.mark.parametrize("reuse_source", [False, True])
 def test_runner_reuses_existing_benchmark_and_qa_pipelines(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_source: bool,
 ) -> None:
     profile = _local_profile(tmp_path)
     payload = _manifest(Path(profile.name))
@@ -128,6 +130,17 @@ def test_runner_reuses_existing_benchmark_and_qa_pipelines(
     source.write_bytes(b"owned test fixture")
     manifest = load_manifest(_write_manifest(tmp_path, payload))
     commands: list[list[str]] = []
+    source_evidence = None
+    monkeypatch.setattr(natural_corpus, "probe", lambda _p: SimpleNamespace(
+        audio=[object()], duration_sec=1.0,
+    ))
+    if reuse_source:
+        source_evidence = tmp_path / "source-evidence.json"
+        source_evidence.write_text(json.dumps({
+            "case_id": "licensed-sdr", "sha256": natural_corpus._sha256(source),
+            "size_bytes": source.stat().st_size, "duration_sec": 1.0,
+            "lufs_i": -20.0, "true_peak_dbtp": -2.0, "audio_note": None,
+        }))
 
     def fake_capture(command: list[str], log: Path) -> int:
         commands.append(command)
@@ -151,14 +164,17 @@ def test_runner_reuses_existing_benchmark_and_qa_pipelines(
 
     monkeypatch.setattr(natural_corpus, "_capture", fake_capture)
     monkeypatch.setattr(natural_corpus, "_psnr", lambda *_args: (40.0, None))
-    monkeypatch.setattr(
-        natural_corpus,
-        "_audio_metrics",
-        lambda *_args: (-14.0, -1.0, None),
-    )
+    def audio_metrics(path):
+        if reuse_source and path == source:
+            pytest.fail("unchanged source diagnostics were unnecessarily recomputed")
+        return (-14.0, -1.0, None)
+
+    monkeypatch.setattr(natural_corpus, "_audio_metrics", audio_metrics)
     results = tmp_path / "results"
 
-    assert natural_corpus.run_manifest(manifest, results, with_sscd=True) == 0
+    assert natural_corpus.run_manifest(
+        manifest, results, with_sscd=True, source_evidence=source_evidence,
+    ) == 0
     assert len(commands) == 2
     assert Path(commands[0][1]).name == "benchmark.py"
     assert "--accept-watermark-risk" in commands[0]
@@ -169,8 +185,37 @@ def test_runner_reuses_existing_benchmark_and_qa_pipelines(
     assert "--sscd" in commands[1]
     summary = yaml.safe_load((results / "summary.json").read_text(encoding="utf-8"))
     assert summary["cells"][0]["rights_reference"] == "licence-42"
+    if reuse_source:
+        assert summary["sources"][0]["lufs_i"] == -20.0
+        assert summary["sources"][0]["evidence_reuse"]["sha256"]
     assert (results / "summary.csv").is_file()
     assert (results / "summary.html").is_file()
+
+
+@pytest.mark.parametrize("invalid", ["hash", "duration", "timeline"])
+def test_source_evidence_rejects_mismatch_or_incomplete_data(tmp_path, invalid):
+    profile = _local_profile(tmp_path)
+    source = tmp_path / "media" / "source.mkv"
+    source.parent.mkdir()
+    source.write_bytes(b"owned")
+    manifest = load_manifest(_write_manifest(tmp_path, _manifest(Path(profile.name))))
+    evidence = {
+        "case_id": "licensed-sdr", "sha256": natural_corpus._sha256(source),
+        "size_bytes": source.stat().st_size, "duration_sec": 1.0,
+        "lufs_i": -20.0, "true_peak_dbtp": -2.0, "audio_note": None,
+    }
+    if invalid == "hash":
+        evidence["sha256"] = "different"
+    elif invalid == "duration":
+        evidence["duration_sec"] = None
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(evidence))
+    with pytest.raises(ValueError, match="source evidence"):
+        natural_corpus.run_manifest(
+            manifest, tmp_path / "new", with_sscd=False,
+            decode_timelines=True, source_evidence=path,
+        )
+    assert not (tmp_path / "new").exists()
 
 
 def test_manifest_accepts_named_current_and_proposed_variants(tmp_path: Path) -> None:

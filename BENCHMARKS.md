@@ -1,6 +1,6 @@
 # Benchmark Methodology and Baseline
 
-## Bounded-QA v6 rerun — in progress
+## Bounded-QA v6 rerun — source measured, encoding blocked by disk admission
 
 Source qualification on `2ada787`: six-cell CI
 [`34056405055`](https://github.com/Hostlife22/yt_uniquifier/actions/runs/34056405055)
@@ -9,14 +9,45 @@ and CodeQL
 passed. Native focused resource/cadence tests, 1,548 unit tests, lint, strict mypy,
 wheel build and 16 shipped profiles passed. An additional real measured-budget
 regression prevents reference publication after overflow. The concurrently started
-full native suite remains pending and is not counted as a passing gate here.
+native suite finished with 1,896 passed, 55 skipped and one failure from the old
+VFR test function loaded before its boundary-isolation update; that exact node
+passed when rerun on the current file. This is not recorded as a clean uninterrupted
+`make check` invocation. The independent planner bug remains open.
 
-The fresh full-timeline run uses `manifest.long-v6.yaml`, processing/QA code
+Source-evidence reuse passed 21 unit checks and a real two-variant cold/reused
+smoke: **four fresh encodes plus QA/output-decode passes**, all measurement-complete.
+Only source diagnostics were reused, explicitly marked in each JSON; output work
+directories remained new. Reports: `.qualification/source-evidence-{baseline,reused}/`.
+
+The fresh full-timeline attempt used `manifest.long-v6.yaml`, processing/QA code
 introduced in `7d3a95f`, and a new `results/long-v6-bounded-qa/` directory.
 Implementation SHA-256 (source Python plus benchmark runner):
 `77db749ccb021e22d18a4475a3ed5c2f19fcfe882e899aad57bc7cec567028d5`.
 Later tooling/test/document commits do not change that implementation digest;
 the encoder's eventual metadata records HEAD at completion plus the start digest.
+Source diagnostics completed: 324,395 decoded video frames, 477,325,312 audio
+samples at 44.1 kHz, zero missing/non-increasing PTS; −23.44 LUFS / +2.57 dBTP.
+Encoding was refused by the shared disk guard: after workspace reservation,
+11.62 GiB more was required but only 9.03 GiB remained unreserved. The initial
+combined admission estimate is **29,270,668,493 bytes**, not the expected actual
+output size. No output was encoded; this attempt is retained with `ok=false`.
+It therefore has no full-run QA RSS or registered metric results.
+
+Retry needs more free storage, not a weaker guard. Three outer download ZIPs were
+checked against their retained extracted artifacts (14 SHA-256 matches each),
+but deletion awaits user approval. Existing benchmark/source media are preserved.
+After storage is available, a fresh result directory can reuse only the trusted
+source diagnostics, with full source-byte/hash/duration checking and explicit
+reuse provenance; all encoding, output QA and output decode remain fresh:
+
+```sh
+.venv/bin/python -m tools.natural_corpus run validation-corpus/manifest.long-v6.yaml \
+  --results validation-corpus/results/long-v6-bounded-qa-retry1 --decode-timelines \
+  --source-evidence validation-corpus/results/long-v6-bounded-qa/source-archival-180m-av.json
+```
+
+`--source-evidence` is opt-in for one case and trusted same-toolchain reports:
+it verifies identity, not the truth of operator-supplied measurement values.
 Do not substitute the historical
 baseline below for its pending results. Long-form pHash now retains compact hashes
 instead of decoded image lists; the image-cache estimate is capped at 64 MiB (not

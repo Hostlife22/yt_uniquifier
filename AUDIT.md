@@ -11,9 +11,11 @@ fractional cadence, plus VFR with injected valid segment boundaries.
 
 Those tests exposed an independent FFmpeg 9 keyframe-origin issue: post-scan
 `stream.start_time` can mutate on VFR MKV. It remains an explicit follow-up in the
-Risk Register, not silently counted as supported multi-segment VFR. The active
-three-hour v6 rerun and expanded bitrate experiment must finish before their
-resource/quality outcomes can be claimed; see `BENCHMARKS.md`.
+Risk Register, not silently counted as supported multi-segment VFR. The three-hour
+v6 attempt completed source diagnostics but was refused before encoding by the
+combined disk reservation estimate (29.27 GB). Retry awaits storage; no guard was
+disabled and no new three-hour output is claimed. The expanded bitrate experiment
+continues separately; see `BENCHMARKS.md`.
 
 ## Current follow-up — v1.6.0, 2026-09-06
 

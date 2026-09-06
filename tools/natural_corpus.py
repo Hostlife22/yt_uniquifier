@@ -487,7 +487,34 @@ def _comparisons(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def run_manifest(
     manifest: CorpusManifest, results: Path, *, with_sscd: bool,
     decode_timelines: bool = False,
+    source_evidence: Path | None = None,
 ) -> int:
+    cached_source: dict[str, Any] | None = None
+    evidence_sha256: str | None = None
+    if source_evidence is not None:
+        if len(manifest.cases) != 1:
+            raise ValueError("source evidence reuse requires exactly one case")
+        case = manifest.cases[0]
+        evidence_bytes = source_evidence.read_bytes()
+        evidence_sha256 = hashlib.sha256(evidence_bytes).hexdigest()
+        cached_source = json.loads(evidence_bytes)
+        if not isinstance(cached_source, dict):
+            raise ValueError("source evidence must be a JSON object")
+        if (cached_source.get("sha256") != _sha256(case.source)
+                or cached_source.get("size_bytes") != case.source.stat().st_size
+                or cached_source.get("case_id") != case.case_id
+                or _number(cached_source, "duration_sec") is None):
+            raise ValueError("source evidence does not match the current source bytes/case")
+        required = {"lufs_i", "true_peak_dbtp", "audio_note"}
+        if not required.issubset(cached_source):
+            raise ValueError("source evidence lacks audio measurement fields")
+        if decode_timelines:
+            timeline = cached_source.get("decoded_timeline", {})
+            if (not isinstance(timeline, dict) or "error" in timeline
+                    or timeline.get("method") != "ffprobe_full_decode_streaming"
+                    or not isinstance(timeline.get("streams"), list)
+                    or not timeline.get("streams")):
+                raise ValueError("source evidence lacks a completed decoded timeline")
     # A reused work directory can hit run_full's resume fast path and replace a
     # genuine encode baseline with near-zero wall time. Claim a fresh destination
     # atomically; never overwrite retained measurements or another active run.
@@ -508,23 +535,42 @@ def run_manifest(
             source_has_audio = bool(source_meta.audio)
         except Exception:  # noqa: BLE001 - benchmark failure remains cell-local evidence
             source_duration = None
-        if source_has_audio:
+        if cached_source is not None:
+            if source_duration != cached_source["duration_sec"]:
+                raise ValueError("source evidence duration differs from the current probe")
+            source_lufs = _number(cached_source, "lufs_i")
+            source_true_peak = _number(cached_source, "true_peak_dbtp")
+            source_audio_note = cached_source["audio_note"]
+        elif source_has_audio:
             source_lufs, source_true_peak, source_audio_note = _audio_metrics(case.source)
         else:
             source_lufs, source_true_peak = None, None
             source_audio_note = "not applicable: source has no audio stream"
+        source_sha256 = _sha256(case.source)
+        if cached_source is not None and source_sha256 != cached_source["sha256"]:
+            raise ValueError("source changed while validating source evidence")
         sources.append({
             "case_id": case.case_id,
             "source": case.source_rel,
-            "sha256": _sha256(case.source),
+            "sha256": source_sha256,
             "size_bytes": case.source.stat().st_size,
             "duration_sec": source_duration,
             "lufs_i": source_lufs,
             "true_peak_dbtp": source_true_peak,
             "audio_note": source_audio_note,
         })
+        if cached_source is not None:
+            assert source_evidence is not None
+            sources[-1]["evidence_reuse"] = {
+                "file": str(source_evidence), "sha256": evidence_sha256,
+                "scope": "source diagnostics only; all output processing/QA is fresh",
+                "trust": "operator-supplied report; source bytes rehashed, values not remeasured",
+            }
         if decode_timelines:
-            sources[-1]["decoded_timeline"] = _timeline_metrics(case.source)
+            sources[-1]["decoded_timeline"] = (
+                cached_source["decoded_timeline"] if cached_source is not None
+                else _timeline_metrics(case.source)
+            )
         (results / f"source-{case.case_id}.json").write_text(
             json.dumps(sources[-1], indent=2, allow_nan=False) + "\n", encoding="utf-8",
         )
@@ -715,6 +761,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--results", type=Path, required=True)
     run.add_argument("--with-sscd", action="store_true")
     run.add_argument("--decode-timelines", action="store_true")
+    run.add_argument("--source-evidence", type=Path,
+                     help="Reuse a trusted same-toolchain source JSON after full byte-hash check; "
+                          "never reuse output encodes or QA")
     return parser
 
 
@@ -739,6 +788,7 @@ def main() -> int:
         return run_manifest(
             manifest, args.results.resolve(), with_sscd=args.with_sscd,
             decode_timelines=args.decode_timelines,
+            source_evidence=args.source_evidence,
         )
     except (OSError, ValueError) as exc:
         print(f"benchmark failed: {exc}", file=sys.stderr)

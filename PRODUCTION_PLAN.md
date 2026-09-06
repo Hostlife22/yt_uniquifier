@@ -4,12 +4,14 @@
 
 - Current resource package: streamed long-form hashes, estimated 64 MiB frame-cache
   bound, and single-copy virtual FFV1 reference under the existing disk budget.
-  Fresh full-timeline v6 benchmark is running separately from historical evidence.
+  Fresh v6 source diagnostics completed; encoding was refused by disk admission.
+  Retry needs storage and a new results directory; trusted byte-matched source
+  diagnostics can be reused explicitly without reusing any output processing/QA.
   Expanded bitrate experiment adds non-prefix 12 s windows, four bounded/unbounded
   arms and five files/four titles; defaults remain unchanged. See `BENCHMARKS.md`.
 - Follow-up discovered during VFR reference tests: obtain stream origin independently
   of FFmpeg 9's frame scan, invalidate keyframe cache, and qualify offset/VFR cases.
-  Do not change the processing implementation underneath the active long-form run.
+  Keep the processing implementation fixed throughout each long-form attempt.
 - Completed controlled bitrate experiment: 18 paired encodes, same transformed SDR
   reference and CRF; source cap materially reduces quality in two tonemap cases.
   No default bitrate or quality-threshold change; retained A/B and empirical bands

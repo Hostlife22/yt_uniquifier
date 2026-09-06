@@ -293,7 +293,8 @@ remains required. The earlier +1.40 dBTP input-seek excerpt was not full-file ev
       checks against the previous sample grid; malformed decoder output is reaped.
 - [x] Single-copy virtual registered reference is pixel/PTS-equivalent in focused
       CFR/fractional-FPS and injected-boundary VFR tests; measured disk guard retained.
-- [ ] Finish `long-v6-bounded-qa`: actual full-run QA RSS, registered metrics,
+- [ ] Retry `long-v6-bounded-qa` after provisioning disk (initial attempt refused
+      before encoding); retain actual full-run QA RSS, registered metrics,
       exact decoded frame/sample endpoints and independent internal audio alignment.
 - [ ] Resolve separately reproduced FFmpeg 9 post-scan VFR stream-origin/keyframe
       normalization bug; injected-boundary reference tests do not qualify the planner.
