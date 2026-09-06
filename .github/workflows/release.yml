@@ -226,7 +226,7 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Download Linux bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: yt-uniq-gui-Linux
           path: _dl
@@ -332,7 +332,7 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
