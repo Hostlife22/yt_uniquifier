@@ -93,7 +93,7 @@ def test_pitch_tempo_chain_shape() -> None:
     spec = get("audio.pitch_tempo")
     p = PitchTempoParams(pitch=1.001, tempo=1.0, sample_rate=48000)
     c = spec.build(p, LabelAllocator(), "0:a:0")
-    assert c.filter_str.startswith("asetrate=48000*1.001000,aresample=48000,atempo=")
+    assert c.filter_str.startswith("asetrate=48048,aresample=48000,atempo=")
 
 
 def test_blend_b_has_extra_input() -> None:

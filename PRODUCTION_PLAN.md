@@ -1,5 +1,21 @@
 # Production Improvement Plan
 
+## Current qualification package — v1.6.0
+
+- Completed controlled bitrate experiment: 18 paired encodes, same transformed SDR
+  reference and CRF; source cap materially reduces quality in two tonemap cases.
+  No default bitrate or quality-threshold change; retained A/B and empirical bands
+  need human labels and held-out titles before production threshold approval.
+- Internal audio diagnostics exposed 0/-50/-100 ms drift in the legacy three-hour
+  run. Integer pitch-clock compensation and precision fixed locally, with a
+  30-minute event regression on FFmpeg 5/6/9 and encode-policy cache revision v6.
+- Actual bundle/AppImage inventories, archive/commit binding and cosign verification
+  added to release workflows. Final committed workflow qualification is pending;
+  static dependency/license completeness is not claimed by file hashes alone.
+- Legacy 180-minute benchmark is retained as legacy provenance, not a new v6 run.
+  Human HDR/listening, hardware/NFS qualification and a release tag remain outside
+  completed engineering checks. Latest measured evidence is in `BENCHMARKS.md`.
+
 Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
 profile engine или QA system не создаются. План был согласован; Phase 1 и часть
 Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. Остальные пункты
@@ -28,8 +44,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
 - Расширенные natural 4K/5.1, HDR→SDR и 176/180-minute прогоны сохраняются в
   `validation-corpus/results/extended-*`; окончательные результаты публикуются
   только после их завершения. Timings под общей нагрузкой — не isolated baseline.
-- Новый public QA contract вынесен в draft `specs/28-qa-correctness-loudness-rfc.md`:
-  до подтверждения владельца поля моделей и CLI не меняются.
+- Public QA contract `specs/28-qa-correctness-loudness-rfc.md` принят владельцем
+  как RFC #21 и реализован в 1.6.0; CI `34034216736` и CodeQL `34034216714` прошли.
 - Дополнительный P0 из natural benchmark: main-audio PTS reset терял начальную
   задержку 1,313 с. Исправлены padding до tempo/window split, clock crossfade и
   short-window headroom; реальный 130-секундный тест ×1/×2 прошёл FFmpeg 5/6/9.
@@ -38,8 +54,8 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
 - Code qualification `8cfb11e`: CI `34030418205` (все шесть конфигураций), CodeQL
   `34030418013`, Docker `34030513883` (amd64/arm64, без публикации) и Release
   `34030512436` прошли. Шесть checksums и семь подписей release-кандидата проверены
-  локально с привязкой к полному SHA. Release tag не создавался; утверждение QA
-  contract, полнота native SBOM и human acceptance по-прежнему не закрыты.
+  локально с привязкой к полному SHA. Release tag не создавался; QA contract уже
+  принят, а полнота native dependency attribution и human acceptance остаются открыты.
 
 ### Предыдущий baseline
 

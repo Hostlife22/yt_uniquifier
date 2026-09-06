@@ -43,7 +43,7 @@ def test_asetrate_method_default_back_compat() -> None:
         spec, PitchTempoParams(pitch=1.012),  # default method=asetrate
         LabelAllocator(), "0:a:0", rng=random.Random(42),
     )
-    assert "asetrate=48000*1.012000" in chain.filter_str
+    assert "asetrate=48576" in chain.filter_str
     assert "rubberband" not in chain.filter_str
 
 

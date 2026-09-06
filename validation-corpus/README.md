@@ -16,6 +16,33 @@ The Meridian MP4 is labelled P3/PQ by its publisher but has neither readable col
 tags nor a 10-bit pixel format. It must not be treated as a native HDR10 contract
 fixture. Any tagged HDR10/HLG derivative must record its exact conversion command.
 
+### Paired bitrate and internal-audio diagnostics
+
+No production rate-control defaults are changed by this experiment. Both arms use
+the existing segment graph, fixed run seed, identical CRF/GOP and source; only
+`-maxrate`/`-bufsize` differ. A transformed FFV1 SDR reference isolates encoding loss.
+Do not interpret these metrics as quality of the HDR master or intentional transforms.
+
+```bash
+.venv/bin/python -m tools.rate_control_experiment \
+  validation-corpus/manifest.rate-control.yaml \
+  --results validation-corpus/results/rate-control-new --seconds 6 --repeats 3
+.venv/bin/python -m tools.media_diagnostics SOURCE OUTPUT \
+  --start 0 --duration 20 --json audio-window.json
+```
+
+Results retain JSON/CSV/HTML and commands/resources; use a fresh destination.
+Audio windows preserve channel order and leading silence. Positive lag means output
+is delayed; silence, weak/periodic correlation and boundary maxima stay inconclusive.
+The zero-lag channel matrix can diagnose known marker permutations but does not
+label speakers in unknown natural mixes. Matching audio is not editorial lip-sync
+approval. Speed-changing derivatives require explicit timeline registration and
+must not be interpreted using this same-speed diagnostic.
+
+Observed corpus min/median/max bands are not approved thresholds. Repeats of one
+clip do not increase independent content coverage. Human accept/reject labels and
+held-out titles are required before enabling corpus-based production quality gates.
+
 1. Copy `manifest.example.yaml` to `manifest.local.yaml`.
 2. Put source files under `media/` and replace every placeholder rights reference.
 3. Validate without media while preparing the manifest:

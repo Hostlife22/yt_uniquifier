@@ -48,7 +48,7 @@ def test_asetrate_uses_actual_input_sample_rate_and_outputs_48k(tmp_path: Path) 
 
     command, _ = build_main_audio_command(plan, tmp_path / "audio.m4a")
 
-    assert "asetrate=44100*1.000400" in command.filter_complex
+    assert "asetrate=44118" in command.filter_complex
     assert command.args[command.args.index("-ar") + 1] == "48000"
 
 

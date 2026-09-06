@@ -150,3 +150,47 @@ jobs:
             echo "Signing $tag@$DIGEST"
             cosign sign --yes "$tag@$DIGEST"
           done <<< "$TAGS"
+
+      - name: Verify immutable image and retain supply-chain evidence
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          image_tag="${TAGS%%$'\n'*}"
+          image_ref="${image_tag}@${DIGEST}"
+          mkdir -p image-proof
+          cosign verify --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${image_ref}" > image-proof/signature.json
+          docker buildx imagetools inspect "${image_ref}" --raw > image-proof/index.json
+          docker buildx imagetools inspect "${image_ref}" --format '{{json .SBOM}}' > image-proof/sbom.json
+          docker buildx imagetools inspect "${image_ref}" --format '{{json .Provenance}}' > image-proof/provenance.json
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          root = Path("image-proof")
+          index = json.loads((root / "index.json").read_text())
+          platforms = {
+              (item.get("platform", {}).get("os"), item.get("platform", {}).get("architecture"))
+              for item in index["manifests"]
+          }
+          assert {("linux", "amd64"), ("linux", "arm64")} <= platforms
+          expected_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          for name in ("sbom", "provenance"):
+              evidence = json.loads((root / f"{name}.json").read_text())
+              assert {"linux/amd64", "linux/arm64"} <= set(evidence), name
+              for platform in ("linux/amd64", "linux/arm64"):
+                  if name == "sbom":
+                      assert evidence[platform]["SPDX"]["packages"], platform
+                  else:
+                      arguments = evidence[platform]["SLSA"]["buildDefinition"]["externalParameters"]["request"]["args"]
+                      assert arguments["label:org.opencontainers.image.revision"] == expected_commit
+          PY
+
+      - name: Upload image verification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-image-proof
+          path: image-proof/
+          if-no-files-found: error

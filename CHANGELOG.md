@@ -30,6 +30,16 @@ the last tag.
 
 ### Changed
 
+- Fix cumulative pitch/tempo clock drift: compensate using the actual integer
+  `asetrate` clock with sufficient tempo precision, and omit a unity `atempo` pass.
+  Internal encode-policy revision v6 invalidates pre-fix cached plans/artifacts;
+  resume within the same revision still reuses valid completed segments.
+- Add paired source-cap/CRF experiments using existing video graphs, independent
+  per-channel envelope diagnostics and speaker-labelled 5.1/flash regressions.
+  Production rate-control defaults and quality thresholds remain unchanged.
+- Release candidates now include artifact-bound inventories of actual native bundles
+  and extracted AppImage, with archive/commit binding and explicit cosign verification.
+  Opaque static dependencies and full license attribution are not claimed complete.
 - Publish terminal web run status after releasing shared admission/output leases,
   preventing an immediate retry from observing completion but receiving 409/429.
 - Preserve the main audio's leading delay before tempo/PTS processing and loudness

@@ -5,13 +5,15 @@ Math:
 - aresample=SR restores sample rate
 - atempo compensates so the final tempo is `tempo`
 
-So target_atempo = tempo / pitch. We cascade atempo nodes when the target
+The sample clock is integer-valued, so target_atempo = tempo / actual_pitch,
+where actual_pitch = round(SR * pitch) / SR. We cascade atempo nodes when the target
 falls outside `atempo`'s per-instance range to maximize compatibility with
 older ffmpeg builds.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,10 +57,10 @@ def cascade_atempo(target: float) -> str:
 
     Each factor stays within [ATEMPO_MIN, ATEMPO_MAX]. Order does not matter.
     """
-    if target <= 0:
+    if not math.isfinite(target) or target <= 0:
         raise ValueError(f"atempo target must be positive, got {target}")
     if ATEMPO_MIN <= target <= ATEMPO_MAX:
-        return f"atempo={target:.6f}"
+        return f"atempo={_tempo_literal(target)}"
 
     factors: list[float] = []
     remaining = target
@@ -71,7 +73,12 @@ def cascade_atempo(target: float) -> str:
             factors.append(ATEMPO_MIN)
             remaining /= ATEMPO_MIN
     factors.append(remaining)
-    return ",".join(f"atempo={f:.6f}" for f in factors)
+    return ",".join(f"atempo={_tempo_literal(f)}" for f in factors)
+
+
+def _tempo_literal(value: float) -> str:
+    short = f"{value:.6f}"
+    return short if float(short) == value else f"{value:.12f}"
 
 
 def _build_pitch_tempo(
@@ -91,13 +98,19 @@ def _build_pitch_tempo(
         filt = f"rubberband=pitch={pitch:.6f}:tempo={params.tempo:.6f}"
     else:
         # Legacy asetrate path — fast, but distorts formants past ~2% shift.
-        compensate = params.tempo / pitch
-        atempo_chain = cascade_atempo(compensate)
+        # asetrate's output clock is an integer, not SR * the nominal pitch.
+        # Compensating nominal pitch accumulated ~86 ms over 3 h at 44.1 kHz
+        # / pitch=1.0004, despite an exact pad/trim endpoint contract.
+        shifted_rate = round(params.sample_rate * pitch)
+        compensate = params.tempo * params.sample_rate / shifted_rate
         filt = (
-            f"asetrate={params.sample_rate}*{pitch:.6f},"
-            f"aresample={params.sample_rate},"
-            f"{atempo_chain}"
+            f"asetrate={shifted_rate},"
+            f"aresample={params.sample_rate}"
         )
+        # atempo=1 is not a sample-exact identity (WSOLA may move a transient
+        # after a long silent interval). Do not invoke it for a unity clock.
+        if compensate != 1.0:
+            filt += f",{cascade_atempo(compensate)}"
     return FilterChain(in_label=in_lbl, out_label=out, filter_str=filt)
 
 

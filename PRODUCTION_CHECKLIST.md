@@ -6,7 +6,16 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
-Final code qualification in this batch: `8cfb11e07c4abfc6b0984738e9abe2bd500fe38d`.
+Latest completed source qualification: v1.6.0, `16fd5663f448d709f3211256889602677076cc6e`.
+CI `34034216736` passed all six Linux/macOS/Windows × Python 3.11/3.12 cells;
+CodeQL `34034216714` passed. Final-HEAD unit/contracts: 1543 passed. The broader
+native run passed 1839 / 55 skipped before the final small follow-ups; those were
+covered by focused checks and fresh CI. Ruff and strict mypy (164 files) passed.
+QA implementation `3cbb3ef` built wheel/Intel GUI 1.6.0 and passed runtime version,
+local ad-hoc signature and startup checks. Release/Docker artifacts below are
+historical evidence, **not** current 1.6.0 release qualification.
+
+Previous code qualification: `8cfb11e07c4abfc6b0984738e9abe2bd500fe38d`.
 CI `34030418205` passed all six OS/Python combinations; CodeQL `34030418013`
 passed and the open code-scanning alert count was zero. Docker `34030513883`
 passed amd64/arm64 with `publish=false`. Release `34030512436` passed all three
@@ -53,7 +62,7 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 
 - [ ] Release commit/tag immutable; worktree clean.
 - [x] Package metadata, CLI command/option, GUI runtime, web OpenAPI, wheel and local
-      macOS bundle runtime/plist agree on `1.5.0`; tagged Linux/Windows artifacts remain
+      macOS bundle runtime/plist agree on `1.6.0`; tagged Linux/Windows artifacts remain
       covered by the immutable-release gate below.
 - [x] Stable API/Profile/CLI/Event changes имеют RFC, migration, snapshots и
       `CHANGELOG.md` entry.
@@ -291,10 +300,15 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 
 ## 12. Security and supply chain
 
-The present release CycloneDX file inventories the Linux Python GUI environment.
-Its format, package version, digest and signature can be verified, but it does not
-fully inventory the native FFmpeg/Qt binaries or the Windows/macOS build closures.
-Complete per-artifact native SBOM coverage remains **NOT VERIFIED**.
+The original `sbom.cdx.json` inventories the Linux Python GUI environment only.
+The updated workflow adds four artifact-bound CycloneDX file inventories from the
+actual Linux/macOS/Windows bundle and extracted AppImage (including Qt/FFmpeg files
+where shipped), plus package versions from shipped METADATA. Symlinks are recorded,
+not traversed. Hashes/commit bindings and cosign verification are release gates.
+Opaque embedded/static dependency identification, external OS libraries and complete
+license attribution remain **NOT VERIFIED**; file coverage is not a complete
+dependency graph. New workflow execution must be recorded before claiming release
+qualification of these inventories.
 
 The downloaded `yt-uniq-gui-macOS.zip` contains an arm64 Mach-O executable, not a
 universal/Intel binary. Intel users need a local x86_64 build or Python installation;
@@ -318,7 +332,7 @@ an independently published Intel desktop asset remains outside verified release 
       bundles, AppImage, CycloneDX 1.5 SBOM, verified SHA-256 checksums and seven
       keyless cosign bundles without publishing a tag. The downloaded candidate and
       clean-Ubuntu AppImage runtime were independently verified locally.
-- [ ] Verify Docker buildx SBOM/provenance/signature and the actual immutable v1.5
+- [ ] Verify Docker buildx SBOM/provenance/signature and the actual immutable v1.6.0
       release assets when the approved release tag is created.
 - [x] Gitleaks found no secrets across 324 commits or the local ~174 MB build
       artifacts; persisted web errors remain redacted by regression tests.
@@ -351,7 +365,7 @@ an independently published Intel desktop asset remains outside verified release 
 - [ ] Benchmark comparison against approved baseline
 - [ ] Production risk register reviewed; no unaccepted P0/P1
 
-## Текущий статус post-v1.5.0 main
+## Исторический статус post-v1.5.0 main (не текущая release qualification)
 
 - [x] Fully provisioned production `make check`: 1725 passed, 55 expected skips;
       fault-injection recovery matrix and three-round POSIX SIGKILL chaos gate passed.

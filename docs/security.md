@@ -5,6 +5,22 @@ The canonical security policy ships in the repository root as
 so that GitHub auto-detects it and surfaces the
 **Security → Report a vulnerability** button.
 
+## Release inventory scope (v1.6.0 preparation)
+
+`tools/bundle_sbom.py` inventories the actual native bundle/extracted AppImage,
+not the packages installed in an unrelated runner. Four platform-specific
+CycloneDX 1.5 documents include regular-file SHA-256 hashes, symlink targets and
+package names/versions from bundled Python METADATA. Each document identifies the
+archive hash and source commit; the release workflow verifies bindings and cosign
+signatures. The older `sbom.cdx.json` remains explicitly build-environment evidence.
+
+This uses CycloneDX's [file/component integrity representation](https://cyclonedx.org/guides/sbom/relationships/).
+File coverage does not establish a complete dependency graph: opaque PYZ/static
+binary contents, external OS libraries, and full license attribution remain
+unverified. Cosign authenticates workflow provenance, not Apple notarization or
+Windows Authenticode. Manual Docker qualification uses a unique candidate tag,
+not `latest`/`edge`, when registry attestation verification is required.
+
 ## Reporting a vulnerability
 
 Use one of these channels:

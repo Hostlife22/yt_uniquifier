@@ -69,7 +69,7 @@ BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
 # Increment whenever an internal encode policy changes in a way that makes existing
 # completed segments unsafe to reuse under the same package development version.
-_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v5"
+_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v6"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:

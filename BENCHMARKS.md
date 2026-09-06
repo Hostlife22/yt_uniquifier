@@ -1,5 +1,68 @@
 # Benchmark Methodology and Baseline
 
+## Controlled source-cap versus CRF — 2026-09-06
+
+Completed 18 video encodes: three licensed six-second excerpts × two policies ×
+three repeats, alternating arm order, fixed seed 42, libx264 CRF 18 and identical
+existing segment filter/GOP commands. Only `-maxrate`/`-bufsize` were removed in
+the experimental arm. Each pair uses the exact same transformed lossless FFV1 SDR
+reference; all 18 decoded frame-count/PTS contracts passed independent assessment.
+
+| Case / policy | VMAF median | SSIM median | PSNR dB | Bytes median | Encode s median |
+|---|---:|---:|---:|---:|---:|
+| SDR dialogue / source cap | 94.753 | 0.993140 | 47.178 | 2,213,530 | 6.06 |
+| SDR dialogue / CRF only | 94.753 | 0.993140 | 47.178 | 2,213,460 | 9.24 |
+| PQ→SDR dark/skin / source cap | 74.588 | 0.958323 | 41.572 | 274,591 | 15.90 |
+| PQ→SDR dark/skin / CRF only | 89.282 | 0.962975 | 43.681 | 3,528,614 | 19.92 |
+| HLG→SDR motion / source cap | 76.284 | 0.957016 | 41.939 | 341,158 | 15.62 |
+| HLG→SDR motion / CRF only | 90.267 | 0.961773 | 43.361 | 3,832,537 | 17.66 |
+
+Retained: `validation-corpus/results/rate-control-v160/` (`results.json/csv/html`,
+`assessment.json`, `review.html`, source hashes, exact commands, profiles, per-arm
+process-tree RSS/time and reference/output files). Three distinct files represent
+only two upstream titles: PQ/HLG are derived natural pictures, not independent
+camera-native HDR masters. Measurements shared host load with long-form QA/tests;
+timing/RSS differences are **not isolated performance regressions**. The reference
+and diagnostic tooling were edited during the session; final assessment separately
+checks all retained output frames without re-encoding or relabelling provenance.
+
+Conclusion: source-derived bitrate alone is not a safe quality budget for these
+tonemapped/noisy outputs. Removing the cap improved VMAF by about 14–15 points but
+increased bytes about 11–13×; SDR control was unchanged. Production defaults are
+unchanged pending a bounded, explicit rate-control policy and broader evidence.
+
+### Calibration status
+
+Observed CRF-only encoding-loss bands: VMAF 89.282–94.753; SSIM 0.961773–0.993140;
+PSNR 43.361–47.178 dB. These are **not production thresholds** and do not judge
+intentional transform quality, lip sync or HDR mastering. No human accept/reject
+labels or independent held-out titles exist for this set. `assessment.json`
+therefore records `proposed_production_thresholds: null` / `NOT VERIFIED`; repeats
+are not counted as independent content. Existing loudness measurements remain
+separate full-track measurements, not arbitrary corpus-derived LUFS defaults.
+
+### Internal audio evidence
+
+Natural 4K/5.1 corrected excerpt: five active channels measure -10 ms envelope lag
+at 10-ms resolution; silent LFE is inconclusive. A speaker-labelled FLAC/MKV fixture
+passes the full segmented pipeline with six channels in order and all 150 decoded
+flash positions unchanged. The test passed native FFmpeg 9 and Linux FFmpeg 5/6.
+
+Legacy three-hour stereo baseline: source/output envelope lags are 0 / -50 / -100 ms
+at 0 / 5400 / 10800 seconds (correlations about 0.95 / 0.99 / 0.98). Matching final
+duration did not establish internal sync. The current transform reproduced a
+quantization defect in three failing clock tests: at 44100 Hz and pitch 1.0004,
+FFmpeg rounds the new clock to 44118 Hz, but nominal compensation 0.999600 creates
+8 ppm of speed error (~86.4 ms/3 h). Compensation now uses the actual integer clock,
+12-digit precision where needed, and avoids nonidentity WSOLA work at unity tempo.
+The legacy long output is retained unchanged; it is not a full v6 re-encode or
+proof of human lip-sync acceptance.
+
+The new 30-minute synthetic late-event regression passed on native FFmpeg 9 and
+Linux FFmpeg 5/6: legacy compensation shifts the event by more than 20 ms; fixed
+clock/unity handling keeps it within 5 ms. This validates the regression, not a
+replacement full three-hour encode under policy v6.
+
 ## QA contract v1.6.0 smoke (RFC #21)
 
 The retained 4K/5.1 `audio-origin-corrected-retry/output-video-only-concat.mp4`

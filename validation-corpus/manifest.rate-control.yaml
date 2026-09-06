@@ -1,0 +1,29 @@
+schema_version: 1
+matrix:
+  workers: 1
+  variants:
+    - id: soft
+      profile: ../src/yt_uniquifier/profiles/soft.yaml
+      encoder: libx264
+    - id: tonemap
+      profile: ../src/yt_uniquifier/profiles/cid_aware_hdr_to_sdr.yaml
+      encoder: libx264
+cases:
+  - id: sdr-dialogue
+    source: media/sdr-dialogue-60s.webm
+    rights_status: licensed
+    rights_reference: open-sources.yaml#tears-of-steel-1080p
+    media_class: sdr
+    variants: [soft]
+  - id: pq-dark-skin
+    source: media/hdr10-dark-highlight-30s.mp4
+    rights_status: licensed
+    rights_reference: open-sources.yaml#meridian-p3pq + DERIVATIONS.md
+    media_class: hdr10
+    variants: [tonemap]
+  - id: hlg-motion
+    source: media/hlg-motion-30s.mp4
+    rights_status: licensed
+    rights_reference: open-sources.yaml#meridian-p3pq + DERIVATIONS.md
+    media_class: hlg
+    variants: [tonemap]

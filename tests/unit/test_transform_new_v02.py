@@ -58,7 +58,7 @@ def test_pitch_no_randomize_is_deterministic() -> None:
     c1 = call_build(spec, p, LabelAllocator(), "0:a:0", rng=random.Random(42))
     c2 = call_build(spec, p, LabelAllocator(), "0:a:0", rng=random.Random(99))
     assert c1.filter_str == c2.filter_str
-    assert "asetrate=48000*1.012000" in c1.filter_str
+    assert "asetrate=48576" in c1.filter_str
 
 
 def test_pitch_randomize_same_seed_same_output() -> None:
@@ -82,7 +82,7 @@ def test_pitch_no_rng_does_not_randomize() -> None:
     p = PitchTempoParams(pitch=1.012, tempo=1.0, randomize_within=0.005)
     c = call_build(spec, p, LabelAllocator(), "0:a:0", rng=None)
     # Without rng, pitch stays at exactly 1.012.
-    assert "asetrate=48000*1.012000" in c.filter_str
+    assert "asetrate=48576" in c.filter_str
 
 
 # ---- audio_eq.randomize_bands ----------------------------------------------
