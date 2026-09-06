@@ -2,12 +2,21 @@
 
 ## Bounded-QA v6 rerun — in progress
 
+Source qualification on `2ada787`: six-cell CI
+[`34056405055`](https://github.com/Hostlife22/yt_uniquifier/actions/runs/34056405055)
+and CodeQL
+[`34056405127`](https://github.com/Hostlife22/yt_uniquifier/actions/runs/34056405127)
+passed. Native focused resource/cadence tests, 1,548 unit tests, lint, strict mypy,
+wheel build and 16 shipped profiles passed. An additional real measured-budget
+regression prevents reference publication after overflow. The concurrently started
+full native suite remains pending and is not counted as a passing gate here.
+
 The fresh full-timeline run uses `manifest.long-v6.yaml`, processing/QA code
 introduced in `7d3a95f`, and a new `results/long-v6-bounded-qa/` directory.
 Implementation SHA-256 (source Python plus benchmark runner):
 `77db749ccb021e22d18a4475a3ed5c2f19fcfe882e899aad57bc7cec567028d5`.
 Later tooling/test/document commits do not change that implementation digest;
-the encoder's eventual metadata records its actual launch HEAD.
+the encoder's eventual metadata records HEAD at completion plus the start digest.
 Do not substitute the historical
 baseline below for its pending results. Long-form pHash now retains compact hashes
 instead of decoded image lists; the image-cache estimate is capped at 64 MiB (not
@@ -23,7 +32,7 @@ RSS, disk use, quality and A/V correctness. Concurrent development tests on this
 Mac mean wall times are observational, not isolated performance comparisons.
 
 Separate extraction stress check completed: two selections of **10,820 frames**
-from a four-second 400×300 FFV1 derivative of the same licensed archival source
+from a four-second 400×300 FFV1 derivative of the same public-domain archival source
 returned identical hashes, with **125,796 KiB** (~122.85 MiB) sampled process-tree
 RSS and **158.719 s** wall time. Evidence: `.qualification/qa-memory-10820.log`
 and `.qualification/qa-memory-10820.resources.json`. This exercises the legacy
@@ -46,6 +55,12 @@ Five files represent four upstream titles (PQ/HLG share Meridian). Each window
 uses one identical transformed FFV1 reference and seed 42 for source cap, 2×/4×
 bounded caps and CRF-only. This is engineering evidence, not threshold calibration
 or permission to change defaults; repeated encodes are not independent content.
+After all 60 decoded contracts pass, this run's five temporary FFV1 references
+are scheduled for retirement to leave space for long-form registered QA. Their
+sizes/hashes are retained in `retired-reference-inventory.json`; source media,
+encoded arms, JSON/CSV/HTML, plans and the previous experiments are preserved.
+Re-assessing from reference pixels then requires regenerating those temporary
+files from the retained source/window/profile/seed and FFV1 command construction.
 
 ## Completed historical three-hour baseline — 2026-09-06
 

@@ -7,6 +7,7 @@ import imagehash
 import pytest
 
 from tools.media_diagnostics import decoded_timeline
+from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Profile, Segment
 from yt_uniquifier.core.orchestrator import build_plan
 from yt_uniquifier.core.qa import phash, registration
@@ -68,3 +69,18 @@ def test_virtual_reference_matches_materialized(
     metric = compute_vmaf(virtual.path, physical.path, reset_pts=True)
     if metric.score is not None:  # libvmaf is optional on supported FFmpeg installations.
         assert metric.score > 99.0
+
+
+@pytest.mark.integration
+def test_measured_reference_budget_prevents_publication(
+    tiny_clip, tmp_path, isolated_cache, monkeypatch,
+):
+    plan = build_plan(tiny_clip, Profile(name="bounded"), encoder_override="libx264")
+    # Admit deliberately so real encoder writes exercise the live check, not
+    # the separate planning estimate. No real filesystem is filled by this test.
+    monkeypatch.setattr(registration, "_check_reference_budget", lambda *_args: False)
+    monkeypatch.setenv("YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES", "16")
+    destination = tmp_path / "reference.mkv"
+    with pytest.raises(PipelineError, match="measured disk budget"):
+        registration.build_transformed_reference(plan, destination)
+    assert not destination.exists()
