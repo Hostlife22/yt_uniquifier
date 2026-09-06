@@ -6,7 +6,24 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
-Latest independently downloaded candidate: release `34029286481` at `fc1610e`,
+Final code qualification in this batch: `8cfb11e07c4abfc6b0984738e9abe2bd500fe38d`.
+CI `34030418205` passed all six OS/Python combinations; CodeQL `34030418013`
+passed and the open code-scanning alert count was zero. Docker `34030513883`
+passed amd64/arm64 with `publish=false`. Release `34030512436` passed all three
+GUI builds, AppImage runtime checks and signing. Its downloaded candidate ZIP
+SHA-256 is `07c89210a71b1642c76cd92aa8996fa05335d4782ba49dc0d4ce2033fd30a073`;
+all six checksums and seven cosign bundles were independently verified locally,
+including certificate workflow-SHA binding. Retained archive/proofs live under
+`.qualification/release-34030512436*`. The initial manual attempts failed before
+build because a short SHA was supplied; these successful runs used the full SHA.
+The Intel x86_64 app also built locally, reported `1.5.0` consistently with its
+plist, passed strict/deep ad-hoc signature verification and an eight-second
+offscreen startup smoke. This is not notarization or interactive GUI acceptance.
+The final native `make check` completed with 1790 passed / 55 skipped / one
+deprecation warning in 1257.03 s; Ruff and strict mypy passed. The skipped opt-in
+hardware matrix and heavy GUI E2E remain outside that full-suite claim.
+
+Earlier independently downloaded candidate: release `34029286481` at `fc1610e`,
 all six checksums and seven cosign bundles verified locally, including certificate
 workflow-SHA binding. CI `34028730804`, CodeQL `34028730880` and both Docker
 architectures `34029288190` passed at that revision. CycloneDX 1.5 contains 59

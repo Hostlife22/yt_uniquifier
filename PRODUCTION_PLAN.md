@@ -35,6 +35,11 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
   short-window headroom; реальный 130-секундный тест ×1/×2 прошёл FFmpeg 5/6/9.
   На natural-фрагменте относительный envelope lag уменьшился с −1,32 до −0,01 с;
   human lip-sync/listening и финальная квалификация нового коммита остаются отдельно.
+- Code qualification `8cfb11e`: CI `34030418205` (все шесть конфигураций), CodeQL
+  `34030418013`, Docker `34030513883` (amd64/arm64, без публикации) и Release
+  `34030512436` прошли. Шесть checksums и семь подписей release-кандидата проверены
+  локально с привязкой к полному SHA. Release tag не создавался; утверждение QA
+  contract, полнота native SBOM и human acceptance по-прежнему не закрыты.
 
 ### Предыдущий baseline
 

@@ -8,6 +8,11 @@ Matching endpoint/sample counts had concealed this internal synchronization bug.
 `pipeline.py::_main_audio_input` now materializes silence before tempo and window
 operations; 130-second delayed-pulse regressions pass on FFmpeg 5/6/9 at 1x/2x.
 Window crossfades now use the output clock and short-window peak retries retain gain.
+Natural rerender reduced relative envelope lag from -1.32 to -0.01 s at 10-ms
+resolution; encoded peak is -1.84 dBTP. All six CI configurations, CodeQL, Docker
+amd64/arm64 and the release dry-run passed at `8cfb11e`; candidate checksums and
+workflow-SHA-bound signatures were independently verified locally. These gates do
+not replace human HDR/listening acceptance or approval of the new public QA RFC.
 
 Natural 4K/5.1 uncovered post-loudnorm resampling/AAC peak overshoot, corrected
 locally with bounded re-render from source and a decoded delivery-peak gate.

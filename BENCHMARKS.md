@@ -15,6 +15,16 @@ container/rate matrices (16 each), and real leading-chapter-gap and stereo/5.1
 encoded-peak tests. Ruff, strict mypy (163 source files), and wheel build passed.
 These separate runs are not represented as a final full-suite run on one revision.
 
+Final code `8cfb11e` subsequently passed the complete native `make check`:
+**1790 passed, 55 skipped, one Starlette deprecation warning, 1257.03 seconds**.
+Ruff and strict mypy (163 source files), wheel and Intel GUI builds passed.
+Skips include the separately opted-in hardware matrix, heavy GUI E2E and the
+missing-PyQt branch in this GUI-equipped environment; they are not qualification
+of those paths. Real audio regressions also passed on Linux FFmpeg 5/6. CI
+`34030418205` passed all six OS/Python jobs; release/Docker proofs are recorded in
+`PRODUCTION_CHECKLIST.md`. The 180-minute baseline remains a separate running job
+started before this audio-origin fix, not a completed benchmark of the new code.
+
 - 4K soft cell: 31.436 s, encode 82.72 s, sampled process-tree RSS 2,456,372 KiB,
   output 41,973,462 bytes, raw VMAF 3.728567 versus registered 93.811511,
   registered SSIM 0.986410. High registered quality does not remove the original
@@ -55,6 +65,16 @@ These separate runs are not represented as a final full-suite run on one revisio
   (0.7046). This measures relative source alignment, not editorial lip-sync or a
   human listening verdict. Artifacts: `results/audio-origin-corrected-retry` and
   `results/listening-surround-origin-corrected` under `validation-corpus/`.
+- Final isolated remux uses an extracted video-only MKV as concat input, matching
+  production's video-only segment contract: `output-video-only-concat.mp4`.
+  Passing the original audio-bearing MP4 directly to concat introduced a 21.313-ms
+  priming-related video offset in the first diagnostic remux; that is not the final
+  comparison file. Final video/audio start at zero, with 753 frames, 1,508,928
+  audio samples/channel, ends 31.375/31.436 s and no PTS defects. Compressed video
+  payload SHA-256 is identical before/after:
+  `b70161be0af08c48c34e6d7ebfc4b7296aa1fd464038914775e58852b35955ef`.
+  Corrected 20-second 5.1 excerpt measures -15.37 LUFS / -1.84 dBTP, zero full-scale
+  or nonfinite values in every channel. Peak safety still does not imply -14 LUFS.
 - 176-minute video-only encode completed: 18 segments, 1,451.65 s pipeline wall,
   245,832 KiB sampled RSS, 2,042,135,805 sampled workspace/output bytes and
   1,022,159,764-byte output. Full decode counted 317,288 source and output frames,
@@ -596,8 +616,9 @@ release по [официальным upload settings](https://support.google.com
 
 ## NOT VERIFIED
 
-- Natural 95-minute movie processing is verified; licensed 2 h / 3 h+ movies and
-  human listening/visual inspection remain unverified.
+- Natural 95-minute A/V and 176-minute video-only measurements are retained. The
+  continuous 180-minute A/V baseline is still running; it must not be reported as
+  complete. Human listening/visual inspection remain unverified.
 - 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
 - HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
 - NVENC/QSV/AMF and AV1 VideoToolbox.
