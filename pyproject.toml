@@ -110,6 +110,8 @@ dev = [
     # or a leaked daemon thread can't wedge the CI matrix for an hour.
     # See [tool.pytest.ini_options]::timeout in this file.
     "pytest-timeout~=2.3",
+    # Cross-platform qualification cleans up real child process trees.
+    "psutil>=7.2.2,<8",
     "ruff~=0.5",
     "mypy>=1.10,<3.0",
     "types-PyYAML~=6.0",

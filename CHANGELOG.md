@@ -67,6 +67,9 @@ the last tag.
 
 ### Added
 
+- Exercise actual CLI, FastAPI and queue-worker jobs concurrently with real FFmpeg
+  and a shared resource registry. Include web and process-tree test dependencies in
+  the pinned development/CI closure so web qualification cannot silently skip.
 - Add strict Intel VideoToolbox 1080p/4K, cancellation and device-loss fallback
   qualification, complementing the existing CFR/VFR, SDR/HLG, GOP/profile/level and
   concurrency coverage.

@@ -97,7 +97,7 @@ in place (see [`installers/README.md`](./installers/README.md)).
 
 ```bash
 git clone https://github.com/Hostlife22/yt-uniquifier.git && cd yt-uniquifier
-make dev                           # .venv + pip install -e ".[dev,gui]"
+make dev                           # .venv + pip install -e ".[dev,gui,web]"
 yt-uniq-gui                        # GUI; or `yt-uniq run <input> ...` for CLI
 ```
 
@@ -323,7 +323,7 @@ Python 3.11 / 3.12. Coverage gate `--cov-fail-under=80` on `core/`.
 ## Development
 
 ```bash
-make dev                          # .venv + pip install -e ".[dev,gui]"
+make dev                          # .venv + pip install -e ".[dev,gui,web]"
 make check                        # ruff + mypy --strict + full pytest
 make test                         # pytest only
 make build                        # PyInstaller bundle

@@ -17,6 +17,10 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
   benchmark/QA/core, не создают второй processing pipeline.
 - Реальные процессы проверяют общий disk registry и recovery после аварии владельца;
   повторный NFSv4 Docker lab прошёл 80/80 lease и 4 SIGKILL publication boundaries.
+- Дополнительно реальные CLI, FastAPI и queue worker одновременно обработали один
+  fixture в трёх процессах: наблюдались reservations всех трёх PID в общем registry,
+  все output декодируются и reservations освобождены. Это не hard CPU/RAM quota
+  для произвольных native процессов; для неё остаются OS/container ограничения.
 - Manual release dry-run `34026381605` на `1305a3a` завершён: три GUI платформы,
   AppImage, шесть checksums и семь cosign bundles проверены локально. Docker
   `34027164490` на `eeda84a` прошёл amd64/arm64 без публикации. Последующие

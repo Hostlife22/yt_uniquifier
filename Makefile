@@ -47,12 +47,12 @@ install: venv  ## Install package + [gui] extra (production).
 	$(PIP) install -e ".[gui]"
 
 .PHONY: dev
-dev: venv  ## Install package + [dev,gui] extras (USE_LOCK=1 → install from requirements-lock.txt).
+dev: venv  ## Install [dev,gui,web] extras (USE_LOCK=1 → install from requirements-lock.txt).
 ifeq ($(USE_LOCK),1)
 	$(PIP) install --require-hashes -r requirements-lock.txt
-	$(PIP) install -e ".[dev,gui]" --no-deps
+	$(PIP) install -e ".[dev,gui,web]" --no-deps
 else
-	$(PIP) install -e ".[dev,gui]"
+	$(PIP) install -e ".[dev,gui,web]"
 endif
 
 .PHONY: dev-min
@@ -61,7 +61,7 @@ dev-min: venv  ## Install [dev] only (no PyQt6/WebEngine — CLI work).
 
 .PHONY: lock
 lock: venv  ## Regenerate requirements-lock.txt via uv pip compile (Python 3.11 + 3.12 ABIs).
-	# v1.0.1 Task 7: pin the dev + gui dependency closure so CI installs
+	# Pin the dev + gui + web dependency closure so CI installs
 	# the same versions every run. Hash mode means a tampered registry
 	# can't silently substitute a malicious wheel. Regenerate this file
 	# whenever pyproject.toml dependency ranges change; commit the diff.
@@ -70,7 +70,7 @@ lock: venv  ## Regenerate requirements-lock.txt via uv pip compile (Python 3.11 
 		exit 1; \
 	}
 	uv pip compile pyproject.toml \
-		--extra dev --extra gui \
+		--extra dev --extra gui --extra web \
 		--python-version 3.11 \
 		--universal \
 		--generate-hashes \

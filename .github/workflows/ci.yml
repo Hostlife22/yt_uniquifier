@@ -92,10 +92,10 @@ jobs:
           if [ -f requirements-lock.txt ]; then
             echo "Installing pinned closure from requirements-lock.txt"
             pip install --require-hashes -r requirements-lock.txt
-            pip install -e ".[dev,gui]" --no-deps
+            pip install -e ".[dev,gui,web]" --no-deps
           else
             echo "requirements-lock.txt missing — falling back to ranges"
-            pip install -e ".[dev,gui]"
+            pip install -e ".[dev,gui,web]"
           fi
 
       - name: Ruff check
