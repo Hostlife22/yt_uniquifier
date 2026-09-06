@@ -43,10 +43,6 @@ def redact_path(value: str, *, all_absolute: bool = False) -> str:
     home = str(Path.home())
     if value == home:
         return "<HOME>"
-    for separator in {os.sep, "/", "\\"}:
-        prefix = home.rstrip("/\\") + separator
-        if value.startswith(prefix):
-            return "<HOME>" + value[len(home):]
     posix_path = PurePosixPath(value)
     windows_path = PureWindowsPath(value)
     if all_absolute and (posix_path.is_absolute() or windows_path.is_absolute()):
@@ -56,6 +52,10 @@ def redact_path(value: str, *, all_absolute: bool = False) -> str:
         # treated as sensitive regardless of the collector's platform.
         name = windows_path.name if windows_path.is_absolute() else posix_path.name
         return f"<PATH>/{name}" if name else "<PATH>"
+    for separator in {os.sep, "/", "\\"}:
+        prefix = home.rstrip("/\\") + separator
+        if value.startswith(prefix):
+            return "<HOME>" + value[len(home):]
     return value
 
 
@@ -68,6 +68,8 @@ def redact_text(value: str, *, all_absolute_paths: bool = False) -> str:
     value = _URL_CREDENTIAL.sub(lambda match: match.group(1) + REDACTED, value)
     value = _KNOWN_TOKEN.sub(REDACTED, value)
     if all_absolute_paths:
+        # A whole path may contain whitespace; redact it before token scanning.
+        value = redact_path(value, all_absolute=True)
         value = _POSIX_PATH_TOKEN.sub(
             lambda match: redact_path(match.group(1), all_absolute=True), value,
         )
@@ -99,8 +101,12 @@ def redact_mapping(
             if _SENSITIVE_KEY.search(key_text):
                 result[key] = REDACTED
             elif isinstance(item, str) and _PATH_KEY.search(key_text):
-                result[key] = redact_path(
-                    redact_text(item), all_absolute=all_absolute_paths,
+                # Handle the complete path before inline token processing. A
+                # premature <HOME> replacement loses absolute-path identity on
+                # Windows, and tokenizing first leaks path components with spaces.
+                result[key] = redact_text(
+                    redact_path(item, all_absolute=all_absolute_paths),
+                    all_absolute_paths=all_absolute_paths,
                 )
             else:
                 result[key] = redact_mapping(

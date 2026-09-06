@@ -14,6 +14,9 @@ the last tag.
 
 ### Changed
 
+- Apply full public-path redaction before home-prefix replacement and inline
+  tokenization, preventing Windows home subdirectories and space-containing path
+  fields from leaking into web audit logs. Preserve opt-in home-only semantics.
 - Preserve explicit chapter clocks and disable AAC-priming-induced global mux
   shifts across FFmpeg versions. Retime extracted canonical SRT cue headers instead
   of packet timestamps, preserving subtitle payload on FFmpeg 5/6/9. MP4/MOV with
