@@ -46,12 +46,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch, *, duration: float,
            in_fp: list[int] | None = None, out_fp: list[int] | None = None) -> None:
     monkeypatch.setattr(cid_predict.phash, "_probe_duration", lambda _p: duration)
     monkeypatch.setattr(
-        cid_predict.phash, "sample_frames",
-        lambda _p, n=60: [Image.new("RGB", (4, 4)) for _ in range(n_chunks)],
-    )
-    monkeypatch.setattr(
-        cid_predict, "imagehash",
-        _ImagehashStub(phash=_scripted_phash(phashes_in, phashes_out)),
+        cid_predict.phash, "_sample_hashes",
+        lambda path, n=60: phashes_in if path.name == "in.mp4" else phashes_out,
     )
     monkeypatch.setattr(
         cid_predict.audio_fp, "fpcalc_available",
@@ -60,7 +56,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch, *, duration: float,
     if in_fp is not None and out_fp is not None:
         monkeypatch.setattr(
             cid_predict, "_full_fingerprint",
-            lambda path: in_fp if "in" in str(path) else out_fp,
+            lambda path: in_fp if path.name == "in.mp4" else out_fp,
         )
 
 

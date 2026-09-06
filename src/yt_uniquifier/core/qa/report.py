@@ -553,6 +553,9 @@ def build_report(
                         cancel_token=cancel_token,
                         progress=lambda fraction: p("registration", fraction * 0.70),
                     )
+                    if reference.path.suffix == ".ffconcat":
+                        notes.append("registration: full-coverage virtual FFV1 concat; "
+                                     "no second reference copy allocated")
                     preserved_hdr = (
                         plan.source.video[0].color.is_hdr
                         and plan.profile.keep_hdr

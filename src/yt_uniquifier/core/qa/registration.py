@@ -14,8 +14,9 @@ from pathlib import Path
 from yt_uniquifier import __version__
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Plan
-from yt_uniquifier.core.pipeline import build_video_segment_command_fused
-from yt_uniquifier.core.runner import CancelToken
+from yt_uniquifier.core.pipeline import build_video_segment_command_fused, expected_output_duration
+from yt_uniquifier.core.probe import probe
+from yt_uniquifier.core.runner import CancelToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.segmenter import _plan_for_segment, concat_segments, plan_segments
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
@@ -88,7 +89,8 @@ def _reference_limit_bytes() -> int:
     return value
 
 
-def _check_reference_budget(plan: Plan, destination: Path) -> None:
+def _check_reference_budget(plan: Plan, destination: Path) -> bool:
+    """Return whether a single-copy virtual concat is required by the budget."""
     if not plan.source.video:
         raise PipelineError("registered video QA requires a video stream")
     video = plan.source.video[0]
@@ -108,12 +110,19 @@ def _check_reference_budget(plan: Plan, destination: Path) -> None:
     free = shutil.disk_usage(destination.parent).free
     available_limit = min(configured_limit, int(free * 0.80))
     if estimated_peak > available_limit:
+        # A concat demuxer manifest exposes the identical lossless segment packets
+        # without allocating a second movie. Restrict the fallback to unchanged
+        # duration: retimed references retain their existing final trimming policy.
+        if (encoded_estimate <= available_limit
+                and abs(expected_output_duration(plan) - plan.source.duration_sec) < 1e-6):
+            return True
         raise PipelineError(
             "registered FFV1 peak workspace estimate exceeds its bounded disk budget: "
             f"estimated={estimated_peak}, allowed={available_limit}. Set "
             "YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES only after provisioning "
             "sufficient temporary storage."
         )
+    return False
 
 
 def build_transformed_reference(
@@ -130,7 +139,10 @@ def build_transformed_reference(
     if not (1.0 <= target_segment_sec <= 86400.0):
         raise PipelineError("registered QA segment size must be in [1, 86400] seconds")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    _check_reference_budget(plan, destination)
+    virtual = _check_reference_budget(plan, destination)
+    initial_free = shutil.disk_usage(destination.parent).free
+    byte_limit = min(_reference_limit_bytes(), int(initial_free * 0.80))
+    free_reserve = initial_free - int(initial_free * 0.80)
     provenance = reference_provenance_key(
         plan,
         target_segment_sec=target_segment_sec,
@@ -143,11 +155,20 @@ def build_transformed_reference(
     work_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[Path] = []
     notify = progress or (lambda _fraction: None)
+
+    def check_disk(_event: RunEvent | None = None) -> None:
+        paths = [*outputs, destination, destination.with_suffix(".ffconcat")]
+        used = sum(path.stat().st_size for path in paths if path.is_file())
+        if used > byte_limit or shutil.disk_usage(destination.parent).free < free_reserve:
+            raise PipelineError("registered reference exceeded its measured disk budget")
+
     for index, segment in enumerate(segments):
         if cancel_token is not None and cancel_token.is_cancelled():
             raise PipelineError("registered reference generation cancelled by user")
         segment_plan = _plan_for_segment(plan, segment.idx)
         output = work_dir / f"reference_{segment.idx:05d}.mkv"
+        outputs.append(output)
+        check_disk()
         command = build_video_segment_command_fused(
             segment_plan,
             segment,
@@ -161,23 +182,40 @@ def build_transformed_reference(
             command,
             output=output,
             cancel_token=cancel_token,
-            progress_via_stdout=False,
+            on_event=check_disk,
+            progress_via_stdout=True,
             log_path=output.with_suffix(".mkv.log"),
         )
-        outputs.append(output)
+        check_disk()
         notify((index + 1) / (len(segments) + 1))
 
+    if virtual:
+        manifest = destination.with_suffix(".ffconcat")
+        lines = ["ffconcat version 1.0"]
+        digest = hashlib.sha256()
+        for output in outputs:
+            if cancel_token is not None and cancel_token.is_cancelled():
+                raise PipelineError("registered reference generation cancelled by user")
+            duration = probe(output).duration_sec
+            if duration <= 0:
+                raise PipelineError("registered reference segment has no valid duration")
+            # Only internally generated relative names are allowed by ffconcat's
+            # default safe mode. The directory itself may contain spaces/quotes.
+            lines.extend([f"file reference-segments/{output.name}", f"duration {duration:.9f}"])
+            digest.update(_sha256_file(output, cancel_token).encode())
+        manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        digest.update(manifest.read_bytes())
+        check_disk()
+        notify(1.0)
+        key = hashlib.sha256(f"{provenance}:virtual-v1:{digest.hexdigest()}".encode()).hexdigest()
+        return TransformedReference(manifest, key, len(segments))
+
     concat_segments(
-        outputs,
-        None,
-        destination,
-        [],
-        work_dir=destination.parent / "concat",
-        audio_source_indices=[],
-        target_duration_sec=plan.source.duration_sec,
-        cancel_token=cancel_token,
-        on_event=lambda _event: None,
+        outputs, None, destination, [], work_dir=destination.parent / "concat",
+        audio_source_indices=[], target_duration_sec=plan.source.duration_sec,
+        cancel_token=cancel_token, on_event=check_disk,
     )
+    check_disk()
     notify(1.0)
     # The encoded reference digest makes the downstream embedding cache robust
     # even for third-party transforms whose extra input is not represented by a

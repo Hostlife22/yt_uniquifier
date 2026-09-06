@@ -30,6 +30,12 @@ the last tag.
 
 ### Changed
 
+- Stream long-form pHash/CID diagnostic frames into compact hashes without changing
+  the sample grid; bound the decoded-frame cache to an estimated 64 MiB.
+- When the existing reference budget fits one FFV1 copy but not two, use a virtual
+  concat for unchanged-duration registered QA. Preserve full frame coverage and
+  check measured workspace/free-space reserve during encoding; retimed references
+  retain the existing fail-closed budget policy.
 - Tolerate completed disk reservations disappearing during a concurrent scan;
   retry bounded transient file-sharing failures during registry replacement and
   owner-checked release. Malformed records and permanent failures remain fail-closed.

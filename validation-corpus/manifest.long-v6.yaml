@@ -1,0 +1,16 @@
+schema_version: 1
+matrix:
+  workers: 2
+  variants:
+    - id: v6
+      profile: ../src/yt_uniquifier/profiles/soft.yaml
+      encoder: libx264
+cases:
+  - id: archival-180m-av
+    source: media/birth-of-a-nation-1915.ogv
+    rights_status: public_domain
+    rights_reference: open-sources.yaml#birth-of-a-nation-1915
+    media_class: sdr
+    review_cues:
+      - historical archival engineering fixture only; racist content is not endorsed
+      - full non-repeating timeline; not evidence of modern dialogue or 4K quality

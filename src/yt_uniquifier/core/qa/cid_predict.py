@@ -18,8 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import imagehash
-
 from yt_uniquifier.core.qa import audio_fp, phash
 from yt_uniquifier.core.qa.corpus import Corpus, CorpusMatch
 from yt_uniquifier.core.qa.utils import _decode_chromaprint
@@ -64,10 +62,8 @@ def predict(
     # distinguish subtle transforms without blowing up cost.
     samples_per_chunk = 4
     total_samples = max(n_chunks * samples_per_chunk, 16)
-    in_frames = phash.sample_frames(input_path, n=total_samples)
-    out_frames = phash.sample_frames(output_path, n=total_samples)
-    in_phashes = [int(str(imagehash.phash(f)), 16) for f in in_frames]
-    out_phashes = [int(str(imagehash.phash(f)), 16) for f in out_frames]
+    in_phashes = phash._sample_hashes(input_path, n=total_samples)
+    out_phashes = phash._sample_hashes(output_path, n=total_samples)
     actual_samples = min(len(in_phashes), len(out_phashes))
     per_chunk = max(1, actual_samples // n_chunks)
     n_pairs = n_chunks if actual_samples >= n_chunks else max(1, actual_samples)

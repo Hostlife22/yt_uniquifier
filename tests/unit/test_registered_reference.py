@@ -120,6 +120,38 @@ def test_reference_budget_fails_before_large_temp_encode(
         registration.build_transformed_reference(plan, tmp_path / "reference.mkv")
 
 
+def test_reference_single_copy_budget_and_retiming_guard(tmp_path, monkeypatch):
+    plan = _plan(tmp_path / "source.mp4")
+    destination = tmp_path / "reference.mkv"
+    estimate = 320 * 180 * 24 * 2 // 2
+    monkeypatch.setenv("YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES", str(estimate * 2))
+    assert registration._check_reference_budget(plan, destination) is False
+    monkeypatch.setenv("YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES", str(estimate))
+    assert registration._check_reference_budget(plan, destination) is True
+    monkeypatch.setattr(registration, "expected_output_duration", lambda _plan: 1.0)
+    with pytest.raises(PipelineError, match="bounded disk budget"):
+        registration._check_reference_budget(plan, destination)
+
+
+def test_reference_measured_growth_stops_before_concat(tmp_path, monkeypatch):
+    plan = _plan(tmp_path / "source.mp4")
+    monkeypatch.setattr(registration, "_check_reference_budget", lambda *_args: False)
+    monkeypatch.setenv("YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES", "16")
+    monkeypatch.setattr(registration, "reference_provenance_key", lambda *a, **k: "test")
+    monkeypatch.setattr(registration, "plan_segments", lambda *a: [
+        Segment(idx=0, start_sec=0.0, end_sec=2.0),
+    ])
+    monkeypatch.setattr(registration, "build_video_segment_command_fused", lambda *a, **k: None)
+
+    def run(_command, *, output, on_event, **_kwargs):
+        output.write_bytes(b"x" * 17)
+        on_event(None)
+
+    monkeypatch.setattr(registration, "run_ffmpeg", run)
+    with pytest.raises(PipelineError, match="measured disk budget"):
+        registration.build_transformed_reference(plan, tmp_path / "reference.mkv")
+
+
 def test_reference_reuses_divergent_segment_seeds_and_ffv1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
