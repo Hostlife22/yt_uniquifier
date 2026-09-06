@@ -30,6 +30,11 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
   только после их завершения. Timings под общей нагрузкой — не isolated baseline.
 - Новый public QA contract вынесен в draft `specs/28-qa-correctness-loudness-rfc.md`:
   до подтверждения владельца поля моделей и CLI не меняются.
+- Дополнительный P0 из natural benchmark: main-audio PTS reset терял начальную
+  задержку 1,313 с. Исправлены padding до tempo/window split, clock crossfade и
+  short-window headroom; реальный 130-секундный тест ×1/×2 прошёл FFmpeg 5/6/9.
+  На natural-фрагменте относительный envelope lag уменьшился с −1,32 до −0,01 с;
+  human lip-sync/listening и финальная квалификация нового коммита остаются отдельно.
 
 ### Предыдущий baseline
 

@@ -84,6 +84,33 @@ def test_profile_loudness_target_is_used_when_transform_has_no_override(
     assert command.filter_complex.endswith(f"[{command.output_audio_label}]")
 
 
+def test_loudnorm_measures_selected_nonfirst_track(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_uniquifier.core import pipeline as pipeline_mod
+    from yt_uniquifier.core.transforms.audio_loudnorm import LoudnormMeasurement
+
+    captured: dict[str, object] = {}
+
+    def fake_measure(*_args: object, **kwargs: object) -> LoudnormMeasurement:
+        captured.update(kwargs)
+        return LoudnormMeasurement(
+            input_i=-20.0, input_tp=-3.0, input_lra=4.0,
+            input_thresh=-30.0, target_offset=0.0,
+        )
+
+    monkeypatch.setattr(pipeline_mod, "measure", fake_measure)
+    source = _src(tmp_path).model_copy(update={"audio": [
+        AudioStream(index=1, codec="aac", sample_rate=48000, channels=2),
+        AudioStream(index=2, codec="aac", sample_rate=44100, channels=2),
+    ]})
+    plan = _plan(source, [TransformConfig(id="audio.loudnorm")], audio_tracks=[2])
+    command, _ = build_main_audio_command(plan, tmp_path / "audio.m4a")
+    prefix = "[0:a:1]aresample=44100:first_pts=0["
+    assert str(captured["pre_filter_complex"]).startswith(prefix)
+    assert command.filter_complex.startswith(prefix)
+
+
 def test_loudnorm_pass_one_measures_preceding_audio_transforms(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

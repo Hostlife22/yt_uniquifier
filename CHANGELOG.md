@@ -14,6 +14,10 @@ the last tag.
 
 ### Changed
 
+- Preserve the main audio's leading delay before tempo/PTS processing and loudness
+  measurement. Normalize once before window splitting, scale window crossfades to
+  the output clock, and retain delivery headroom in the short-window fallback.
+  Invalidate older encode artifacts; add real delayed-pulse tests at 1x/2x speed.
 - Apply full public-path redaction before home-prefix replacement and inline
   tokenization, preventing Windows home subdirectories and space-containing path
   fields from leaking into web audit logs. Preserve opt-in home-only semantics.

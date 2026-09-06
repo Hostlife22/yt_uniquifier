@@ -47,6 +47,27 @@ def test_long_audio_emits_multiple_windows(tmp_path: Path) -> None:
     assert fc.count("atrim=") == 4
     # 2 internal boundaries → 2 acrossfades.
     assert fc.count("acrossfade=") == 2
+    assert fc.count("first_pts=0") == 1
+    assert fc.index("first_pts=0") < fc.index("asplit=3") < fc.index("atrim=")
+
+
+def test_short_windowed_audio_preserves_delivery_headroom(tmp_path: Path) -> None:
+    plan = _divergent_plan(tmp_path, duration_sec=30.0, transforms=[
+        TransformConfig(id="audio.pitch_tempo", params={"pitch": 1.01}),
+    ])
+    command, _ = build_main_audio_command_windowed(
+        plan, tmp_path / "a.m4a", post_gain_db=-2.5,
+    )
+    assert "volume=-2.500000dB" in command.filter_complex
+
+
+def test_crossfade_uses_output_clock(tmp_path: Path) -> None:
+    plan = _divergent_plan(tmp_path, duration_sec=180.0, transforms=[
+        TransformConfig(id="video.speed", params={"rate": 2.0}),
+        TransformConfig(id="audio.pitch_tempo", params={"pitch": 1.0, "tempo": 2.0}),
+    ])
+    command, _ = build_main_audio_command_windowed(plan, tmp_path / "a.m4a")
+    assert command.filter_complex.count("acrossfade=d=0.05:") == 2
 
 
 def test_windowed_filter_has_unique_seeds_per_window(tmp_path: Path) -> None:

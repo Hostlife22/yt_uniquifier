@@ -6,6 +6,14 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
+Latest independently downloaded candidate: release `34029286481` at `fc1610e`,
+all six checksums and seven cosign bundles verified locally, including certificate
+workflow-SHA binding. CI `34028730804`, CodeQL `34028730880` and both Docker
+architectures `34029288190` passed at that revision. CycloneDX 1.5 contains 59
+environment components; see the incomplete native-bundle SBOM scope below.
+These artifacts **predate** the subsequent main-audio-origin correction and are
+not evidence of its release qualification. No release tag was created.
+
 Extended Intel Mac review (2026-09-06): manual release dry-run `34026381605`
 passed at `1305a3a`; six artifact checksums and seven OIDC/cosign bundles were
 independently verified locally. Docker `34027164490` passed both architectures at
@@ -265,6 +273,15 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
       remain gates.
 
 ## 12. Security and supply chain
+
+The present release CycloneDX file inventories the Linux Python GUI environment.
+Its format, package version, digest and signature can be verified, but it does not
+fully inventory the native FFmpeg/Qt binaries or the Windows/macOS build closures.
+Complete per-artifact native SBOM coverage remains **NOT VERIFIED**.
+
+The downloaded `yt-uniq-gui-macOS.zip` contains an arm64 Mach-O executable, not a
+universal/Intel binary. Intel users need a local x86_64 build or Python installation;
+an independently published Intel desktop asset remains outside verified release scope.
 
 - [x] Ruff, strict mypy and full local production gate pass (`1725 passed`,
       `55 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`

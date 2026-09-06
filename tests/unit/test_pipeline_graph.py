@@ -462,8 +462,14 @@ def test_loudnorm_triggers_measurement(
 ) -> None:
     calls = {"n": 0}
 
-    def fake_measure(source: Path, params: object | None = None) -> LoudnormMeasurement:
+    def fake_measure(
+        source: Path, params: object | None = None, *,
+        pre_filter_complex: str | None = None, pre_output_label: str | None = None,
+    ) -> LoudnormMeasurement:
         calls["n"] += 1
+        assert pre_filter_complex is not None
+        assert "first_pts=0" in pre_filter_complex
+        assert pre_output_label is not None
         return LoudnormMeasurement(
             input_i=-20.0, input_tp=-2.0, input_lra=5.0, input_thresh=-30.0,
             target_offset=0.0,

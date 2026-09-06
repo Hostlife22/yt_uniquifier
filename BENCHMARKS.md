@@ -39,8 +39,22 @@ These separate runs are not represented as a final full-suite run on one revisio
 - Both 4K variants and the corrected-audio mux decode to 753 video frames and
   1,508,928 audio samples/channel; video ends at 31.375 s, audio at 31.436 s
   (+61 ms). Source already has a +62.33 ms endpoint delta and delayed audio start;
-  normalized padding accounts for the increased decoded sample count. This does
-  not establish lip-sync between the independently published video/audio editions.
+  the increased decoded sample count alone does **not** demonstrate correct padding
+  placement. Subsequent 10-ms RMS-envelope correlation exposed a 1.32-second advance
+  in both baseline and peak-only-corrected audio, matching the source's 1.313-second
+  leading gap. These files must not be used as synchronization-qualified outputs.
+  A new origin correction materializes silence before tempo/PTS operations; real
+  130-second delayed-pulse tests at 1x/2x pass on FFmpeg 5/6/9. Natural rerender and
+  independent editorial lip-sync assessment remain separate checks.
+- Natural origin-corrected rerender: existing baseline video stream copied without
+  another video encode; audio rendered again from the original source. Staged full
+  decode/contract/peak validation passed. Delivered full-stream peak is -1.84 dBTP
+  after two source renders and -1.87 dB linked gain. On the same 20-second region
+  starting at 2 s, decoded mono 8 kHz / 10-ms RMS-envelope cross-correlation within
+  ±2 s measures baseline lag -1.32 s (0.7195 correlation), corrected lag -0.01 s
+  (0.7046). This measures relative source alignment, not editorial lip-sync or a
+  human listening verdict. Artifacts: `results/audio-origin-corrected-retry` and
+  `results/listening-surround-origin-corrected` under `validation-corpus/`.
 - 176-minute video-only encode completed: 18 segments, 1,451.65 s pipeline wall,
   245,832 KiB sampled RSS, 2,042,135,805 sampled workspace/output bytes and
   1,022,159,764-byte output. Full decode counted 317,288 source and output frames,

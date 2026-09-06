@@ -10,6 +10,12 @@ distinguish an unavailable measurement from a passed gate. VMAF (0–100) and SS
 (-1–1) need independent opt-in policies. No natural-corpus-derived defaults have
 been approved, and a good similarity score must not hide a correctness failure.
 
+`core/qa/vmaf.py::compute` currently turns any numeric VMAF below 1 into an
+unavailable score and falls back to SSIM. A valid low score and an invalid scoring
+domain are different conditions; magnitude alone cannot distinguish them. The
+extended HDR experiment makes this distinction visible, but is not proof that an
+SDR VMAF model can judge HDR mastering quality.
+
 ## Proposal
 
 Keep every existing field, flag, default and raw/registered metric meaning.
@@ -23,6 +29,9 @@ Add nullable `correctness` and `loudness` objects to `QAReport`:
   Unavailable requested metrics fail the requested gate, not silently pass;
 - correctness has precedence over quality. Loudness does not imply acceptable
   clipping, phase, clicks, speech quality or human listening approval.
+- retain numeric zero/near-zero VMAF when the measurement succeeds; determine
+  domain validity/backend failure independently, and never let SSIM silently
+  substitute for an explicitly requested VMAF minimum.
 
 ## Implementation after acceptance
 
@@ -32,6 +41,7 @@ frame/sample diagnostics in `tools/` until independently promoted to a public AP
 Update schema/CLI snapshots, `docs/api-contracts.md`, `docs/qa_report.md`, changelog
 and version together. Test legacy JSON, optional backends, invalid output, silence,
 multitrack audio, incompatible scoring domains and independent threshold boundaries.
+Include valid 0/0.5 VMAF, failed backend parsing, and a high-SSIM/low-VMAF pair.
 
 ## Alternatives
 

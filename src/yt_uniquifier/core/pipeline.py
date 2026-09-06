@@ -69,7 +69,7 @@ BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
 # Increment whenever an internal encode policy changes in a way that makes existing
 # completed segments unsafe to reuse under the same package development version.
-_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v4"
+_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v5"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:
@@ -95,6 +95,20 @@ def _main_audio_channel_args(plan: Plan) -> list[str]:
     if not stream.channel_layout and stream.channels > 2:
         return ["-ac", str(stream.channels)]
     return []
+
+
+def _main_audio_input(plan: Plan, alloc: LabelAllocator) -> tuple[str, str]:
+    """Materialize the source's leading silence before any tempo/PTS operation."""
+    selected = selected_audio_relative_indices(plan.source, plan.profile.audio_tracks)
+    if not selected:
+        raise PipelineError("cannot prepare audio without a selected stream")
+    sample_rate = plan.source.audio[selected[0]].sample_rate
+    if sample_rate <= 0:
+        raise PipelineError("selected audio has an invalid sample rate")
+    label = alloc.next("a")
+    return label, (
+        f"[0:a:{selected[0]}]aresample={sample_rate}:first_pts=0[{label}]"
+    )
 
 
 def _main_audio_tail_filter(plan: Plan, *, post_gain_db: float = 0.0) -> str:
@@ -189,8 +203,8 @@ def _measure_before_loudnorm(
     )
     if not selected_audio:
         raise PipelineError("cannot measure loudness without a selected audio stream")
-    label = f"0:a:{selected_audio[0]}"
-    chains: list[str] = []
+    label, input_chain = _main_audio_input(plan, alloc)
+    chains: list[str] = [input_chain]
     for tc in audio_transforms:
         if tc.id == LOUDNORM_ID:
             break
@@ -202,8 +216,6 @@ def _measure_before_loudnorm(
     params = _resolve_loudnorm_target(
         _loudnorm_params_from(plan.profile, audio_transforms), rng,
     )
-    if not chains:
-        return measure(plan.source.path, params)
     return measure(
         plan.source.path,
         params,
@@ -893,8 +905,8 @@ def build_main_audio_command(
     if needs_loudnorm and measurement is None:
         measurement = _measure_before_loudnorm(plan, audio_transforms)
 
-    a_label = f"0:a:{selected_audio[0]}"
-    a_chains: list[str] = []
+    a_label, input_chain = _main_audio_input(plan, alloc)
+    a_chains: list[str] = [input_chain]
     for tc in audio_transforms:
         spec = get(tc.id)
         params = _audio_transform_params(plan, tc)
@@ -992,6 +1004,7 @@ def build_main_audio_command_windowed(
         # Short audio — windowing buys nothing; degrade to legacy path.
         return build_main_audio_command(
             plan, audio_output, loudnorm_measurement=loudnorm_measurement,
+            post_gain_db=post_gain_db,
         )
 
     audio_transforms_all = [
@@ -1013,12 +1026,15 @@ def build_main_audio_command_windowed(
     measurement = loudnorm_measurement
 
     alloc = LabelAllocator()
-    window_chains: list[str] = []
+    origin, input_chain = _main_audio_input(plan, alloc)
+    window_inputs = [alloc.next("a") for _ in windows]
+    window_chains = [
+        input_chain,
+        f"[{origin}]asplit={len(windows)}" + "".join(f"[{label}]" for label in window_inputs),
+    ]
     window_out_labels: list[str] = []
-    # Relative audio specifier — same as FilterGraph.build.
-    main_audio_specifier = f"0:a:{selected_audio[0]}"
 
-    for w in windows:
+    for w, input_label in zip(windows, window_inputs, strict=True):
         seg_seed = derive_segment_seed(
             plan.plan_hash, AUDIO_WINDOW_NS_OFFSET + w.idx, plan.run_seed,
         )
@@ -1036,7 +1052,7 @@ def build_main_audio_command_windowed(
         # Start the per-window chain: atrim the slice, reset PTS to 0.
         trim_out = alloc.next("a")
         chain_parts = [
-            f"[{main_audio_specifier}]atrim=start={cut_in:.4f}:end={cut_out:.4f},"
+            f"[{input_label}]atrim=start={cut_in:.4f}:end={cut_out:.4f},"
             f"asetpts=PTS-STARTPTS[{trim_out}]"
         ]
         a_label = trim_out
@@ -1055,12 +1071,15 @@ def build_main_audio_command_windowed(
     # Crossfade adjacent windows pairwise. Each step takes previous accumulator
     # + next window's tail, produces a new combined label.
     acrossfade_chains: list[str] = []
+    crossfade_duration = (
+        CROSSFADE_SEC * expected_output_duration(plan) / plan.source.duration_sec
+    )
     accumulator = window_out_labels[0]
     for next_label in window_out_labels[1:]:
         out_label = alloc.next("a")
         acrossfade_chains.append(
             f"[{accumulator}][{next_label}]"
-            f"acrossfade=d={CROSSFADE_SEC}:c1=tri:c2=tri[{out_label}]"
+            f"acrossfade=d={crossfade_duration:g}:c1=tri:c2=tri[{out_label}]"
         )
         accumulator = out_label
 

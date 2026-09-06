@@ -2,6 +2,13 @@
 
 ## Extended qualification findings — 2026-09-06
 
+Natural-content envelope comparison additionally exposed a 1.32-second audio
+advance: resetting main-audio PTS discarded the source's 1.313-second leading gap.
+Matching endpoint/sample counts had concealed this internal synchronization bug.
+`pipeline.py::_main_audio_input` now materializes silence before tempo and window
+operations; 130-second delayed-pulse regressions pass on FFmpeg 5/6/9 at 1x/2x.
+Window crossfades now use the output clock and short-window peak retries retain gain.
+
 Natural 4K/5.1 uncovered post-loudnorm resampling/AAC peak overshoot, corrected
 locally with bounded re-render from source and a decoded delivery-peak gate.
 Staged media is now checked before atomic replacement, not only after publication.

@@ -16,11 +16,17 @@ desktop-бинарника.
 | Файл                                | OS              | Подпись                | Что внутри                                             |
 |-------------------------------------|-----------------|------------------------|--------------------------------------------------------|
 | `yt-uniq-gui-*.AppImage`            | Linux (x86_64)  | ✅ self-contained       | PyInstaller бандл + **bundled static ffmpeg/ffprobe**  |
-| `yt-uniq-gui-macOS.zip` (`.app`)    | macOS 12+       | ⚠️ ad-hoc только (v1.1.0+) — см. ниже | `.app` бандл; ffmpeg = system (brew install ffmpeg)    |
+| `yt-uniq-gui-macOS.zip` (`.app`)    | macOS 12+, Apple Silicon (arm64) | ⚠️ ad-hoc только (v1.1.0+) — см. ниже | `.app` бандл; ffmpeg = system (brew install ffmpeg)    |
 | `yt-uniq-gui-Windows.zip` (`.exe`)  | Windows 10/11   | ❌ unsigned (см. ниже)  | PyInstaller бандл; ffmpeg = system (`choco install`)   |
 | `SHA256SUMS`                        | все             | —                       | стандартный `sha256sum -c`-формат                       |
 
 ### Установка по платформам
+
+Текущий `macos-latest` release runner создаёт arm64, а не universal `.app`:
+это подтверждено проверкой Mach-O в candidate от 2026-09-06. На Intel Mac используйте
+установку из Python-пакета или локальную сборку `make build`; наличие файла с именем
+`macOS.zip` само по себе не означает поддержку x86_64. Отдельный опубликованный Intel
+release-архив пока не заявляется.
 
 **Linux (AppImage — рекомендуется):**
 
