@@ -21,7 +21,7 @@ dependencies = [
     # the patched boundary even when another optional extra accepts older Click.
     "click>=8.3.3,<9",
     "pydantic~=2.7",
-    "rich~=13.7",
+    "rich>=13.7,<16.0",
     "pyyaml~=6.0",
     "imagehash~=4.3",
     # Pillow is production runtime through imagehash. Keep the lower bound at
