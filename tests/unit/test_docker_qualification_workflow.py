@@ -14,3 +14,9 @@ def test_manual_docker_qualification_can_skip_registry_mutation() -> None:
     assert workflow["jobs"]["buildx"]["if"] == (
         "github.event_name != 'workflow_dispatch' || inputs.publish"
     )
+
+
+def test_docker_smoke_root_is_traversable_by_container_uid() -> None:
+    script = (Path(__file__).parents[2] / "tools/docker_multiarch_smoke.sh").read_text()
+    assert 'chmod 0755 "${smoke_dir}"' in script
+    assert script.index('chmod 0755 "${smoke_dir}"') < script.index("docker run")

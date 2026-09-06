@@ -15,6 +15,9 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "${smoke_dir}/input" "${smoke_dir}/output" "${smoke_dir}/work"
+# mktemp creates 0700, owned by the host runner. The image runs as UID 1000,
+# which differs from hosted Linux's UID; it must traverse the mounted root too.
+chmod 0755 "${smoke_dir}"
 chmod 0777 "${smoke_dir}/input" "${smoke_dir}/output" "${smoke_dir}/work"
 
 build_cache_args=()

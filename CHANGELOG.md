@@ -16,6 +16,8 @@ the last tag.
 
 - Add manual Docker `publish=false` qualification: both architecture smokes run
   without changing GHCR tags; existing publication defaults remain unchanged.
+- Make the smoke test's private temporary root traversable by the container UID
+  on native Linux, where host and image users differ.
 - Verify main-audio true peak after AAC delivery, not only before encoding; retry
   from the original source with bounded linked headroom and fail closed if the
   ceiling still cannot be met. Revalidate cached audio and final output. Peak
