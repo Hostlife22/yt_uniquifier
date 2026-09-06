@@ -7,6 +7,7 @@ import csv
 import hashlib
 import html
 import json
+import math
 import os
 import platform
 import re
@@ -315,12 +316,16 @@ def _audio_metrics(path: Path) -> tuple[float | None, float | None, str | None]:
         loudness = measure(path)
     except Exception as exc:  # noqa: BLE001 - metric availability belongs in report
         return None, None, f"audio loudness unavailable: {exc}"
+    if not math.isfinite(loudness.input_i) or not math.isfinite(loudness.input_tp):
+        return None, None, "audio loudness unavailable: silence/nonfinite measurement"
     return loudness.input_i, loudness.input_tp, None
 
 
 def _number(payload: dict[str, Any], key: str) -> float | int | None:
     value = payload.get(key)
-    return value if isinstance(value, (float, int)) and not isinstance(value, bool) else None
+    if isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value):
+        return value
+    return None
 
 
 def _required_metric_names(
@@ -483,7 +488,15 @@ def run_manifest(
     manifest: CorpusManifest, results: Path, *, with_sscd: bool,
     decode_timelines: bool = False,
 ) -> int:
-    results.mkdir(parents=True, exist_ok=True)
+    # A reused work directory can hit run_full's resume fast path and replace a
+    # genuine encode baseline with near-zero wall time. Claim a fresh destination
+    # atomically; never overwrite retained measurements or another active run.
+    try:
+        results.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise ValueError(
+            "benchmark results already exist; choose a fresh results directory"
+        ) from exc
     cells: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
     failed = False
@@ -512,6 +525,9 @@ def run_manifest(
         })
         if decode_timelines:
             sources[-1]["decoded_timeline"] = _timeline_metrics(case.source)
+        (results / f"source-{case.case_id}.json").write_text(
+            json.dumps(sources[-1], indent=2, allow_nan=False) + "\n", encoding="utf-8",
+        )
         for variant in (
             item for item in manifest.variants if item.variant_id in case.variant_ids
         ):
@@ -658,7 +674,7 @@ def run_manifest(
         "comparisons": comparisons,
     }
     (results / "summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(summary, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
     )
     _write_summary_csv(sources, cells, results / "summary.csv")
     _write_summary_html(sources, cells, comparisons, results / "summary.html")
@@ -719,10 +735,14 @@ def main() -> int:
     )
     if args.command == "validate":
         return 0
-    return run_manifest(
-        manifest, args.results.resolve(), with_sscd=args.with_sscd,
-        decode_timelines=args.decode_timelines,
-    )
+    try:
+        return run_manifest(
+            manifest, args.results.resolve(), with_sscd=args.with_sscd,
+            decode_timelines=args.decode_timelines,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"benchmark failed: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

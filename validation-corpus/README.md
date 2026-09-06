@@ -64,6 +64,12 @@ historical films. Fetch the pinned sources and prepare derivatives using
 Completion means **measured**, not production-approved. Inspect `qa_verdict`,
 missing measurements, delivery peaks and human-review status independently.
 The matrix is intentionally slow; full-film QA performs multiple full decodes.
+Each run requires a fresh results directory, including when using
+`make production-benchmark CORPUS_RESULTS=validation-corpus/results/my-next-run`.
+This protects retained evidence and prevents a cached resume from being reported
+as an unrealistically fast new encode. Completed source measurements are retained
+per case before encoding starts. Silence/nonfinite loudness is unavailable/null,
+not a passing score or non-standard JSON Infinity.
 
 Use `--decode-timelines` on `tools/natural_corpus.py run` to include full decoded
 frame counts, native-rate audio sample counts, non-increasing/missing PTS and

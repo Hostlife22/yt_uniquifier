@@ -19,4 +19,6 @@ def test_manual_docker_qualification_can_skip_registry_mutation() -> None:
 def test_docker_smoke_root_is_traversable_by_container_uid() -> None:
     script = (Path(__file__).parents[2] / "tools/docker_multiarch_smoke.sh").read_text()
     assert 'chmod 0755 "${smoke_dir}"' in script
-    assert script.index('chmod 0755 "${smoke_dir}"') < script.index("docker run")
+    assert script.index('chmod 0755 "${smoke_dir}"') < script.index("--entrypoint ffmpeg")
+    assert '--entrypoint chmod --volume "${smoke_dir}:/smoke"' in script
+    assert script.index("-R a+rwX /smoke") < script.index('rm -rf "${smoke_dir}"')

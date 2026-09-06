@@ -5,10 +5,18 @@ platform="${1:-linux/amd64}"
 tag="${2:-yt-uniquifier:smoke-${platform##*/}}"
 smoke_dir="$(mktemp -d)"
 container_id=""
+smoke_image_ready=0
 
 cleanup() {
   if [[ -n "${container_id}" ]]; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
+  fi
+  if [[ "${smoke_image_ready}" == 1 ]]; then
+    # Container-owned nested work directories may be 0755. Allow the host UID
+    # to remove this script's disposable workspace, never a user media mount.
+    docker run --rm --platform "${platform}" --network none --user 0:0 \
+      --entrypoint chmod --volume "${smoke_dir}:/smoke" "${tag}" \
+      -R a+rwX /smoke >/dev/null 2>&1 || true
   fi
   rm -rf "${smoke_dir}"
 }
@@ -31,6 +39,7 @@ fi
 
 docker buildx build --platform "${platform}" --load --tag "${tag}" \
   "${build_cache_args[@]}" .
+smoke_image_ready=1
 
 docker run --rm --platform "${platform}" --entrypoint ffmpeg \
   --volume "${smoke_dir}/input:/work" "${tag}" \

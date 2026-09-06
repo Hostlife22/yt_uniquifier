@@ -34,6 +34,33 @@ def _local_profile(tmp_path: Path) -> Path:
     return profile
 
 
+def test_existing_benchmark_evidence_is_never_overwritten(tmp_path: Path) -> None:
+    profile = _local_profile(tmp_path)
+    manifest = load_manifest(
+        _write_manifest(tmp_path, _manifest(Path(profile.name))), require_media=False,
+    )
+    results = tmp_path / "results"
+    results.mkdir()
+    previous = results / "benchmark.json"
+    previous.write_text("previous evidence")
+    with pytest.raises(ValueError, match="choose a fresh"):
+        natural_corpus.run_manifest(manifest, results, with_sscd=False)
+    assert previous.read_text() == "previous evidence"
+
+
+def test_nonfinite_loudness_is_unavailable_not_json_infinity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(natural_corpus, "measure", lambda path: SimpleNamespace(
+        input_i=float("-inf"), input_tp=float("-inf"),
+    ))
+    lufs, peak, note = natural_corpus._audio_metrics(tmp_path / "silence.wav")
+    assert lufs is None and peak is None
+    assert note is not None and "nonfinite" in note
+    for invalid in (float("nan"), float("inf"), True):
+        assert natural_corpus._number({"value": invalid}, "value") is None
+
+
 def _manifest(profile: Path) -> dict[str, object]:
     return {
         "schema_version": 1,
