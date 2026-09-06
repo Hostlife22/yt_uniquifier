@@ -1,5 +1,7 @@
 """QA must retain hashes, not movie-sized decoded frame lists."""
 import io
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -61,3 +63,24 @@ def test_stream_parser_matches_legacy_pixels():
 def test_stream_parser_rejects_corruption_and_oversize(blob):
     with pytest.raises(PipelineError):
         list(phash._iter_png_frames(io.BytesIO(blob)))
+
+
+@pytest.mark.parametrize("script, message", [
+    ("import os,time; os.write(1,b'badbytes'); time.sleep(30)", "invalid QA PNG"),
+    ("import sys; sys.stderr.write('decoder failed'); sys.exit(7)", "decoder failed"),
+])
+def test_streaming_failure_reaps_decoder(monkeypatch, script, message):
+    real_popen = subprocess.Popen
+    children = []
+
+    def launch(_command, **kwargs):
+        child = real_popen([sys.executable, "-c", script], **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(phash, "_probe_duration", lambda _path: 1000.0)
+    monkeypatch.setattr(phash.subprocess, "Popen", launch)
+    with pytest.raises(PipelineError, match=message):
+        phash._sample_hashes(Path("unused.mp4"), 601)
+    assert len(children) == 1
+    assert children[0].poll() is not None

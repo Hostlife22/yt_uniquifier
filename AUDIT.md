@@ -1,5 +1,20 @@
 # Production Audit: yt_uniquifier
 
+## QA resource follow-up — measurements in progress
+
+Long-form diagnostics now stream PNG frames into compact hashes without changing
+sampling. The frame cache has a 64 MiB estimated payload bound, not a global RSS
+quota. Registered QA can consume a virtual concat of existing FFV1 segments rather
+than a second movie copy when only the single-copy estimate fits; live disk/reserve
+checks remain active. Real pixel/PTS/metric equivalence tests passed for CFR and
+fractional cadence, plus VFR with injected valid segment boundaries.
+
+Those tests exposed an independent FFmpeg 9 keyframe-origin issue: post-scan
+`stream.start_time` can mutate on VFR MKV. It remains an explicit follow-up in the
+Risk Register, not silently counted as supported multi-segment VFR. The active
+three-hour v6 rerun and expanded bitrate experiment must finish before their
+resource/quality outcomes can be claimed; see `BENCHMARKS.md`.
+
 ## Current follow-up — v1.6.0, 2026-09-06
 
 The additive QA contract (RFC #21) is approved and implemented: nullable

@@ -2,8 +2,13 @@
 
 ## Bounded-QA v6 rerun — in progress
 
-The fresh full-timeline run uses `manifest.long-v6.yaml`, commit `7d3a95f`,
-and a new `results/long-v6-bounded-qa/` directory. Do not substitute the historical
+The fresh full-timeline run uses `manifest.long-v6.yaml`, processing/QA code
+introduced in `7d3a95f`, and a new `results/long-v6-bounded-qa/` directory.
+Implementation SHA-256 (source Python plus benchmark runner):
+`77db749ccb021e22d18a4475a3ed5c2f19fcfe882e899aad57bc7cec567028d5`.
+Later tooling/test/document commits do not change that implementation digest;
+the encoder's eventual metadata records its actual launch HEAD.
+Do not substitute the historical
 baseline below for its pending results. Long-form pHash now retains compact hashes
 instead of decoded image lists; the image-cache estimate is capped at 64 MiB (not
 a total-process RSS limit). Reference generation can use a single-copy virtual
@@ -16,6 +21,15 @@ timestamps, SSIM and available VMAF, including directories containing quotes/spa
 The eventual three-hour report, not these short tests, must establish long-form
 RSS, disk use, quality and A/V correctness. Concurrent development tests on this
 Mac mean wall times are observational, not isolated performance comparisons.
+
+Separate extraction stress check completed: two selections of **10,820 frames**
+from a four-second 400×300 FFV1 derivative of the same licensed archival source
+returned identical hashes, with **125,796 KiB** (~122.85 MiB) sampled process-tree
+RSS and **158.719 s** wall time. Evidence: `.qualification/qa-memory-10820.log`
+and `.qualification/qa-memory-10820.resources.json`. This exercises the legacy
+three-hour sample count but is **not** the entire QA pipeline, independent natural
+frames, or a measured three-hour speed/RSS improvement. The real full-run result
+remains pending. All 16 shipped YAML profiles also validated without changes.
 
 Expanded bitrate experiment (fresh result directory required):
 

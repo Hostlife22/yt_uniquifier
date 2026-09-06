@@ -289,6 +289,14 @@ remains required. The earlier +1.40 dBTP input-seek excerpt was not full-file ev
 
 ## 10. QA and calibration
 
+- [x] Long-form hashes are streamed, with a byte-bounded image cache and regression
+      checks against the previous sample grid; malformed decoder output is reaped.
+- [x] Single-copy virtual registered reference is pixel/PTS-equivalent in focused
+      CFR/fractional-FPS and injected-boundary VFR tests; measured disk guard retained.
+- [ ] Finish `long-v6-bounded-qa`: actual full-run QA RSS, registered metrics,
+      exact decoded frame/sample endpoints and independent internal audio alignment.
+- [ ] Resolve separately reproduced FFmpeg 9 post-scan VFR stream-origin/keyframe
+      normalization bug; injected-boundary reference tests do not qualify the planner.
 - [x] Orchestrator enforces stream/duration/HDR correctness before success.
 - [x] Known QA topology/timestamp/decode correctness failures produce `INVALID`.
 - [x] Raw and spatial/temporal registered quality metrics are both reported from
