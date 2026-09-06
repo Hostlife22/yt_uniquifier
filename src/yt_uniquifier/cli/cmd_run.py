@@ -9,6 +9,7 @@ from rich.console import Console
 
 from yt_uniquifier.cli.progress_view import make_run_progress
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.media_validation import DecodeEvidence
 from yt_uniquifier.core.models import Plan, Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import RunOptions, build_plan, run_full
 from yt_uniquifier.core.profile_loader import load_profile
@@ -148,6 +149,7 @@ def run_cmd(
                 output,
                 fast=fast_qa,
                 target_segment_sec=target_segment_sec,
+                decode_evidence=summary.decode_evidence,
             )
     except KeyboardInterrupt:
         # POSIX convention: 128 + SIGINT(2) = 130. Ctrl+C must leave
@@ -308,6 +310,7 @@ def _run_qa(
     *,
     fast: bool,
     target_segment_sec: float,
+    decode_evidence: DecodeEvidence | None = None,
 ) -> None:
     console.print("[dim]Building QA report…[/dim]")
     report = build_report(
@@ -320,6 +323,7 @@ def _run_qa(
         registration_target_segment_sec=target_segment_sec,
         # run_full already performed the mandatory complete A/V decode.
         verify_decode=False,
+        decode_evidence=decode_evidence,
     )
     json_path = output.with_suffix(output.suffix + ".qa.json")
     html_path = output.with_suffix(output.suffix + ".qa.html")

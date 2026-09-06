@@ -17,7 +17,7 @@ import math
 import re
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +30,9 @@ from yt_uniquifier.core.transforms.base import (
     register,
 )
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin
+
+if TYPE_CHECKING:
+    from yt_uniquifier.core.runner import CancelToken
 
 # YouTube content loudness target.
 DEFAULT_TARGET_I = -14.0
@@ -70,6 +73,7 @@ def measure(
     *,
     pre_filter_complex: str | None = None,
     pre_output_label: str | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> LoudnormMeasurement:
     """Run pass 1 over the full audio. Returns measurement struct.
 
@@ -106,6 +110,22 @@ def measure(
     else:
         cmd += ["-af", loudnorm_filter]
     cmd += ["-f", "null", "-"]
+    if cancel_token is not None:
+        import tempfile
+
+        from yt_uniquifier.core.pipeline import BuiltCommand
+        from yt_uniquifier.core.runner import run as run_ffmpeg
+
+        with tempfile.TemporaryDirectory(prefix="qa_loudness_") as tmp:
+            log = Path(tmp) / "measure.log"
+            run_ffmpeg(
+                BuiltCommand(args=cmd), output=Path("-"), log_path=log,
+                cancel_token=cancel_token, progress_via_stdout=False,
+                wall_timeout_sec=14400,
+            )
+            with log.open("rb") as handle:
+                handle.seek(max(0, log.stat().st_size - 65536))
+                return _parse_measurement(handle.read().decode("utf-8", errors="replace"))
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     except subprocess.TimeoutExpired as exc:

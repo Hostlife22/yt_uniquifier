@@ -1,5 +1,15 @@
 # Benchmark Methodology and Baseline
 
+## QA contract v1.6.0 smoke (RFC #21)
+
+The retained 4K/5.1 `audio-origin-corrected-retry/output-video-only-concat.mp4`
+was compared to itself with `--no-vmaf --no-audio-fp --no-cid-predict --samples 8
+--min-ssim 0.999 --loudness`. Real full-decode correctness passed; SSIM was 1.0;
+full-stream loudness was -15.70 LUFS / -1.84 dBTP. JSON/HTML artifacts:
+`.qualification/qa-rfc21-natural.{json,html}`. This is an identity/measurement smoke,
+not source-versus-derivative quality acceptance or a benchmark of encoding speed.
+The earlier 20-second excerpt LUFS is deliberately a different measurement scope.
+
 ## Extended Intel Mac experiment — 2026-09-06 (qualification in progress)
 
 Sources/rights/hashes: `validation-corpus/open-sources.yaml`; derivations and exact

@@ -1,0 +1,245 @@
+[
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "input",
+    "options": [
+      "input"
+    ],
+    "required": true,
+    "type": "file"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "output",
+    "options": [
+      "output"
+    ],
+    "required": true,
+    "type": "file"
+  },
+  {
+    "choices": [],
+    "default": 120,
+    "max": null,
+    "min": null,
+    "name": "samples",
+    "options": [
+      "--samples"
+    ],
+    "required": false,
+    "type": "int"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "no_vmaf",
+    "options": [
+      "--no-vmaf"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "no_audio_fp",
+    "options": [
+      "--no-audio-fp"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "no_ssim",
+    "options": [
+      "--no-ssim"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "json_out",
+    "options": [
+      "--json"
+    ],
+    "required": false,
+    "type": "path"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "html_out",
+    "options": [
+      "--html"
+    ],
+    "required": false,
+    "type": "path"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "no_cid_predict",
+    "options": [
+      "--no-cid-predict"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "vs_corpus",
+    "options": [
+      "--vs-corpus"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "corpus_dir",
+    "options": [
+      "--corpus-dir"
+    ],
+    "required": false,
+    "type": "path"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "fast_qa",
+    "options": [
+      "--fast-qa"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "sscd",
+    "options": [
+      "--sscd"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": 32,
+    "max": null,
+    "min": null,
+    "name": "sscd_frames",
+    "options": [
+      "--sscd-frames"
+    ],
+    "required": false,
+    "type": "int"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": null,
+    "min": null,
+    "name": "plan_json",
+    "options": [
+      "--plan-json"
+    ],
+    "required": false,
+    "type": "file"
+  },
+  {
+    "choices": [],
+    "default": 600.0,
+    "max": 86400.0,
+    "min": 1.0,
+    "name": "registration_segment_sec",
+    "options": [
+      "--registration-segment-sec"
+    ],
+    "required": false,
+    "type": "float range"
+  },
+  {
+    "choices": [],
+    "default": false,
+    "max": null,
+    "min": null,
+    "name": "loudness",
+    "options": [
+      "--loudness"
+    ],
+    "required": false,
+    "type": "boolean"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": 100.0,
+    "min": 0.0,
+    "name": "min_vmaf",
+    "options": [
+      "--min-vmaf"
+    ],
+    "required": false,
+    "type": "float range"
+  },
+  {
+    "choices": [],
+    "default": null,
+    "max": 1.0,
+    "min": -1.0,
+    "name": "min_ssim",
+    "options": [
+      "--min-ssim"
+    ],
+    "required": false,
+    "type": "float range"
+  },
+  {
+    "choices": [
+      "raw",
+      "registered"
+    ],
+    "default": "raw",
+    "max": null,
+    "min": null,
+    "name": "quality_domain",
+    "options": [
+      "--quality-domain"
+    ],
+    "required": false,
+    "type": "choice"
+  }
+]

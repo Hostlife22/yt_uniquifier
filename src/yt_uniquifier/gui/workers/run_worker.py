@@ -283,6 +283,7 @@ class RunWorker(WorkerBase):
             registration_target_segment_sec=self.options.target_segment_sec,
             # run_full already performed the mandatory complete A/V decode.
             verify_decode=False,
+            decode_evidence=summary.decode_evidence,
         )
         json_path = summary.output.with_suffix(summary.output.suffix + ".qa.json")
         html_path = summary.output.with_suffix(summary.output.suffix + ".qa.html")

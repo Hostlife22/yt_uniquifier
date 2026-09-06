@@ -1,7 +1,21 @@
 # RFC draft: explicit QA correctness/loudness and independent quality thresholds
 
-Status: DRAFT — owner approval requested; no public model or CLI changes applied.
+Status: ACCEPTED by the repository owner in the implementation request following
+the explanation of this proposal. The owner authorized expedited implementation;
+this records an explicit owner exception to the normal review window/decision
+procedure, not two invented reviewer approvals. Existing RFC #11/#12 are unchanged.
 Release class: additive MINOR. This does not reopen approved RFC #11/#12.
+Tracking: https://github.com/Hostlife22/yt_uniquifier/issues/21
+
+Implementation details: `--loudness` is opt-in (no hidden full-audio scan by
+default); `--min-vmaf`, `--min-ssim`, `--quality-domain raw|registered` set the
+persisted `quality_policy`. Explicit failed/unavailable gates exit 2 after writing
+reports; invalid/incompatible options exit 1 or argument-parse error 2. Legacy
+invocations retain their exit behavior and heuristic thresholds. The corrected
+numeric VMAF result can legitimately change the old heuristic verdict.
+An optional opaque `RunSummary.decode_evidence` carries process-local final-decode
+evidence into existing CLI/batch/GUI QA calls. File identity is checked and stale
+evidence forces another full decode; it is not portable/persistent attestation.
 
 ## Problem
 

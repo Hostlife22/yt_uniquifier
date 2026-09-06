@@ -6,6 +6,7 @@ available=False and the QA report records a 'skipped' note. No crash.
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import tempfile
@@ -40,7 +41,7 @@ def vmaf_available() -> bool:
     return "libvmaf" in proc.stdout
 
 
-_SCORE_RE = re.compile(r"VMAF score:\s*([0-9.]+)")
+_SCORE_RE = re.compile(r"VMAF score:\s*(\S+)")
 
 
 # B5 (v0.6.0): auto-subsample target — 1 sample per ~0.25 s of source.
@@ -86,10 +87,9 @@ def compute(
     `subsample=N` tells libvmaf to score every N-th frame, cutting runtime
     by ~N× — useful for long files.
 
-    `hdr_aware=True` switches to libvmaf's phone_model=0 (more lenient,
-    perceptually-tuned for tonemapped HDR↔SDR pairs). Use for any pair where
-    one side is HDR and the other is SDR; without this flag VMAF will look
-    artificially low.
+    `hdr_aware=True` retains the legacy phone_model=0 argument for compatibility.
+    It does not make the SDR VMAF model valid for HDR/SDR or HDR mastering quality.
+    Scoring-domain validity must be established independently of score magnitude.
     """
     if not vmaf_available():
         return VMAFResult(
@@ -131,6 +131,8 @@ def compute(
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         except subprocess.TimeoutExpired:
             return VMAFResult(available=True, score=None, note="vmaf timed out")
+        except OSError:
+            return VMAFResult(available=True, score=None, note="vmaf process could not start")
         if proc.returncode != 0:
             tail = proc.stderr.strip().splitlines()[-1] if proc.stderr else "unknown"
             return VMAFResult(available=True, score=None, note=f"vmaf failed: {tail}")
@@ -158,16 +160,13 @@ def compute(
     m = _SCORE_RE.search(metric_log)
     if not m:
         return VMAFResult(available=True, score=None, note="vmaf score not found in output")
-    score = float(m.group(1))
-    # libvmaf on very short clips occasionally returns ~0 even when frames
-    # are essentially identical (HIGH-1 from 2026-05-30 test report). Treat
-    # scores below 1.0 as unreliable and let the caller fall back to SSIM.
-    if score < 1.0:
+    try:
+        score = float(m.group(1))
+    except ValueError:
+        return VMAFResult(available=True, score=None, note="vmaf score could not be parsed")
+    if not math.isfinite(score) or not 0.0 <= score <= 100.0:
         return VMAFResult(
             available=True, score=None,
-            note=(
-                f"VMAF returned {score:.2f} (unreliable on this pair); "
-                "falling back to SSIM"
-            ),
+            note="vmaf returned an invalid numeric score",
         )
     return VMAFResult(available=True, score=score, note=None)

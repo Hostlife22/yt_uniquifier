@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 if TYPE_CHECKING:
     from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream
@@ -314,6 +314,56 @@ class QARegistration(BaseModel):
     audio: QARegistrationDetail | None = None
 
 
+QAStatus = Literal["passed", "failed", "not_verified"]
+
+
+class QACorrectness(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: QAStatus
+    scope: Literal["plan_contract", "pair_contract"]
+    failure_codes: list[str] = Field(default_factory=list)
+    full_decode_status: QAStatus = "not_verified"
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def consistent_status(self) -> QACorrectness:
+        if self.status == "passed" and (
+            self.full_decode_status != "passed" or self.failure_codes
+        ):
+            raise ValueError("passed correctness requires full decode and no failure codes")
+        if self.full_decode_status == "failed" and self.status != "failed":
+            raise ValueError("failed decoding requires failed correctness")
+        return self
+
+
+class QAAudioLoudness(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    stream_index: int = Field(ge=0)
+    status: QAStatus
+    integrated_lufs: float | None = None
+    true_peak_dbtp: float | None = None
+    method: Literal["ffmpeg_loudnorm_full_decode"] = "ffmpeg_loudnorm_full_decode"
+    note: str | None = None
+
+
+class QALoudness(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: QAStatus
+    streams: list[QAAudioLoudness] = Field(default_factory=list)
+    note: str | None = None
+
+
+class QAQualityPolicy(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    domain: Literal["raw", "registered"] = "raw"
+    min_vmaf: float | None = Field(default=None, ge=0.0, le=100.0)
+    min_ssim: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+
 class QAReport(BaseModel):
     """Aggregated QA metrics for one (input, output) pair."""
 
@@ -369,3 +419,6 @@ class QAReport(BaseModel):
         default=None, ge=0.0, le=32.0,
     )
     registration: QARegistration | None = None
+    correctness: QACorrectness | None = None
+    loudness: QALoudness | None = None
+    quality_policy: QAQualityPolicy | None = None

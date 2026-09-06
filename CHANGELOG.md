@@ -12,6 +12,22 @@ the last tag.
 
 ## [Unreleased]
 
+### Added — v1.6.0 QA contract (RFC #21)
+
+- Nullable structured `correctness`, `loudness` and `quality_policy` in QA JSON,
+  with matching HTML evidence. Old reports remain readable. Correctness reports
+  contract/decode scope, not a guarantee of internal A/V synchronization.
+- Opt-in `yt-uniq qa --loudness` measures full output tracks without downmixing;
+  silence/undefined measurements use JSON null. No extra audio scan by default.
+- Independent `--min-vmaf` / `--min-ssim` gates and `--quality-domain raw|registered`.
+  Every requested measurement must pass; missing metrics cannot pass by substitution.
+  Failed explicit gates write reports then exit 2; legacy exit behavior is unchanged.
+- Optional process-local `RunSummary.decode_evidence` lets run/batch/GUI reuse final
+  decoding for the same file identity; stale evidence triggers a new decode.
+- Preserve valid zero/near-zero VMAF instead of substituting SSIM. Backend failures
+  and incompatible HDR scoring domains are handled separately. Existing heuristic
+  thresholds remain unchanged, but corrected VMAF values can change their verdict.
+
 ### Changed
 
 - Preserve the main audio's leading delay before tempo/PTS processing and loudness

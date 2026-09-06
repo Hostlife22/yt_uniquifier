@@ -17,11 +17,15 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.media_validation import (
+    DecodeEvidence,
     inspect_output_contract,
     inspect_output_decode,
 )
 from yt_uniquifier.core.models import (
     Plan,
+    QACorrectness,
+    QALoudness,
+    QAQualityPolicy,
     QARegistration,
     QARegistrationDetail,
     QAReport,
@@ -35,7 +39,7 @@ from yt_uniquifier.core.transforms.hdr_wrap import is_tonemap_active
 ProgressFn = Callable[[str, float], None]  # phase name, fraction in [0..1]
 
 Verdict = Literal["invalid", "green", "yellow", "red"]
-CorrectnessBand = Literal["valid", "invalid"]
+CorrectnessBand = Literal["valid", "invalid", "not_verified"]
 QualityBand = Literal["pass", "warning", "fail", "unavailable"]
 SimilarityBand = Literal["low", "moderate", "high", "unavailable"]
 
@@ -62,7 +66,9 @@ def verdict(report: QAReport) -> VerdictResult:
     correctness_reasons = [
         note for note in report.notes if note.startswith("correctness:")
     ]
-    if not report.duration_match:
+    if not report.duration_match and (
+        report.correctness is None or report.correctness.scope == "pair_contract"
+    ):
         correctness_reasons.append(
             f"correctness: duration mismatch: input {report.input_duration_sec:.3f}s vs "
             f"output {report.output_duration_sec:.3f}s — encode changed length."
@@ -70,6 +76,18 @@ def verdict(report: QAReport) -> VerdictResult:
     correctness: CorrectnessBand = (
         "invalid" if correctness_reasons else "valid"
     )
+    if report.correctness is not None:
+        if report.correctness.status == "failed":
+            correctness = "invalid"
+            correctness_reasons.extend(report.correctness.failure_codes)
+        elif report.correctness.status == "not_verified" and correctness != "invalid":
+            correctness = "not_verified"
+            correctness_reasons.append(report.correctness.note or "Correctness not fully verified.")
+    elif report.quality_policy is not None and correctness != "invalid":
+        correctness = "not_verified"
+        correctness_reasons.append(
+            "Explicit gates require correctness evidence absent in this report."
+        )
 
     quality_reasons: list[str] = []
     quality: QualityBand = "unavailable"
@@ -101,6 +119,10 @@ def verdict(report: QAReport) -> VerdictResult:
     if quality == "unavailable":
         quality_reasons.append("No VMAF or SSIM result is available.")
 
+    policy = report.quality_policy
+    if policy is not None and (policy.min_vmaf is not None or policy.min_ssim is not None):
+        quality, quality_reasons = _policy_quality(report, policy)
+
     similarity_reasons: list[str] = []
     visual_similarity: SimilarityBand
     if report.phash_samples <= 0:
@@ -127,7 +149,7 @@ def verdict(report: QAReport) -> VerdictResult:
         band = "invalid"
     elif quality == "fail":
         band = "red"
-    elif quality in {"warning", "unavailable"}:
+    elif correctness == "not_verified" or quality in {"warning", "unavailable"}:
         band = "yellow"
     else:
         band = "green"
@@ -144,12 +166,39 @@ def verdict(report: QAReport) -> VerdictResult:
     )
 
 
+def _policy_quality(report: QAReport, policy: QAQualityPolicy) -> tuple[QualityBand, list[str]]:
+    reasons: list[str] = []
+    failed = False
+    registered = policy.domain == "registered"
+    provenance = report.registration.video if report.registration is not None else None
+    for metric, minimum, maximum in (
+        ("vmaf", policy.min_vmaf, 100.0), ("ssim", policy.min_ssim, 1.0),
+    ):
+        if minimum is None:
+            continue
+        value = getattr(report, f"{metric}{'_registered' if registered else ''}_mean")
+        valid_registration = not registered or (
+            provenance is not None and provenance.compared_samples > 0
+            and provenance.coverage_ratio > 0 and provenance.confidence > 0
+        )
+        if value is None or not math.isfinite(value) or not valid_registration:
+            failed = True
+            reasons.append(f"{policy.domain} {metric.upper()}: required measurement unavailable.")
+        elif not (-1.0 if metric == "ssim" else 0.0) <= value <= maximum or value < minimum:
+            failed = True
+            reasons.append(f"{policy.domain} {metric.upper()} {value:g} fails minimum {minimum:g}.")
+        else:
+            reasons.append(f"{policy.domain} {metric.upper()} {value:g} meets minimum {minimum:g}.")
+    return ("fail" if failed else "pass"), reasons
+
+
 def _correctness_notes(
     src_meta: SourceMeta,
     out_meta: SourceMeta,
     *,
     plan: Plan | None,
     output_path: Path,
+    failure_codes: list[str],
 ) -> list[str]:
     if plan is not None:
         contract = inspect_output_contract(
@@ -157,6 +206,7 @@ def _correctness_notes(
             output_path,
             probed_output=out_meta,
         )
+        failure_codes.extend(failure.code for failure in contract.failures)
         return [
             "correctness: "
             f"{failure.code}: expected={failure.expected!r}, actual={failure.actual!r}"
@@ -173,17 +223,21 @@ def _correctness_notes(
     out_chapters = getattr(out_meta, "chapters", ())
 
     if len(out_video) != 1:
+        failure_codes.append("pair.video_count")
         notes.append(
             f"correctness: expected one primary video stream, found {len(out_video)}"
         )
     if src_audio and not out_audio:
+        failure_codes.append("pair.audio_missing")
         notes.append("correctness: source main audio stream is missing from output")
     if len(out_subtitles) != len(src_subtitles):
+        failure_codes.append("pair.subtitle_count")
         notes.append(
             "correctness: subtitle stream count changed "
             f"({len(src_subtitles)} -> {len(out_subtitles)})"
         )
     if len(out_chapters) != len(src_chapters):
+        failure_codes.append("pair.chapter_count")
         notes.append(
             "correctness: chapter count changed "
             f"({len(src_chapters)} -> {len(out_chapters)})"
@@ -194,6 +248,7 @@ def _correctness_notes(
         source_count = sum(stream.kind == kind for stream in source_aux)
         output_count = sum(stream.kind == kind for stream in output_aux)
         if source_count != output_count:
+            failure_codes.append(f"pair.{kind}_count")
             notes.append(
                 f"correctness: {kind} stream count changed "
                 f"({source_count} -> {output_count})"
@@ -219,6 +274,9 @@ def build_report(
     verify_decode: bool = True,
     run_registered: bool = False,
     registration_target_segment_sec: float = 600.0,
+    run_loudness: bool = False,
+    quality_policy: QAQualityPolicy | None = None,
+    decode_evidence: DecodeEvidence | None = None,
 ) -> QAReport:
     """Collect every metric we can compute for the pair, in order.
 
@@ -229,6 +287,13 @@ def build_report(
     """
     p = progress or (lambda _n, _f: None)
     notes: list[str] = []
+    if quality_policy is not None:
+        if quality_policy.min_vmaf is not None and not run_vmaf:
+            raise PipelineError("VMAF minimum conflicts with disabled VMAF measurement")
+        if quality_policy.min_ssim is not None and not run_ssim:
+            raise PipelineError("SSIM minimum conflicts with disabled SSIM measurement")
+        if quality_policy.domain == "registered" and (not run_registered or plan is None):
+            raise PipelineError("Registered quality policy requires registered metrics and a Plan")
 
     def _check_cancel(phase: str) -> None:
         if cancel_token is not None and cancel_token.is_cancelled():
@@ -241,16 +306,44 @@ def build_report(
     p("probe", 0.0)
     src_meta = probe_file(input_path)
     out_meta = probe_file(output_path)
+    try:
+        output_identity = DecodeEvidence.capture(output_path)
+    except OSError:
+        output_identity = None
+    if quality_policy is not None and quality_policy.domain == "raw" and (
+        quality_policy.min_vmaf is not None
+    ) and any(video.color.is_hdr for meta in (src_meta, out_meta) for video in meta.video):
+        raise PipelineError(
+            "Raw VMAF gating requires SDR/SDR; HDR needs a valid SDR scoring domain"
+        )
     p("probe", 1.0)
+    failure_codes: list[str] = []
     notes.extend(_correctness_notes(
         src_meta,
         out_meta,
         plan=plan,
         output_path=output_path,
+        failure_codes=failure_codes,
     ))
     duration_match = abs(src_meta.duration_sec - out_meta.duration_sec) < 0.5
+    if plan is None and not duration_match:
+        failure_codes.append("pair.duration")
+    correctness = QACorrectness(
+        status="failed" if failure_codes else "not_verified",
+        scope="plan_contract" if plan is not None else "pair_contract",
+        failure_codes=failure_codes,
+        note="Full output decode was not performed; internal A/V sync is not established.",
+    )
 
-    if verify_decode and out_meta.video:
+    reused_decode = decode_evidence is not None and decode_evidence.matches(output_path)
+    if reused_decode:
+        correctness = correctness.model_copy(update={
+            "status": "failed" if failure_codes else "passed",
+            "full_decode_status": "passed",
+            "note": "Reused process-local final decode evidence for unchanged output bytes; "
+                    "internal A/V sync requires event checks.",
+        })
+    if not reused_decode and (verify_decode or decode_evidence is not None) and out_meta.video:
         _check_cancel("decode")
         p("decode", 0.0)
         def _on_decode_event(event: RunEvent) -> None:
@@ -272,7 +365,23 @@ def build_report(
         )
         if decode_failure is not None:
             notes.append(f"correctness: full output decode failed: {decode_failure.actual}")
+            failure_codes.append(decode_failure.code)
+        correctness = correctness.model_copy(update={
+            "status": "failed" if failure_codes else "passed",
+            "failure_codes": failure_codes,
+            "full_decode_status": "failed" if decode_failure is not None else "passed",
+            "note": "Contract and decode scope only; internal A/V sync requires event checks.",
+        })
         p("decode", 1.0)
+
+    loudness = QALoudness(status="not_verified", note="Full-stream measurement not requested.")
+    if run_loudness:
+        from yt_uniquifier.core.qa.loudness import measure_output
+
+        _check_cancel("loudness")
+        p("loudness", 0.0)
+        loudness = measure_output(output_path, out_meta, cancel_token=cancel_token)
+        p("loudness", 1.0)
 
     _check_cancel("md5")
     p("md5", 0.0)
@@ -581,7 +690,17 @@ def build_report(
         ]
         p("cid_predict", 1.0)
 
+    if output_identity is not None and not output_identity.matches(output_path):
+        failure_codes.append("output.changed_during_qa")
+        correctness = correctness.model_copy(update={
+            "status": "failed", "failure_codes": failure_codes,
+            "note": "Output changed while QA was running; discard measurements.",
+        })
+
     return QAReport(
+        correctness=correctness,
+        loudness=loudness,
+        quality_policy=quality_policy,
         input_md5=md5_in,
         output_md5=md5_out,
         input_size_bytes=src_meta.size_bytes,

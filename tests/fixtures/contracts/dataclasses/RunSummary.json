@@ -18,5 +18,10 @@
     "has_default": false,
     "name": "preflight_findings",
     "type": "list[PreflightFinding]"
+  },
+  {
+    "has_default": true,
+    "name": "decode_evidence",
+    "type": "DecodeEvidence | None"
   }
 ]

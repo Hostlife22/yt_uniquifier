@@ -34,6 +34,28 @@ def allowed_output_suffixes(container: Container) -> frozenset[str]:
 
 
 @dataclass(frozen=True)
+class DecodeEvidence:
+    """Process-local evidence for unchanged bytes, not a portable attestation.
+
+    Inode/size/mtime survive same-filesystem atomic publication. Never deserialize
+    this token from an untrusted QA report or use it as a persistent resume cache.
+    """
+
+    identity: tuple[int, int, int, int]
+
+    @classmethod
+    def capture(cls, output: Path) -> DecodeEvidence:
+        stat = output.stat()
+        return cls((stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
+
+    def matches(self, output: Path) -> bool:
+        try:
+            return self == self.capture(output)
+        except OSError:
+            return False
+
+
+@dataclass(frozen=True)
 class MediaInvariantFailure:
     code: str
     expected: object

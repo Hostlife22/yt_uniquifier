@@ -26,6 +26,7 @@ from yt_uniquifier.core.encoder import detect_encoders, pick_encoder
 from yt_uniquifier.core.errors import PipelineError, PreflightFailure
 from yt_uniquifier.core.logging_config import get_logger
 from yt_uniquifier.core.media_validation import (
+    DecodeEvidence,
     allowed_output_suffixes,
     require_output_contract,
     require_output_decode,
@@ -149,6 +150,7 @@ class RunSummary:
     plan: Plan
     segments_done: int
     preflight_findings: list[PreflightFinding]
+    decode_evidence: DecodeEvidence | None = None
 
 
 def build_plan(input_path: Path, profile: Profile, encoder_override: str | None) -> Plan:
@@ -474,7 +476,7 @@ def _run_full_body(
     ):
         if store.output_is_valid(options.output):
             try:
-                _validate_final_output(
+                resume_decode_evidence = _validate_final_output(
                     plan, options.output, emit, cancel_token,
                 )
             except PipelineError:
@@ -499,6 +501,7 @@ def _run_full_body(
                     plan=plan,
                     segments_done=len(segments),
                     preflight_findings=findings,
+                    decode_evidence=resume_decode_evidence,
                 )
         # A3 (v0.5.5): output gone but state.json reports done →
         # segments were cleaned up after a successful concat. We need
@@ -718,7 +721,10 @@ def _run_full_body(
         plan.source, plan.profile.audio_tracks,
     )
 
+    decode_evidence: DecodeEvidence | None = None
+
     def prepare_staged_output(staged: Path) -> None:
+        nonlocal decode_evidence
         # Optional second-pass normalization must finish before publication too.
         if options.sanitize_bitstream:
             from yt_uniquifier.core.sanitizer import (
@@ -743,7 +749,7 @@ def _run_full_body(
                     "phase": "sanitize",
                     "message": "encoder is already libx264 — skipping (no-op)",
                 }))
-        _validate_final_output(plan, staged, emit, cancel_token)
+        decode_evidence = _validate_final_output(plan, staged, emit, cancel_token)
 
     concat_segments(
         final_segments,
@@ -789,6 +795,7 @@ def _run_full_body(
         plan=plan,
         segments_done=len(final_segments),
         preflight_findings=findings,
+        decode_evidence=decode_evidence,
     )
 
 
@@ -987,9 +994,13 @@ def _validate_final_output(
     output: Path,
     emit: Callable[[RunEvent], None],
     cancel_token: CancelToken | None,
-) -> None:
+) -> DecodeEvidence:
     """Apply the same non-optional final gate to fresh and resumed outputs."""
     require_output_contract(plan, output)
+    try:
+        evidence = DecodeEvidence.capture(output)
+    except OSError as exc:
+        raise PipelineError("output unavailable during final validation") from exc
     emit(RunEvent(kind="log", payload={
         "phase": "validation",
         "message": "decoding complete output to verify every video/audio packet",
@@ -1003,6 +1014,9 @@ def _validate_final_output(
         cancel_token=cancel_token,
     )
     require_audio_delivery_peak(plan, output, on_event=emit, cancel_token=cancel_token)
+    if not evidence.matches(output):
+        raise PipelineError("output changed during final validation")
+    return evidence
 
 
 # v0.7 R5 / F4 — post-job notification dispatch.

@@ -132,6 +132,7 @@ def _process_one(
                 registration_target_segment_sec=options.target_segment_sec,
                 # run_full already performed the mandatory complete A/V decode.
                 verify_decode=False,
+                decode_evidence=summary.decode_evidence,
             )
             write_json(report, out.with_suffix(out.suffix + ".qa.json"))
             render_html(report, summary.plan, out.with_suffix(out.suffix + ".qa.html"))

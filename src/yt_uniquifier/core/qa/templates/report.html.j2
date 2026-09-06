@@ -292,5 +292,31 @@ audio: {{ '%.3f'|format(c.audio) }}"></span>
 </div>
 {% endif %}
 
+{% if report.correctness %}
+<section class="section">
+  <h2>Correctness evidence</h2>
+  <p>{{ report.correctness.status }} — {{ report.correctness.scope }};
+     full decode: {{ report.correctness.full_decode_status }}</p>
+  <p>{{ report.correctness.note or '' }}</p>
+  {% for code in report.correctness.failure_codes %}<p><code>{{ code }}</code></p>{% endfor %}
+</section>
+{% endif %}
+{% if report.loudness %}
+<section class="section">
+  <h2>Output loudness measurement: {{ report.loudness.status }}</h2>
+  <p>{{ report.loudness.note or '' }}</p>
+  <table><tr><th>Audio stream</th><th>Status</th><th>LUFS</th><th>True peak dBTP</th></tr>
+  {% for stream in report.loudness.streams %}
+    <tr><td>{{ stream.stream_index }}</td><td>{{ stream.status }} {{ stream.note or '' }}</td>
+    <td>{{ stream.integrated_lufs if stream.integrated_lufs is not none else 'not available' }}</td>
+    <td>{{ stream.true_peak_dbtp if stream.true_peak_dbtp is not none else 'not available' }}</td></tr>
+  {% endfor %}</table>
+</section>
+{% endif %}
+{% if report.quality_policy %}
+<p>Explicit quality policy: {{ report.quality_policy.domain }};
+   VMAF minimum {{ report.quality_policy.min_vmaf }};
+   SSIM minimum {{ report.quality_policy.min_ssim }}.</p>
+{% endif %}
 </body>
 </html>

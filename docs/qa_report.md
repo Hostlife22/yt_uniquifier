@@ -202,7 +202,7 @@ production pass/fail gate without corpus-specific validation.
 
 The CLI and HTML show independent axes:
 
-- **Correctness** — `VALID` or `INVALID`. Topology, duration, first video PTS,
+- **Correctness** — `VALID`, `INVALID` or `NOT_VERIFIED`. Topology, duration, first video PTS,
   declared color/HDR contract and complete decode take precedence.
 - **Quality** — `PASS`, `WARNING`, `FAIL` or `UNAVAILABLE`, based on VMAF/SSIM.
 - **Visual similarity** — `LOW`, `MODERATE`, `HIGH` or `UNAVAILABLE`, based on
@@ -211,8 +211,58 @@ The CLI and HTML show independent axes:
 The overall output status is `INVALID` on a correctness failure, otherwise
 green/yellow/red follows quality evidence only. Similarity never compensates for bad
 quality and never turns a correct, high-quality output into a failure. The existing
-`QAReport` JSON schema remains additive-compatible; correctness details are carried
-in `notes[]` until a separately approved schema RFC adds a structured block.
+`QAReport` JSON schema remains additive-compatible; legacy `notes[]` remain present,
+and v1.6.0 adds structured evidence under [RFC #21](https://github.com/Hostlife22/yt_uniquifier/issues/21).
+
+## Explicit evidence and optional gates (v1.6.0)
+
+- `correctness`: `status` (`passed`, `failed`, `not_verified`), `scope`
+  (`plan_contract` or `pair_contract`), `failure_codes`, `full_decode_status`, `note`.
+  Passing means only the declared contract and full decode were checked. It does
+  **not** certify internal lip-sync, audible transients or visual quality. Without a
+  Plan, only the conservative pair contract is available. Legacy `duration_match`
+  still compares source/output duration; accepted speed changes use the Plan's
+  expected duration for structured correctness and verdict instead.
+- `loudness`: measurement `status`, `streams` and `note`. Each output audio stream
+  reports its absolute `stream_index`, `integrated_lufs`, `true_peak_dbtp`, `method`,
+  measurement `status` and `note`. No downmix or normalization is applied to the
+  measured signal. Negative-infinite silence/sub-gating measurements become null;
+  invalid NaN/+infinite results are not marked verified. `passed` means the scan
+  completed, **not** that a loudness target, clipping/phase or listening test passed.
+  Default: `not_verified` (scan not requested); use `--loudness` for a full scan of
+  every output track. This can take substantial time on long films.
+- `quality_policy`: optional `domain` (`raw` or `registered`), `min_vmaf` (0–100)
+  and `min_ssim` (-1–1). Null means the old heuristic bands remain active. When
+  minimums are explicitly requested, those minimums in the selected domain drive
+  the quality axis; **all** requested metrics must be available, finite and pass.
+  Registered gates also require usable video-registration evidence, not merely a
+  numeric value. They do not establish a universally calibrated quality target.
+
+Example only — these are operator-selected thresholds, not production defaults:
+
+```bash
+yt-uniq qa source.mkv output.mp4 --plan-json plan.json --quality-domain registered \
+  --min-vmaf 90 --min-ssim 0.98 --loudness
+```
+
+Explicit gate failure or unverified correctness writes JSON/HTML and exits **2**.
+Invalid combinations (such as `--fast-qa --min-vmaf 90`, `--no-ssim --min-ssim .9`,
+or registered gates without a Plan) fail before expensive metrics. Raw VMAF gates
+reject HDR pairs: `phone_model=0` does not make an SDR VMAF model HDR-valid.
+Registered VMAF remains unavailable for preserved HDR. For authorized HDR→SDR,
+compare within the plan-transformed SDR domain, then perform human visual review.
+
+No new thresholds or loudness scans are enabled by default; old CLI invocations
+retain their exit behavior. Valid VMAF 0/0.5 is now retained, so the old heuristic
+verdict may correctly become worse instead of silently falling back to SSIM.
+Old JSON loads with nullable evidence fields unset. Consumers using their own
+strict schemas must update them for the new optional fields.
+
+`RunSummary.decode_evidence` is process-local and checked against file identity
+(device/inode/size/mtime). Run/batch/GUI reuse it only for matching output; stale
+tokens force a fresh full decode. It is not cryptographic proof and must never be
+loaded from untrusted JSON or stored as a resume cache. Output changes during QA
+produce `output.changed_during_qa`, not a successful result.
 
 ## Acceptance targets
 

@@ -129,6 +129,7 @@ def test_final_validation_orders_contract_before_decode_and_labels_progress(
     monkeypatch.setattr(orchestrator, "require_output_contract", contract)
     monkeypatch.setattr(orchestrator, "require_output_decode", decode)
 
+    _options(tmp_path).output.touch()
     orchestrator._validate_final_output(
         _plan(tmp_path), _options(tmp_path).output, events.append, None,
     )

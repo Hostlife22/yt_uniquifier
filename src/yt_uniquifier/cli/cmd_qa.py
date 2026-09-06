@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -9,13 +10,18 @@ from pydantic import ValidationError
 from rich.console import Console
 
 from yt_uniquifier.core.errors import YtUniquifierError
-from yt_uniquifier.core.models import Plan
+from yt_uniquifier.core.models import Plan, QAQualityPolicy
 from yt_uniquifier.core.qa.corpus import Corpus
 from yt_uniquifier.core.qa.report import build_report, render_html, verdict, write_json
 
 console = Console()
 
 _COLOR = {"invalid": "magenta", "green": "green", "yellow": "yellow", "red": "red"}
+
+
+class QualityDomain(StrEnum):
+    raw = "raw"
+    registered = "registered"
 
 
 def qa_cmd(
@@ -78,6 +84,15 @@ def qa_cmd(
         max=86400.0,
         help="Segment target used by the original run represented by --plan-json.",
     ),
+    loudness: bool = typer.Option(
+        False, "--loudness",
+        help="Measure full output LUFS/true peak per audio stream (extra scan).",
+    ),
+    min_vmaf: float | None = typer.Option(None, "--min-vmaf", min=0.0, max=100.0),
+    min_ssim: float | None = typer.Option(None, "--min-ssim", min=-1.0, max=1.0),
+    quality_domain: QualityDomain = typer.Option(
+        QualityDomain.raw, "--quality-domain", help="Domain for explicitly requested minimums.",
+    ),
 ) -> None:
     """Compute similarity metrics for an (input, output) pair."""
     if fast_qa:
@@ -87,6 +102,9 @@ def qa_cmd(
         if samples == 120:
             samples = 60
     try:
+        policy = QAQualityPolicy.model_validate({
+            "domain": quality_domain.value, "min_vmaf": min_vmaf, "min_ssim": min_ssim,
+        }) if min_vmaf is not None or min_ssim is not None else None
         plan: Plan | None = None
         if plan_json is not None:
             try:
@@ -114,8 +132,10 @@ def qa_cmd(
             sscd_frame_count=sscd_frames,
             run_registered=plan is not None,
             registration_target_segment_sec=registration_segment_sec,
+            run_loudness=loudness,
+            quality_policy=policy,
         )
-    except YtUniquifierError as exc:
+    except (YtUniquifierError, ValidationError) as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
@@ -180,3 +200,5 @@ def qa_cmd(
         console.print(f"  [dim]note:[/dim] {n}")
     console.print(f"Wrote: {json_path}")
     console.print(f"Wrote: {html_path}")
+    if policy is not None and (v.correctness != "valid" or v.quality != "pass"):
+        raise typer.Exit(code=2)

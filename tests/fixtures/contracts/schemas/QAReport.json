@@ -1,5 +1,211 @@
 {
   "$defs": {
+    "QAAudioLoudness": {
+      "additionalProperties": false,
+      "properties": {
+        "integrated_lufs": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Integrated Lufs"
+        },
+        "method": {
+          "const": "ffmpeg_loudnorm_full_decode",
+          "default": "ffmpeg_loudnorm_full_decode",
+          "title": "Method",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_verified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stream_index": {
+          "minimum": 0,
+          "title": "Stream Index",
+          "type": "integer"
+        },
+        "true_peak_dbtp": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "True Peak Dbtp"
+        }
+      },
+      "required": [
+        "stream_index",
+        "status"
+      ],
+      "title": "QAAudioLoudness",
+      "type": "object"
+    },
+    "QACorrectness": {
+      "additionalProperties": false,
+      "properties": {
+        "failure_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failure Codes",
+          "type": "array"
+        },
+        "full_decode_status": {
+          "default": "not_verified",
+          "enum": [
+            "passed",
+            "failed",
+            "not_verified"
+          ],
+          "title": "Full Decode Status",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "scope": {
+          "enum": [
+            "plan_contract",
+            "pair_contract"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_verified"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "scope"
+      ],
+      "title": "QACorrectness",
+      "type": "object"
+    },
+    "QALoudness": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_verified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "streams": {
+          "items": {
+            "$ref": "#/$defs/QAAudioLoudness"
+          },
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "QALoudness",
+      "type": "object"
+    },
+    "QAQualityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "default": "raw",
+          "enum": [
+            "raw",
+            "registered"
+          ],
+          "title": "Domain",
+          "type": "string"
+        },
+        "min_ssim": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": -1.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Ssim"
+        },
+        "min_vmaf": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Vmaf"
+        }
+      },
+      "title": "QAQualityPolicy",
+      "type": "object"
+    },
     "QARegistration": {
       "additionalProperties": false,
       "description": "Provenance and per-domain evidence for registered QA metrics.",
@@ -237,6 +443,17 @@
       "title": "Corpus Matches",
       "type": "array"
     },
+    "correctness": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QACorrectness"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "duration_match": {
       "title": "Duration Match",
       "type": "boolean"
@@ -252,6 +469,17 @@
     "input_size_bytes": {
       "title": "Input Size Bytes",
       "type": "integer"
+    },
+    "loudness": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QALoudness"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "notes": {
       "items": {
@@ -291,6 +519,17 @@
     "phash_similarity": {
       "title": "Phash Similarity",
       "type": "number"
+    },
+    "quality_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QAQualityPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "registration": {
       "anyOf": [

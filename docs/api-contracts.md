@@ -54,6 +54,12 @@ Every model below has its full JSON schema locked by
 
 ### Dataclasses (`stable`)
 
+RFC #21 (v1.6.0) adds nullable `QAReport.correctness`, `loudness`, and
+`quality_policy` with nested frozen evidence/policy models. See
+[QA evidence and gates](qa_report.md#explicit-evidence-and-optional-gates-v160)
+for field meanings, legacy JSON behavior and the opt-in CLI exit contract.
+QA command options are also locked by `tests/contracts/test_qa_cli_contract.py`.
+
 Field shapes (name + type repr + has-default) are locked by
 `tests/contracts/test_runoptions_dataclass_stable.py` and
 `tests/contracts/test_runevent_kinds_stable.py`. Default *values*
@@ -65,7 +71,7 @@ are explicitly NOT locked — a behaviour-only default tweak
 | `RunEvent` | `core/runner.py` | `kind`, `payload` |
 | `RunResult` | `core/runner.py` | `returncode`, `duration_sec`, `output_path` |
 | `RunOptions` | `core/orchestrator.py` | `work_dir`, `output`, `encoder_override`, `title_template`, `target_segment_sec`, `keep_segments`, `enforce_preflight`, `force_new_variant`, `workers`, `sanitize_bitstream`, `sample_phash`, `notifications`, `telemetry`, `run_id`, `accept_watermark_risk`, `audit_log_path`, `audit_principal` |
-| `RunSummary` | `core/orchestrator.py` | `output`, `plan`, `segments_done`, `preflight_findings` |
+| `RunSummary` | `core/orchestrator.py` | `output`, `plan`, `segments_done`, `preflight_findings`, optional `decode_evidence` (v1.6.0; opaque process-local token, not a serialized/persistent attestation) |
 
 ### RunEvent kinds (`stable`)
 

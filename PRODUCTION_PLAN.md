@@ -43,6 +43,14 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
 
 ### Предыдущий baseline
 
+QA contract follow-up: owner-approved RFC #21 implemented for v1.6.0 in the
+existing report/model/CLI path. Added structured correctness/loudness, opt-in
+per-metric gates, local decode-evidence reuse, JSON/CLI snapshots and regression
+tests. Natural identity smoke on the retained 4K/5.1 derivative reports full decode
+passed, SSIM 1.0 and full-stream -15.70 LUFS / -1.84 dBTP. This is not acceptance of
+universal thresholds or a human listening verdict. Earlier draft/pending notes
+above describe the preceding audit stage.
+
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
   web guards; correctness-aware QA verdict; job-specific encoder probe; runner
