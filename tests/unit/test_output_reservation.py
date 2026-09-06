@@ -111,6 +111,35 @@ def test_release_does_not_remove_a_different_owner(tmp_path: Path) -> None:
     assert reservation.lock_path.exists()
 
 
+@pytest.mark.parametrize("replace_owner", [False, True])
+def test_release_retries_sharing_lock_and_rechecks_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_owner: bool,
+) -> None:
+    reservation = OutputReservation.acquire(tmp_path / "result.mp4", "run-a")
+    original_unlink = Path.unlink
+    calls = 0
+
+    def transient_unlink(path: Path, missing_ok: bool = False) -> None:
+        nonlocal calls
+        if path == reservation.lock_path:
+            calls += 1
+            if calls == 1:
+                if replace_owner:
+                    owner = json.loads(path.read_text(encoding="utf-8"))
+                    owner["run_id"] = "run-b"
+                    path.write_text(json.dumps(owner), encoding="utf-8")
+                raise PermissionError("injected reader sharing lock")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", transient_unlink)
+    reservation.release()
+
+    assert reservation.lock_path.exists() is replace_owner
+    assert calls == (1 if replace_owner else 2)
+    if replace_owner:
+        assert json.loads(reservation.lock_path.read_text())["run_id"] == "run-b"
+
+
 def test_separate_process_observes_live_reservation(tmp_path: Path) -> None:
     output = tmp_path / "result.mp4"
     reservation = OutputReservation.acquire(output, "parent-run")

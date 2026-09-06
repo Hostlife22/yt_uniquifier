@@ -51,6 +51,48 @@ def test_disk_estimates_share_one_bitrate_model(tmp_path: Path) -> None:
     assert budget.estimate_work_bytes(source) == 13_000_000
 
 
+def test_concurrent_release_during_registry_scan_is_not_corruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixed_free(monkeypatch, 100)
+    reservation = budget.DiskReservation.acquire(tmp_path, "releasing", 30)
+    original_glob = Path.glob
+
+    def disappearing_glob(path: Path, pattern: str):  # type: ignore[no-untyped-def]
+        if path == reservation.lock_path.parent and pattern == "reservation-*.lock":
+            reservation.release()
+            yield reservation.lock_path
+        else:
+            yield from original_glob(path, pattern)
+
+    monkeypatch.setattr(Path, "glob", disappearing_glob)
+    assert budget.DiskReservation._active_reserved_bytes(
+        reservation.lock_path.parent, reservation.filesystem_id, reservation.hostname,
+    ) == 0
+
+
+def test_resize_retries_transient_reader_sharing_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixed_free(monkeypatch, 100)
+    reservation = budget.DiskReservation.acquire(tmp_path, "resizing", 30)
+    original = os.replace
+    calls = 0
+
+    def sharing_locked(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise PermissionError("temporary reader sharing lock")
+        original(source, target)
+
+    monkeypatch.setattr(os, "replace", sharing_locked)
+    reservation.resize(20)
+    assert calls == 3
+    assert reservation.reserved_bytes == 20
+    reservation.release()
+
+
 def test_disk_estimates_include_all_audio_streams(tmp_path: Path) -> None:
     source = _source(tmp_path).model_copy(update={
         "audio": [

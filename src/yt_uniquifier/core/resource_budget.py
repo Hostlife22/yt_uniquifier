@@ -9,6 +9,7 @@ import os
 import secrets
 import shutil
 import socket
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -25,6 +26,7 @@ from yt_uniquifier.core.output_reservation import (
     _reclaim_dead_local_lock,
     _release_exact_owner,
 )
+from yt_uniquifier.core.utils.file_ops import retry_sharing_lock
 
 DEFAULT_RESOURCE_LOCK_DIR = (
     Path.home() / ".cache" / "yt_uniquifier" / "resource-admission"
@@ -274,7 +276,13 @@ class DiskReservation:
     ) -> int:
         total = 0
         for lock_path in reservations_dir.glob("reservation-*.lock"):
-            if lock_path.is_symlink() or not lock_path.is_file():
+            try:
+                record_stat = retry_sharing_lock(lock_path.lstat)
+            except FileNotFoundError:
+                # Owners release outside this scan's mutex. Disappearance is
+                # valid completion, not a malformed/non-regular record.
+                continue
+            if not stat.S_ISREG(record_stat.st_mode):
                 raise DiskReservationError(
                     f"disk reservation record is not a regular file: {lock_path}"
                 )
@@ -385,7 +393,7 @@ class DiskReservation:
                         handle.write("\n")
                         handle.flush()
                         os.fsync(handle.fileno())
-                    os.replace(replacement, self.lock_path)
+                    retry_sharing_lock(lambda: os.replace(replacement, self.lock_path))
                     created = False
                 except BaseException as exc:
                     if created:

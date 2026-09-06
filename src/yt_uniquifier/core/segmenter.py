@@ -57,6 +57,7 @@ from yt_uniquifier.core.transforms.audio_loudnorm import (
 )
 from yt_uniquifier.core.transforms.audio_pitch import cascade_atempo
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
+from yt_uniquifier.core.utils.file_ops import retry_sharing_lock
 
 _log = logging.getLogger(__name__)
 _LOUDNORM_LOG_TAIL_BYTES = 64 * 1024
@@ -277,16 +278,10 @@ def _replace_cache_file(tmp: Path, destination: Path) -> None:
     retry preserves the no-torn-write guarantee without serialising unrelated
     cache entries.
     """
-    delay = 0.01
-    for attempt in range(_CACHE_REPLACE_ATTEMPTS):
-        try:
-            os.replace(tmp, destination)
-            return
-        except PermissionError:
-            if attempt == _CACHE_REPLACE_ATTEMPTS - 1:
-                raise
-            time.sleep(delay)
-            delay = min(delay * 2, _CACHE_REPLACE_MAX_DELAY_SEC)
+    retry_sharing_lock(
+        lambda: os.replace(tmp, destination), attempts=_CACHE_REPLACE_ATTEMPTS,
+        max_delay_sec=_CACHE_REPLACE_MAX_DELAY_SEC,
+    )
 
 
 def plan_segments(plan: Plan, target_size_sec: float = 600.0) -> list[Segment]:

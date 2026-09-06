@@ -30,6 +30,9 @@ the last tag.
 
 ### Changed
 
+- Tolerate completed disk reservations disappearing during a concurrent scan;
+  retry bounded transient file-sharing failures during registry replacement and
+  owner-checked release. Malformed records and permanent failures remain fail-closed.
 - Fix cumulative pitch/tempo clock drift: compensate using the actual integer
   `asetrate` clock with sufficient tempo precision, and omit a unity `atempo` pass.
   Internal encode-policy revision v6 invalidates pre-fix cached plans/artifacts;

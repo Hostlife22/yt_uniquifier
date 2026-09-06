@@ -117,7 +117,9 @@ def test_actual_frontends_share_registry_and_publish_valid_outputs(tmp_path: Pat
                     observed.add(int(json.loads(lock.read_text())["pid"]))
             time.sleep(0.02)
         outcomes = [results.get(timeout=5) for _ in processes]
-        assert all(status == "passed" for _, status in outcomes), outcomes
+        failures = [f"{kind}:\n{status}" for kind, status in outcomes if status != "passed"]
+        if failures:
+            pytest.fail("\n\n".join(failures))
         assert observed == {process.pid for process in processes}
     finally:
         for process in processes:

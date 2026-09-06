@@ -19,6 +19,7 @@ from typing import Any
 
 from yt_uniquifier.core.checkpoint import _pid_alive
 from yt_uniquifier.core.errors import YtUniquifierError
+from yt_uniquifier.core.utils.file_ops import retry_sharing_lock
 
 _RESERVATION_DIR = ".yt_uniquifier-reservations"
 _ADMISSION_DIR = ".yt_uniquifier-admission"
@@ -105,6 +106,18 @@ def _release_exact_owner(
     hostname: str,
 ) -> bool:
     """Delete *lock_path* only when all owner fields still match."""
+    try:
+        return retry_sharing_lock(lambda: _release_exact_owner_once(
+            lock_path, run_id=run_id, pid=pid, hostname=hostname,
+        ))
+    except OSError:
+        return False
+
+
+def _release_exact_owner_once(
+    lock_path: Path, *, run_id: str, pid: int, hostname: str,
+) -> bool:
+    # Recheck identity on every retry, never delete a newly replaced owner.
     owner = _read_owner(lock_path)
     if owner is None:
         return True
@@ -120,6 +133,8 @@ def _release_exact_owner(
         return False
     try:
         lock_path.unlink(missing_ok=True)
+    except PermissionError:
+        raise
     except OSError:
         return False
     return True
