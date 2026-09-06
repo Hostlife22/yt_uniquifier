@@ -224,22 +224,25 @@ def register(  # noqa: PLR0913
                     run_id=run_id,
                 )
                 run_full(plan, opts, on_event=_on_event, cancel_token=cancel_token)
-                with runs_lock:
-                    record.status = (
-                        "cancelled" if cancel_token.is_cancelled() else "completed"
-                    )
-                    record.updated_at = time.time()
+                terminal_status = "cancelled" if cancel_token.is_cancelled() else "completed"
             except BaseException as exc:  # noqa: BLE001 — capture everything
+                terminal_status = "cancelled" if cancel_token.is_cancelled() else "failed"
                 with runs_lock:
-                    record.status = (
-                        "cancelled" if cancel_token.is_cancelled() else "failed"
-                    )
                     record.error = f"{type(exc).__name__}: {exc}"
-                    record.updated_at = time.time()
                 _on_event(RunEvent(kind="error", payload={
                     "phase": "runner", "message": record.error,
                 }))
             finally:
+                # Publish a terminal state only after releasing both shared
+                # leases. Otherwise a client observing completion can still
+                # receive 409/429 when it immediately submits the next run.
+                try:
+                    output_reservation.release()
+                finally:
+                    run_admission.release()
+                with runs_lock:
+                    record.status = terminal_status
+                    record.updated_at = time.time()
                 try:
                     from yt_uniquifier.web.metrics import (
                         ACTIVE_RUNS,
@@ -257,9 +260,6 @@ def register(  # noqa: PLR0913
                         persist_runs()
                 except Exception:  # pragma: no cover - production callback is best-effort
                     _log.exception("could not persist terminal web run state")
-                finally:
-                    output_reservation.release()
-                    run_admission.release()
                 # Never let a disconnected client's full queue strand this
                 # worker thread while it tries to publish the terminal marker.
                 try:

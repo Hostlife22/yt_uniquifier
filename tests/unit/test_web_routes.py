@@ -419,6 +419,14 @@ def test_two_app_instances_cannot_reserve_the_same_output(
     assert status == "completed"
     retry_response = second.post("/api/run", json=payload)
     assert retry_response.status_code == 200
+    retry_id = retry_response.json()["run_id"]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        retry_status = second.get(f"/api/run/{retry_id}/status").json()["status"]
+        if retry_status == "completed":
+            break
+        time.sleep(0.01)
+    assert retry_status == "completed"  # Do not remove mocks while the retry is still starting.
 
 
 def test_two_app_instances_share_global_run_admission(
@@ -497,6 +505,79 @@ def test_two_app_instances_share_global_run_admission(
         json={**base_payload, "output_name": "second.mp4"},
     )
     assert retry_response.status_code == 200
+    retry_id = retry_response.json()["run_id"]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        retry_status = second.get(f"/api/run/{retry_id}/status").json()["status"]
+        if retry_status == "completed":
+            break
+        time.sleep(0.01)
+    assert retry_status == "completed"
+
+
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("lease_name", ["OutputReservation", "RunAdmission"])
+def test_terminal_status_waits_for_shared_lease_release(
+    web_dirs: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+    lease_name: str,
+) -> None:
+    """A deliberately blocked lease release must not expose terminal status."""
+    from yt_uniquifier.core.models import Profile
+    from yt_uniquifier.web.routes import run as run_routes
+
+    work, output, profiles = web_dirs
+    source = tmp_path / "input.mp4"
+    source.touch()
+    profile = profiles / "shared.yaml"
+    profile.write_text("name: shared\ntransforms: []\n", encoding="utf-8")
+    entered = threading.Event()
+    proceed = threading.Event()
+    finished = threading.Event()
+    lease_class = getattr(run_routes, lease_name)
+    original_release = lease_class.release
+
+    def delayed_release(lease):  # type: ignore[no-untyped-def]
+        entered.set()
+        try:
+            assert proceed.wait(timeout=10)
+            original_release(lease)
+        finally:
+            finished.set()
+
+    def fake_run(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        if outcome == "failed":
+            raise RuntimeError("injected processing failure")
+        if outcome == "cancelled":
+            kwargs["cancel_token"].cancel()
+
+    monkeypatch.setattr(run_routes, "load_profile", lambda _path: Profile(name="shared"))
+    monkeypatch.setattr(run_routes, "build_plan", lambda *_args: object())
+    monkeypatch.setattr(run_routes, "run_full", fake_run)
+    monkeypatch.setattr(lease_class, "release", delayed_release)
+    client = TestClient(build_app(WebConfig(
+        work_dir=work, output_dir=output, profile_dir=profiles, input_root=tmp_path,
+    )))
+    response = client.post("/api/run", json={
+        "input_path": str(source), "profile_path": str(profile), "output_name": "out.mp4",
+    })
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    try:
+        assert entered.wait(timeout=5)
+        assert client.get(f"/api/run/{run_id}/status").json()["status"] == "running"
+    finally:
+        proceed.set()
+        assert finished.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        status = client.get(f"/api/run/{run_id}/status").json()["status"]
+        if status == outcome:
+            break
+        time.sleep(0.01)
+    assert status == outcome
 
 
 def test_run_uses_profile_container_and_rejects_conflicting_suffix(

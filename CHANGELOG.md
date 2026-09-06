@@ -30,6 +30,8 @@ the last tag.
 
 ### Changed
 
+- Publish terminal web run status after releasing shared admission/output leases,
+  preventing an immediate retry from observing completion but receiving 409/429.
 - Preserve the main audio's leading delay before tempo/PTS processing and loudness
   measurement. Normalize once before window splitting, scale window crossfades to
   the output clock, and retain delivery headroom in the short-window fallback.
