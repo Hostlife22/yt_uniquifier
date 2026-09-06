@@ -1,5 +1,36 @@
 # Production Audit: yt_uniquifier
 
+## Current follow-up — v1.6.0, 2026-09-06
+
+The additive QA contract (RFC #21) is approved and implemented: nullable
+correctness/loudness evidence and independent opt-in VMAF/SSIM gates preserve old
+fields/defaults. Earlier pending-approval notes describe historical audit stages.
+
+Controlled source-cap/CRF testing completed 18 encodes and independently checked
+every decoded frame count/PTS sequence. Two derived HDR→SDR cases lost about
+14–15 VMAF points under the source cap, while uncapped files grew 11–13×.
+Defaults remain unchanged; two upstream titles without human labels/held-out
+validation cannot establish universal quality thresholds.
+
+Independent per-channel diagnostics exposed a second audio timing issue: integer
+`asetrate` quantization was not reflected in tempo compensation. Legacy three-hour
+audio advanced approximately 100 ms by the final review window. The local fix
+uses the actual integer clock, adequate precision and no unity WSOLA pass;
+encode-policy v6 invalidates pre-fix cached artifacts. A 30-minute late-event
+regression passed FFmpeg 5/6/9. A speaker-labelled 5.1/flash fixture checks channel
+identity and internal event retention, not merely stream count/end duration.
+
+Two resource-registry races were reproduced and fixed: concurrent owner release
+during scanning and transient file-sharing failures during atomic replacement.
+Owner identity is checked on every release retry; corruption remains fail-closed.
+
+Release tooling now inventories actual native bundles/extracted AppImage and
+binds hashes to the archives and commit. File inventories do not prove complete
+opaque/static dependency or license attribution. See `PRODUCTION_CHECKLIST.md`
+for revision-specific CI/artifact qualification, and `BENCHMARKS.md` for measured
+results. Long-form QA reached about 5.89 GiB sampled process-tree RSS; its
+duration-scaled frame sampling/cache remains an explicit open resource risk.
+
 ## Extended qualification findings — 2026-09-06
 
 Natural-content envelope comparison additionally exposed a 1.32-second audio
@@ -12,7 +43,7 @@ Natural rerender reduced relative envelope lag from -1.32 to -0.01 s at 10-ms
 resolution; encoded peak is -1.84 dBTP. All six CI configurations, CodeQL, Docker
 amd64/arm64 and the release dry-run passed at `8cfb11e`; candidate checksums and
 workflow-SHA-bound signatures were independently verified locally. These gates do
-not replace human HDR/listening acceptance or approval of the new public QA RFC.
+not replace human HDR/listening acceptance. The subsequent QA RFC is now approved.
 
 Natural 4K/5.1 uncovered post-loudnorm resampling/AAC peak overshoot, corrected
 locally with bounded re-render from source and a decoded delivery-peak gate.
@@ -20,8 +51,8 @@ Staged media is now checked before atomic replacement, not only after publicatio
 `BENCHMARKS.md` records raw versus registered metrics and the loudness/headroom
 tradeoff; neither completed measurement nor a high registered score implies
 production approval. Existing pipeline, profile engine and QA implementation are
-reused. ASS/bitmap retiming, public QA contract approval, natural HDR display/listening
-and current-revision GHCR publication remain explicitly incomplete. The existing
+reused. ASS/bitmap retiming and natural HDR display/listening remain incomplete.
+Current GHCR qualification is tracked separately in the release checklist. The existing
 old `edge` image's signature, architecture manifests and attestations were verified;
 see the digest/revision in `PRODUCTION_CHECKLIST.md`.
 
@@ -30,7 +61,7 @@ see the digest/revision in `PRODUCTION_CHECKLIST.md`.
 Режим аудита: исходный production-код не изменялся до согласования плана.
 Implementation status обновлён после подтверждения пользователя.
 
-## Implementation status — v1.5.0 candidate
+## Historical implementation status — v1.5.0 candidate
 
 Подтверждённые P0 и локально исправимые P1 correctness defects устранены в
 существующем pipeline без rewrite. Добавлены container-aware stream mapping,
@@ -534,7 +565,7 @@ Path validation и plugin capability/audit-hook defenses выглядят осм
   `requires-python >=3.11`.
 - Profile descriptions заявляют ожидаемый VMAF без воспроизводимого benchmark.
 
-## Проверки
+## Исторические проверки — v1.5.0 (текущие в PRODUCTION_CHECKLIST.md)
 
 | Gate | Result |
 |---|---|

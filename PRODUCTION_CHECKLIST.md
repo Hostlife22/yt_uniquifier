@@ -6,14 +6,54 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
-Latest completed source qualification: v1.6.0, `16fd5663f448d709f3211256889602677076cc6e`.
-CI `34034216736` passed all six Linux/macOS/Windows × Python 3.11/3.12 cells;
-CodeQL `34034216714` passed. Final-HEAD unit/contracts: 1543 passed. The broader
-native run passed 1839 / 55 skipped before the final small follow-ups; those were
-covered by focused checks and fresh CI. Ruff and strict mypy (164 files) passed.
-QA implementation `3cbb3ef` built wheel/Intel GUI 1.6.0 and passed runtime version,
-local ad-hoc signature and startup checks. Release/Docker artifacts below are
-historical evidence, **not** current 1.6.0 release qualification.
+Latest completed source qualification: v1.6.0, `3a334df7f66e78af5d4593767c2dd5e923d41b7a`.
+CI `34037614644` passed all six Linux/macOS/Windows × Python 3.11/3.12 cells;
+CodeQL `34037614576`, Release `34037678414` and Docker `34037679856` passed.
+Ruff and strict mypy (165 files) passed; the wheel rebuilt as 1.6.0. Native
+`make check` passed 1873 / 55 skipped / one deprecation warning in 1253.78 s;
+that run began before the resource-registry follow-up, which is covered by
+35 fresh focused tests and the new six-cell CI. A further 22 diagnostic/SBOM/
+audio-clock tests passed on the final code. The 55 opt-in hardware/GUI skips
+are not qualification of those capabilities.
+Fresh final-code unit/contracts: **1569 passed** in 82.95 s. Remote Ubuntu/Python
+3.12 branch coverage: **80.91%**, above the required 80%.
+
+Release `34037678414` candidate artifact SHA-256:
+`451299202da2b917dcda08bc88d77b87e8a6200d02f91c5dff0170e8e68416d6`.
+Independent local verification passed all **10 checksums / 11 cosign bundles**,
+including exact workflow-SHA binding. All four SBOMs passed CycloneDX validation;
+the archives matched inventories of **2306 Linux / 2078 Windows / 3592 macOS**
+files. AppImage's **4809** entries are extracted/inventoried in Linux CI; local
+Mac verification covers its archive hash and schema, not native AppImage execution.
+Retained candidate/proof: `.qualification/release-34037678414/`.
+
+Docker `qualification-1.6.0-3a334df` immutable digest:
+`sha256:c8d89679549de39862b7745d5fb821a43facf11ec09f4ed00121be66fe109ad0`.
+The signature was independently verified locally against commit `3a334df` and
+the Docker workflow identity. Both architecture manifests, SPDX inventories
+(391 amd64 / 386 arm64 packages) and commit-bound SLSA provenance were checked;
+proof: `.qualification/docker-34037679856/`. Qualification tags are not immutable
+release tags: use the digest for identity. Final documentation-only follow-ups
+do not change the qualified source tree; a tagged release still requires its own
+workflow/artifact identity checks.
+
+The earlier `72d3a9b` qualification exposed a Windows 3.12 resource-registry race
+in CI `34036608149`. Two real race regressions were reproduced and fixed in
+`3a334df`; the failure is not hidden by a skip or reduced assertion. Its historical
+release `34036668007` passed all 10 local checksum checks and 11 workflow-SHA-bound
+cosign checks. Four native/AppImage file inventories passed CycloneDX validation;
+all declared Linux/Windows/macOS file hashes were independently checked in archives.
+Docker `34036671786` also passed with a verified immutable digest and both platform
+SPDX/SLSA documents. These older artifacts are not substituted for the later build.
+
+The historical three-hour benchmark is now complete, but its cell is **not passed**:
+324395/324395 frames, exact padded 48 kHz sample target and +7.667 ms A/V end delta
+coexist with up to −100 ms internal audio drift. Registered quality was refused by
+the disk guard; raw QA is RED. It predates encode-policy v6 and is not a new 1.6.0
+run. Detailed samples, quality and separate processing/QA resource measurements
+are in `BENCHMARKS.md`. No release Git tag or GitHub Release was created.
+
+### Historical qualification (not current release identity)
 
 Previous code qualification: `8cfb11e07c4abfc6b0984738e9abe2bd500fe38d`.
 CI `34030418205` passed all six OS/Python combinations; CodeQL `34030418013`
@@ -50,15 +90,16 @@ digest `sha256:be51edeaf94f6d2d7878e7c20633e9099024a2ea5dca71eba2d352fc3faba210`
 has verified amd64/arm64 manifests, per-platform SPDX/SLSA and a valid cosign OIDC
 signature. However it identifies old revision `09ac191`, not current HEAD.
 The earlier HTTP 403 was for the wrong package path and is not an access blocker.
-Manual Docker qualification can now use `publish=false` to run both architecture
-smokes without replacing any registry tag; a current release image is still pending.
+Manual Docker qualification can use `publish=false` for unpublished smokes or a
+unique qualification tag for published/signature checks, leaving `edge`/`latest`
+unchanged. The current candidate evidence is listed above, not this old `edge` image.
 
 Natural 5.1 review exposed encoded peak overshoot: the complete stream measured
 +0.27 dBTP despite loudnorm reporting -1.50 dBTP before delivery. The local fix
 re-rendered audio from the original with linked headroom and measured -3.38 dBTP,
 with no full-scale samples in the reviewed excerpt. Stereo/5.1 regression tests
-pass locally. Cross-platform CI and human loudness/listening acceptance remain
-required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
+pass locally and in the subsequent six-cell CI. Human loudness/listening acceptance
+remains required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 
 - [ ] Release commit/tag immutable; worktree clean.
 - [x] Package metadata, CLI command/option, GUI runtime, web OpenAPI, wheel and local
@@ -77,7 +118,8 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 - [x] Final processed audio sample rate соответствует policy: 48 kHz.
 - [x] Output с no audio transforms сохраняет selected main audio.
 - [x] Negative AAC priming/edit-list PTS не сдвигает video на regression fixture.
-- [x] Нет unintended frame drop на regression fixture (752/752); long-form matrix pending.
+- [x] Frame retention on regression fixture (752/752); historical three-hour decode
+      counted 324395/324395. Full v6 natural frame-content/long-form matrix remains open.
 - [x] A/V sync проходит start/end и internal flash/impulse tests на software path;
       hardware and natural-content listening matrix pending.
 - [x] Chapters сохраняются согласно policy на MKV→MP4 regression fixture.
@@ -124,7 +166,8 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 - [x] VFR: multi-segment libx264 and H.264/HEVC VideoToolbox preserve 220/220 frames
       and the 30/20/60 FPS cadence; other hardware vendors remain pending.
 - [x] Synthetic long-GOP/sparse keyframes, static scene and rapid scene-cut
-      segmentation verified; natural licensed corpus remains pending.
+      segmentation verified; historical natural 19-segment output fully decoded with
+      matching frame counts. Full v6 natural seam-content review remains open.
 - [x] Every concat seam checked against its matching source interval on the
       deterministic sparse long-GOP fixture; full natural corpus remains pending.
 
@@ -136,7 +179,8 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 - [x] Main AAC plus secondary Opus is container-qualified: Opus is copied in MKV
       and explicitly transcoded to AAC for MP4/MOV while metadata is preserved.
 - [x] Loudnorm measures actual pre-loudnorm chain, not original source.
-- [x] Final integrated loudness within ±0.5 LU on regression fixture; corpus pending.
+- [x] Final integrated loudness within ±0.5 LU on regression fixture; natural measurements
+      are retained, but peak headroom can lower LUFS and corpus acceptance remains open.
 - [x] Requested and FFmpeg-reported loudnorm modes are recorded in the audio log
       and emitted as a RunEvent; unusable-measurement and FFmpeg-selected dynamic
       fallbacks have distinct explicit reasons.
@@ -252,7 +296,8 @@ required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
 - [x] No low VMAF substitution and no pHash-as-quality fallback; SSIM is used only
       when VMAF is unavailable and retains its metric identity.
 - [x] Audio fingerprint uses ordered start/middle/tail windows for >600 s media and
-      derives all fields from one extraction per file; natural-film corpus pending.
+      derives all fields from one extraction per file. Natural-film measurements exist;
+      confidence calibration remains open after independently exposed internal drift.
 - [x] SSCD direction verified: higher cosine means higher similarity.
 - [x] SSCD midpoint frame extraction is batched into one cancellable FFmpeg runner
       process per file and returns the complete requested grid.
@@ -307,19 +352,18 @@ where shipped), plus package versions from shipped METADATA. Symlinks are record
 not traversed. Hashes/commit bindings and cosign verification are release gates.
 Opaque embedded/static dependency identification, external OS libraries and complete
 license attribution remain **NOT VERIFIED**; file coverage is not a complete
-dependency graph. New workflow execution must be recorded before claiming release
-qualification of these inventories.
+dependency graph. Release `34037678414` exercised these inventory and signature
+gates for the qualified 1.6.0 code; this does not create an immutable release tag.
 
 The downloaded `yt-uniq-gui-macOS.zip` contains an arm64 Mach-O executable, not a
 universal/Intel binary. Intel users need a local x86_64 build or Python installation;
 an independently published Intel desktop asset remains outside verified release scope.
 
-- [x] Ruff, strict mypy and full local production gate pass (`1725 passed`,
-      `55 expected skips`); remote Ubuntu/Python 3.12 branch coverage is `81.23%`
-      (`1497 passed`, 12 expected skips), above the required 80%.
-- [x] Final six-cell CI run `33966344170` passed on `6aa0720` for
+- [x] Ruff, strict mypy and local suite passed with revision/scope described above;
+      remote Ubuntu/Python 3.12 passed the required 80% branch-coverage gate.
+- [x] Six-cell CI run `34037614644` passed on `3a334df` for
       Linux/macOS/Windows with Python 3.11/3.12.
-- [x] CodeQL v4 run `33966344225` passed on `6aa0720`; alert #13 is fixed and the
+- [x] CodeQL v4 run `34037614576` passed on `3a334df`; alert #13 is fixed and the
       GitHub API reports zero open code-scanning alerts.
 - [x] Base/dev/GUI hash-lock reproducible and `pip-audit` clean; Intel macOS ML
       exception documented and restricted to the pinned official SSCD checkpoint.
@@ -328,10 +372,12 @@ an independently published Intel desktop asset remains outside verified release 
       malformed, negative, duplicate, transfer-encoding-conflicting and over-limit
       Content-Length fail closed.
 - [x] Container runs as non-root UID 1000; input mount is documented read-only.
-- [x] Manual release workflow run `33964477926` generated Linux/macOS/Windows GUI
-      bundles, AppImage, CycloneDX 1.5 SBOM, verified SHA-256 checksums and seven
-      keyless cosign bundles without publishing a tag. The downloaded candidate and
-      clean-Ubuntu AppImage runtime were independently verified locally.
+- [x] Manual Release `34037678414` generated 1.6.0 Linux/macOS/Windows GUI bundles,
+      AppImage, environment SBOM and four actual-bundle inventories, SHA-256 manifest
+      and 11 verified keyless cosign bundles without publishing a Git tag.
+- [x] Docker `34037679856` passed amd64/arm64 build/start/health smoke and published
+      the isolated `qualification-1.6.0-3a334df` tag with SPDX/SLSA and cosign checks;
+      `edge` and `latest` were not changed.
 - [ ] Verify Docker buildx SBOM/provenance/signature and the actual immutable v1.6.0
       release assets when the approved release tag is created.
 - [x] Gitleaks found no secrets across 324 commits or the local ~174 MB build
@@ -343,14 +389,14 @@ an independently published Intel desktop asset remains outside verified release 
 - [x] `make typecheck`
 - [x] `make test-unit`
 - [x] `make test-integration`
-- [x] Full contracts/property/GUI/offscreen suite (`make check`:
-      1725 passed, 55 expected hardware-selection/optional skips)
+- [x] Full contracts/property/GUI/offscreen suite (`make check`: 1873 passed,
+      55 expected optional skips; subsequent registry changes separately qualified)
 - [x] Visual suite passed locally with optional QtCharts backend accounted for
 - [x] Profile validation for all shipped profiles
 - [x] FFmpeg synthetic SDR/HDR10/HLG and MP4/MKV/MOV core smoke matrix on this Mac.
-- [x] `make build-wheel` produced `yt_uniquifier-1.5.0-py3-none-any.whl`
+- [x] `make build-wheel` produced `yt_uniquifier-1.6.0-py3-none-any.whl`
 - [x] `make build` GUI artifact on local macOS; Linux/macOS/Windows GUI archives and
-      embedded `1.5.0` versions passed manual release run `33964477926`.
+      embedded `1.6.0` versions passed manual release run `34037678414`.
 - [x] Local `linux/amd64` Docker build/start smoke: non-root UID 1000, `/healthz`
       and `/readyz` pass, shared resource-registry path is writable.
 - [x] Docker multi-arch build/start/health/process smoke for `linux/amd64` and
@@ -358,7 +404,8 @@ an independently published Intel desktop asset remains outside verified release 
       the release gate.
 - [x] One-command rights-attested current/proposed corpus runner is prepared under
       `validation-corpus/`; exact Plan, VMAF/SSIM/PSNR/LUFS/true peak/size/time/RAM and
-      JSON/CSV/HTML output passed synthetic smoke. Licensed media remains `NOT VERIFIED`.
+      JSON/CSV/HTML output passed synthetic smoke and retained licensed/public-domain
+      corpus measurements. Human quality acceptance/production thresholds remain unverified.
 - [x] Scheduled performance workflow on final `6aa0720` passed in run `33966849505`:
       wall time +0.8% and peak RSS +0.2% against the prior same-runner baseline,
       within the 15% hard threshold; no regression issue was created.

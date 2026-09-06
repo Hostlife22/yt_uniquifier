@@ -1,5 +1,53 @@
 # Benchmark Methodology and Baseline
 
+## Completed historical three-hour baseline — 2026-09-06
+
+The previously running job has finished, including full source/output decode.
+It is **not a fresh v1.6.0 / encode-policy v6 benchmark**: its retained metadata
+reports package 1.5.0, git `0cd70bb` and process-start implementation SHA-256
+`0187e9f8fb3fed3edcbc9ddb4bc74bb1bdac9562b7c60f501faf33ff842b7348`.
+Source SHA-256: `2642337aeabc7ef77e21efba895b6b3c17088e0d033e1e0b3d7f82445c087442`.
+This is a public-domain archival 400×300, 29.97 FPS engineering fixture, not
+modern dialogue, natural-camera HDR or three-hour 4K qualification.
+
+| Measurement | Source | Historical soft/libx264 output |
+|---|---:|---:|
+| Fully decoded video frames | 324,395 | 324,395 |
+| Missing / non-increasing PTS | 0 / 0 | 0 / 0 |
+| Decoded audio samples / rate | 477,325,312 / 44,100 Hz | 519,551,552 / 48,000 Hz |
+| Video end, seconds | 10,823.990658 | 10,823.983000 |
+| Audio end, seconds | 10,823.703220 | 10,823.990667 |
+| Audio minus video end | −287.438 ms | +7.667 ms |
+| Integrated loudness / true peak | −23.44 LUFS / +2.57 dBTP | −14.63 LUFS / −1.79 dBTP |
+| File bytes | 769,585,376 | 1,741,605,990 (2.263×) |
+
+Output samples exactly equal `round(10823.990657 × 48000)`: zero sample delta
+from the declared padded output timeline. Direct source/output sample subtraction
+would be misleading because the source is 44.1 kHz and its audio ends early.
+Matching frame counts/monotonic timestamps do not prove every decoded picture's
+identity; matching endpoints do not disprove the independently measured internal
+audio drift of 0 / −50 / −100 ms at start/middle/end.
+
+Processing wall time: **6,947.27 s** (115 min 47 s), sampled process-tree peak
+RSS **300,684 KiB**. QA separately took **4,109.30 s** with **6,171,004 KiB** peak
+RSS (~5.89 GiB). Sampled peak logical working/output bytes: **3,475,706,195**;
+this is a lower-bound sampled disk footprint, not cumulative physical I/O.
+These phase measurements do not include every later diagnostic pass and are not
+an isolated-host performance comparison.
+
+Raw VMAF **14.258758**, SSIM **0.750925**, PSNR **22.207173 dB**. Legacy QA is
+**RED**, and the benchmark cell remains `ok=false`, `metrics.complete=false`:
+registered VMAF/SSIM could not run because the reference needed 38,927,438,926
+bytes versus 23,294,954,700 allowed by the disk guard. No guard was bypassed.
+Raw source/derivative scores include intentional transform differences; unavailable
+registered metrics must not be presented as validated encoding quality.
+
+Retained JSON/CSV/HTML and per-phase evidence:
+`validation-corpus/results/extended-long-180m/summary.{json,csv,html}` and
+`historical-180m-av__current/`. Completion of measurement is **not** production
+acceptance. A full v6 rerender, adequate registered-reference storage/bounded
+reference design and human quality/listening review remain open.
+
 ## Controlled source-cap versus CRF — 2026-09-06
 
 Completed 18 video encodes: three licensed six-second excerpts × two policies ×
@@ -95,8 +143,8 @@ Skips include the separately opted-in hardware matrix, heavy GUI E2E and the
 missing-PyQt branch in this GUI-equipped environment; they are not qualification
 of those paths. Real audio regressions also passed on Linux FFmpeg 5/6. CI
 `34030418205` passed all six OS/Python jobs; release/Docker proofs are recorded in
-`PRODUCTION_CHECKLIST.md`. The 180-minute baseline remains a separate running job
-started before this audio-origin fix, not a completed benchmark of the new code.
+`PRODUCTION_CHECKLIST.md`. The separate 180-minute job started before these fixes;
+its completed historical results are now recorded at the top of this document.
 
 - 4K soft cell: 31.436 s, encode 82.72 s, sampled process-tree RSS 2,456,372 KiB,
   output 41,973,462 bytes, raw VMAF 3.728567 versus registered 93.811511,
@@ -168,8 +216,9 @@ started before this audio-origin fix, not a completed benchmark of the new code.
   quality is **NOT VERIFIED** on this film.
 
 Reports/audio live under ignored `validation-corpus/results/extended-*` and
-`listening-*`. Final long-form decode accounting and corrected CI results are pending;
-no uncompleted experiment is counted as passed. Human visual/HDR/listening verdicts
+`listening-*`. Completed historical long-form decode accounting is recorded above;
+revision-specific CI evidence is in the checklist. No incomplete experiment is
+counted as passed. Human visual/HDR/listening verdicts
 are **NOT VERIFIED**.
 
 Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
@@ -667,7 +716,10 @@ results remain **NOT VERIFIED** until the owner adds licensed fixtures.
 
 ## Предлагаемые release thresholds
 
-Это стартовые engineering gates, их нужно утвердить на natural corpus:
+Это предлагаемые engineering gates, а не действующие defaults. Численные
+quality floors нельзя утвердить по повторам нескольких фрагментов: требуются
+human accept/reject labels, независимые held-out titles и отдельные SDR/tonemap
+домены. Измеренные диапазоны текущего corpus приведены в начале документа.
 
 | Gate | Initial threshold |
 |---|---|
@@ -678,8 +730,8 @@ results remain **NOT VERIFIED** until the owner adds licensed fixtures.
 | Audio duration | ≤ one encoded audio frame from expected timeline |
 | Loudness | target ±0.5 LU; true peak ≤ configured ceiling + 0.1 dB |
 | HDR | required tags + mastering/light metadata preserved; unsupported dynamic HDR rejected |
-| Encode-only VMAF | corpus median ≥95, per-clip floor selected by content class |
-| Quality-first derivative VMAF | target determined after valid registration; never below 88 without explicit override |
+| Encode-only VMAF/SSIM | NOT VERIFIED: independent per-metric floors require labelled, held-out corpus validation |
+| Quality-first derivative VMAF/SSIM | NOT VERIFIED: validate registration and content-class quality before selecting thresholds; no universal 88/95 claim |
 | Resource regression | median wall/RSS no worse than 10% without accepted quality/reliability gain |
 | Resume | 100% valid completed segments reused; 0 foreign/corrupt artifacts reused |
 
@@ -689,9 +741,9 @@ release по [официальным upload settings](https://support.google.com
 
 ## NOT VERIFIED
 
-- Natural 95-minute A/V and 176-minute video-only measurements are retained. The
-  continuous 180-minute A/V baseline is still running; it must not be reported as
-  complete. Human listening/visual inspection remain unverified.
+- Natural 95-minute A/V, 176-minute video-only and the completed continuous
+  180-minute historical baseline are retained. A full v6 three-hour rerender,
+  registered long-form quality and human listening/visual acceptance remain unverified.
 - 4K long-form throughput/resource usage (короткий 4K AV1 smoke verified).
 - HLG и natural HDR corpus; dynamic HDR preservation intentionally unsupported.
 - NVENC/QSV/AMF and AV1 VideoToolbox.

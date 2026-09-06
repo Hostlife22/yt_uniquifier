@@ -10,15 +10,24 @@
   run. Integer pitch-clock compensation and precision fixed locally, with a
   30-minute event regression on FFmpeg 5/6/9 and encode-policy cache revision v6.
 - Actual bundle/AppImage inventories, archive/commit binding and cosign verification
-  added to release workflows. Final committed workflow qualification is pending;
+  passed Release `34037678414` and Docker `34037679856` at code `3a334df`;
   static dependency/license completeness is not claimed by file hashes alone.
-- Legacy 180-minute benchmark is retained as legacy provenance, not a new v6 run.
+- Legacy 180-minute benchmark completed: 324395/324395 decoded frames and exact
+  padded audio sample target, but raw QA RED, registered metrics unavailable and
+  internal audio drift up to −100 ms. It is legacy provenance, not a new v6 run.
   Human HDR/listening, hardware/NFS qualification and a release tag remain outside
   completed engineering checks. Latest measured evidence is in `BENCHMARKS.md`.
+- Resource-registry scan/replacement/release races were reproduced and fixed;
+  all six CI cells `34037614644` and CodeQL `34037614576` passed on `3a334df`.
+- Remaining release decisions: labelled held-out corpus thresholds, bounded
+  quality/size policy instead of blind source-cap removal, full v6 long-form
+  rerender with registered-reference storage, human review and explicit acceptance
+  of remaining P1 supply-chain/hardware/NFS risks. No release tag was created.
 
 Основа плана — локальные изменения существующего pipeline. Новый orchestrator,
 profile engine или QA system не создаются. План был согласован; Phase 1 и часть
-Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. Остальные пункты
+Phase 2/3 production guardrails реализованы начиная с candidate `v1.5.0`;
+текущий QA candidate — `v1.6.0`. Остальные пункты
 сохраняются как проверяемый roadmap, а не как заявление о завершённой поддержке.
 
 ## Статус на 2026-09-05
