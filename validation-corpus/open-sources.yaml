@@ -3,6 +3,56 @@ schema_version: 1
 # Redistributable/public-domain natural content used only for engineering QA.
 # Keep exact hashes: upstream replacement must be reviewed as a new fixture.
 sources:
+  - id: birth-of-a-nation-1915
+    filename: birth-of-a-nation-1915.ogv
+    title: The Birth of a Nation (1915), historical 180-minute archival copy
+    publisher: Wikimedia Commons / Internet Archive
+    url: https://upload.wikimedia.org/wikipedia/commons/6/63/The_Birth_of_a_Nation.ogv
+    source_page: https://commons.wikimedia.org/wiki/File:The_Birth_of_a_Nation.ogv
+    license: Public Domain Mark 1.0
+    license_url: https://creativecommons.org/publicdomain/mark/1.0/
+    expected_bytes: 769585376
+    sha256: 2642337aeabc7ef77e21efba895b6b3c17088e0d033e1e0b3d7f82445c087442
+    use: Non-looped three-hour A/V correctness fixture, not a modern quality reference
+    caveat: Racist historical content; retained only for technical archival testing, not endorsement or promotion.
+
+  - id: intolerance-1916
+    filename: intolerance-1916.ogv
+    title: Intolerance (1916), silent 176-minute historical copy
+    publisher: Wikimedia Commons / Internet Archive
+    url: https://upload.wikimedia.org/wikipedia/commons/e/e7/Intolerance_%281916%29.ogv
+    source_page: https://commons.wikimedia.org/wiki/File:Intolerance_(1916).ogv
+    license: Public domain in the United States (published 1916)
+    license_url: https://commons.wikimedia.org/wiki/File:Intolerance_(1916).ogv#Licensing
+    expected_bytes: 707143844
+    sha256: 77a14be278658114583b16f863cae03ee4c381259183307df95832d25e3c6fe3
+    use: Continuous 176-minute non-looped natural-picture timeline; no audio stream
+    caveat: Historic 400x300 copy; not a modern restored soundtrack or 4K quality source. Public-domain evidence is jurisdiction-specific.
+
+  - id: tears-of-steel-4k
+    filename: tears-of-steel-4k.webm
+    title: Tears of Steel (Blender Foundation 4K release)
+    publisher: Blender Foundation / Wikimedia Commons
+    url: https://upload.wikimedia.org/wikipedia/commons/1/10/Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm
+    source_page: https://commons.wikimedia.org/wiki/File:Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm
+    license: CC BY 3.0
+    license_url: https://creativecommons.org/licenses/by/3.0/
+    expected_bytes: 958806974
+    sha256: 76d05c9a5d08c4fe686374f869f58a079e22db29b58c24f36611e79c88ff3ddf
+    use: Native 3840x1714 SDR, live action/CGI, skin and motion
+
+  - id: tears-of-steel-surround
+    filename: tears-of-steel-surround.flac
+    title: Tears of Steel original surround mix
+    publisher: Blender Foundation / Xiph.org
+    url: https://media.xiph.org/tearsofsteel/tearsofsteel-surround.flac
+    source_page: https://media.xiph.org/tearsofsteel/README.txt
+    license: CC BY 3.0
+    license_url: https://creativecommons.org/licenses/by/3.0/
+    expected_bytes: 346994847
+    sha256: fb3eeeea2bedd6dd6d416a7cf896f4690eb9eb1932ed45dd821554192030b1d3
+    use: Original 5.1 dialogue/music listening, not synthesized upmix
+
   - id: tears-of-steel-1080p
     filename: tears-of-steel-1080p.webm
     title: Tears of Steel (official Blender Foundation release, 1080p derivative)

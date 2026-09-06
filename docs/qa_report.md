@@ -118,6 +118,17 @@ returning a deceptively good value. Registered VMAF fails closed for preserved H
 instead of interpreting PQ/HLG code values with an SDR model; HDR→SDR output can be
 scored after the explicit tonemap because both registered inputs are then SDR.
 
+For example, the extended 4K natural-content experiment produced raw VMAF 3.73
+and plan-registered VMAF 93.81 in the same cell. The first includes the difference
+from the original scene/timeline; the second compares encoding against the
+transformed reference. Neither number alone authorizes a production release.
+The corpus runner records measurement completeness separately from QA verdict
+and human acceptance; its `measured` status is not a quality pass.
+
+Explicit public correctness/loudness objects and independent opt-in thresholds
+are proposed in `specs/28-qa-correctness-loudness-rfc.md`, not yet accepted or
+implemented. Existing report/CLI contracts remain unchanged.
+
 Reference generation is cancellable and guarded by both free space and
 `YT_UNIQ_REGISTERED_REFERENCE_MAX_BYTES` (40 GiB by default). If the conservative
 FFV1 estimate exceeds that budget, registered video metrics become unavailable with

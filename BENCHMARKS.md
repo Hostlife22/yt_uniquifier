@@ -1,5 +1,51 @@
 # Benchmark Methodology and Baseline
 
+## Extended Intel Mac experiment — 2026-09-06 (qualification in progress)
+
+Sources/rights/hashes: `validation-corpus/open-sources.yaml`; derivations and exact
+commands: `validation-corpus/DERIVATIONS.md`. New 4K/5.1 and continuous 176/180-minute
+sources are not synthesized loops. Historical low-resolution films do not qualify
+modern 4K movies. HDR cases remain explicitly derived natural-picture PQ/HLG, not
+camera-native HDR10 evidence.
+
+- 4K soft cell: 31.436 s, encode 82.72 s, sampled process-tree RSS 2,456,372 KiB,
+  output 41,973,462 bytes, raw VMAF 3.728567 versus registered 93.811511,
+  registered SSIM 0.986410. High registered quality does not remove the original
+  scene/timeline difference. Medium cell encode: 247.75 s, RSS 2,383,384 KiB,
+  sampled work/output logical peak 83,683,340 bytes. Runs shared host load and
+  are **not an isolated speed comparison**.
+- Natural 5.1 delivery defect reproduced: loudnorm reports -1.50 dBTP; resampled
+  float PCM measures -1.05; full AAC output +0.27. A fast input-seek review excerpt
+  initially measured +1.40; switching review extraction to decode-before-trim
+  removed that seek artifact but retained the genuine +0.27 full-stream overshoot.
+- Bounded source re-render with linked headroom delivered -3.38 dBTP. The 20-second
+  A/B region contains 960,000 samples/channel and no full-scale/nonfinite values;
+  source/current/corrected LUFS are -23.17/-13.68/-16.64. This is a peak-safety fix,
+  not a claim to still meet -14 LUFS or to pass human listening.
+- Stereo review: source/current/medium excerpt LUFS -9.49/-13.24/-13.26 and
+  peaks +0.77/-1.50/-1.50 dBTP in the initial excerpt experiment. Retain full-file
+  and excerpt scopes separately; cuts can alter measured boundary transients.
+- Numeric counters are streamed, not retained per frame in RAM. Disk values are
+  1-second sampled logical-file lower bounds for work/output directories, excluding
+  OS-temp QA references. QA time/RSS are now measured separately in the runner.
+- Both 4K variants and the corrected-audio mux decode to 753 video frames and
+  1,508,928 audio samples/channel; video ends at 31.375 s, audio at 31.436 s
+  (+61 ms). Source already has a +62.33 ms endpoint delta and delayed audio start;
+  normalized padding accounts for the increased decoded sample count. This does
+  not establish lip-sync between the independently published video/audio editions.
+- 176-minute video-only encode completed: 18 segments, 1,451.65 s pipeline wall,
+  245,832 KiB sampled RSS, 2,042,135,805 sampled workspace/output bytes and
+  1,022,159,764-byte output. Full QA/decode accounting is still pending.
+- First HDR natural-picture pair: current registered VMAF/SSIM 78.623/0.958818;
+  tonemap-only proposed 89.128/0.995036. Each score uses its own transformed
+  reference, so the difference does not prove that the tone curve itself is better.
+  Raw HDR-to-SDR VMAF is not a perceptual HDR mastering verdict.
+
+Reports/audio live under ignored `validation-corpus/results/extended-*` and
+`listening-*`. Final long-form, HDR matrix and current-commit CI results are pending;
+no uncompleted experiment is counted as passed. Human visual/HDR/listening verdicts
+are **NOT VERIFIED**.
+
 Baseline: 2026-09-02, commit `14df893`; production acceptance дополнен
 2026-09-05. Результаты относятся только к указанному локальному environment и не
 экстраполируются автоматически на фильмы/HDR/GPU.

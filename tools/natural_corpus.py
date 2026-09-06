@@ -7,22 +7,28 @@ import csv
 import hashlib
 import html
 import json
+import os
 import platform
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
+from yt_uniquifier.core.models import QAReport
 from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.profile_loader import load_profile
+from yt_uniquifier.core.qa.report import verdict
+from yt_uniquifier.core.runner import _terminate
 from yt_uniquifier.core.transforms.audio_loudnorm import measure
 
 REPO = Path(__file__).resolve().parents[1]
-ALLOWED_MEDIA_SUFFIXES = {".mkv", ".mov", ".mp4", ".mxf", ".webm"}
+ALLOWED_MEDIA_SUFFIXES = {".mkv", ".mov", ".mp4", ".mxf", ".webm", ".ogv"}
 ALLOWED_RIGHTS = {"licensed", "owned", "public_domain"}
 ALLOWED_CLASSES = {"sdr", "hdr10", "hlg"}
 
@@ -236,16 +242,34 @@ def _sha256(path: Path) -> str:
 
 
 def _capture(command: list[str], log: Path) -> int:
+    try:
+        from tools.benchmark import _ProcessTreeMemorySampler
+    except ModuleNotFoundError:
+        from benchmark import _ProcessTreeMemorySampler  # type: ignore[no-redef]
+    started = time.monotonic()
     with log.open("w", encoding="utf-8") as handle:
-        result = subprocess.run(
+        result = subprocess.Popen(
             command,
             cwd=REPO,
             text=True,
             stdout=handle,
             stderr=subprocess.STDOUT,
-            check=False,
+            start_new_session=os.name != "nt",
         )
-    return result.returncode
+        sampler = _ProcessTreeMemorySampler(pid=result.pid)
+        sampler.start()
+        try:
+            returncode = result.wait()
+        finally:
+            peak_kb, method = sampler.stop()
+            if result.poll() is None:
+                _terminate(result)
+                result.wait()
+    log.with_suffix(".resources.json").write_text(json.dumps({
+        "wall_sec": time.monotonic() - started,
+        "rss_peak_kb": peak_kb if peak_kb > 0 else None, "rss_method": method,
+    }, indent=2) + "\n", encoding="utf-8")
+    return returncode
 
 
 _PSNR_RE = re.compile(r"average:([0-9.]+|inf)")
@@ -373,7 +397,7 @@ def _write_summary_csv(
                 "variant_id": cell["variant_id"],
                 "profile": cell["profile"],
                 "encoder": cell["encoder"],
-                "status": "passed" if cell["ok"] else "failed",
+                "status": "measured" if cell["ok"] else "incomplete",
                 **{field: metrics.get(field) for field in _CSV_FIELDS[5:]},
             })
 
@@ -396,7 +420,7 @@ def _write_summary_html(
         metrics = cell.get("metrics", {})
         values = [
             cell["case_id"], cell["variant_id"], cell["profile"], cell["encoder"],
-            "passed" if cell["ok"] else "failed",
+            "measured" if cell["ok"] else "incomplete",
             *(metrics.get(field) for field in headings[5:]),
         ]
         rows.append("<tr>" + "".join(
@@ -413,6 +437,8 @@ def _write_summary_html(
         "</style></head><body><h1>Production benchmark</h1><table><thead><tr>"
         + "".join(f"<th>{html.escape(field)}</th>" for field in headings)
         + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+        + "<p>Measured means pipeline/metric collection completed, not production acceptance. "
+        "Review each cell's QA verdict and human listening/visual assessment separately.</p>"
         + f"<h2>Variant deltas</h2><pre>{comparison_json}</pre></body></html>\n"
     )
     destination.write_text(document, encoding="utf-8")
@@ -453,7 +479,10 @@ def _comparisons(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) -> int:
+def run_manifest(
+    manifest: CorpusManifest, results: Path, *, with_sscd: bool,
+    decode_timelines: bool = False,
+) -> int:
     results.mkdir(parents=True, exist_ok=True)
     cells: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
@@ -481,6 +510,8 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
             "true_peak_dbtp": source_true_peak,
             "audio_note": source_audio_note,
         })
+        if decode_timelines:
+            sources[-1]["decoded_timeline"] = _timeline_metrics(case.source)
         for variant in (
             item for item in manifest.variants if item.variant_id in case.variant_ids
         ):
@@ -515,6 +546,7 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
                 "--plan-json",
                 str(plan_json),
                 "--accept-watermark-risk",
+                "--sample-disk",
             ]
             benchmark_rc = _capture(benchmark_command, cell_dir / "benchmark.log")
             qa_rc: int | None = None
@@ -537,6 +569,7 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
             pipeline_ok = benchmark_rc == 0 and qa_rc == 0
             benchmark = _load_json(benchmark_json)
             qa = _load_json(qa_json)
+            qa_resources = _load_json(cell_dir / "qa.resources.json")
             psnr_db: float | None = None
             psnr_note: str | None = "PSNR skipped because output is unavailable"
             output_lufs: float | None = None
@@ -570,10 +603,19 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
                 "duration_sec": _number(qa, "output_duration_sec"),
                 "wall_sec": _number(benchmark, "wall_sec"),
                 "rss_peak_kb": _number(benchmark, "rss_peak_kb"),
+                "qa_wall_sec": _number(qa_resources, "wall_sec"),
+                "qa_rss_peak_kb": _number(qa_resources, "rss_peak_kb"),
+                "disk_peak_logical_bytes": _number(benchmark, "disk_peak_logical_bytes"),
                 "notes": [
                     note for note in (psnr_note, output_audio_note) if note is not None
                 ],
             }
+            if decode_timelines and output.is_file():
+                metrics["decoded_timeline"] = _timeline_metrics(output)
+                if "error" in metrics["decoded_timeline"]:
+                    pipeline_ok = False
+                if "error" in sources[-1]["decoded_timeline"]:
+                    pipeline_ok = False
             required_metrics = _required_metric_names(
                 media_class=case.media_class,
                 keep_hdr=profile.keep_hdr,
@@ -600,6 +642,8 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
                 "benchmark_exit_code": benchmark_rc,
                 "qa_exit_code": qa_rc,
                 "ok": cell_ok,
+                "qa_verdict": _qa_verdict(qa),
+                "production_acceptance": "NOT VERIFIED: human/corpus policy review required",
                 "metrics": metrics,
                 "review_cues": case.review_cues,
             })
@@ -621,6 +665,29 @@ def run_manifest(manifest: CorpusManifest, results: Path, *, with_sscd: bool) ->
     return 1 if failed else 0
 
 
+def _qa_verdict(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = verdict(QAReport.model_validate(payload))
+    except ValidationError:
+        return {"status": "NOT VERIFIED", "reason": "missing or invalid QA report"}
+    return {
+        "status": result.band, "correctness": result.correctness,
+        "quality": result.quality, "reasons": result.reasons,
+    }
+
+
+def _timeline_metrics(path: Path) -> dict[str, Any]:
+    # tools can be executed both as modules and directly from the repository.
+    try:
+        from tools.media_diagnostics import decoded_timeline
+    except ModuleNotFoundError:
+        from media_diagnostics import decoded_timeline  # type: ignore[no-redef]
+    try:
+        return decoded_timeline(path)
+    except (OSError, ValueError, TimeoutError) as exc:
+        return {"error": str(exc), "status": "NOT VERIFIED"}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -631,6 +698,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("manifest", type=Path)
     run.add_argument("--results", type=Path, required=True)
     run.add_argument("--with-sscd", action="store_true")
+    run.add_argument("--decode-timelines", action="store_true")
     return parser
 
 
@@ -651,7 +719,10 @@ def main() -> int:
     )
     if args.command == "validate":
         return 0
-    return run_manifest(manifest, args.results.resolve(), with_sscd=args.with_sscd)
+    return run_manifest(
+        manifest, args.results.resolve(), with_sscd=args.with_sscd,
+        decode_timelines=args.decode_timelines,
+    )
 
 
 if __name__ == "__main__":

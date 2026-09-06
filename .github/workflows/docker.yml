@@ -25,6 +25,11 @@ on:
         description: "Image tag (defaults to git ref name)"
         required: false
         default: "edge"
+      publish:
+        description: "Publish/sign after smoke; false checks both architectures without changing GHCR"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -60,6 +65,7 @@ jobs:
 
   buildx:
     needs: smoke
+    if: github.event_name != 'workflow_dispatch' || inputs.publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

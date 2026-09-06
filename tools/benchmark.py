@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import hashlib
 import json
 import os
 import platform
@@ -44,6 +45,56 @@ from yt_uniquifier.core.runner import RunEvent
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+class _DiskUsageSampler:
+    """Sample logical bytes, not allocated blocks or device-wide I/O.
+
+    The output directory must be a dedicated benchmark cell directory.
+    """
+
+    def __init__(self, roots: list[Path], interval_sec: float = 1.0) -> None:
+        self.roots = list(dict.fromkeys(path.resolve() for path in roots))
+        self.interval_sec = interval_sec
+        self.peak_bytes = 0
+        self.errors = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def _sample(self) -> None:
+        total = 0
+        seen: set[tuple[int, int]] = set()
+        for root in self.roots:
+            for directory, _, files in os.walk(root, followlinks=False):
+                for name in files:
+                    path = Path(directory) / name
+                    try:
+                        if path.is_symlink():
+                            continue
+                        stat = path.stat()
+                    except FileNotFoundError:
+                        continue  # concurrent publication or cleanup
+                    except OSError:
+                        self.errors += 1
+                        continue
+                    key = (stat.st_dev, stat.st_ino)
+                    if key not in seen:
+                        total += stat.st_size
+                        seen.add(key)
+        self.peak_bytes = max(self.peak_bytes, total)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.interval_sec):
+            self._sample()
+
+    def start(self) -> None:
+        self._sample()
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join()
+        self._sample()
+
+
 class _ProcessTreeMemorySampler:
     """Sample aggregate parent + live FFmpeg child RSS.
 
@@ -52,7 +103,7 @@ class _ProcessTreeMemorySampler:
     tree sum; retain an explicitly-labelled approximation when psutil is absent.
     """
 
-    def __init__(self, interval_sec: float = 0.1) -> None:
+    def __init__(self, interval_sec: float = 0.1, *, pid: int | None = None) -> None:
         self.interval_sec = interval_sec
         self.peak_kb = 0
         self.method = "resource_self_plus_children_max"
@@ -60,14 +111,20 @@ class _ProcessTreeMemorySampler:
         self._thread: threading.Thread | None = None
         self._psutil: Any | None = None
         self._process: Any | None = None
+        self._external_pid = pid
         try:
             import psutil
 
             self._psutil = psutil
-            self._process = psutil.Process(os.getpid())
-            self.method = "psutil_process_tree_sum_100ms"
+            try:
+                self._process = psutil.Process(pid if pid is not None else os.getpid())
+                self.method = "psutil_process_tree_sum_100ms"
+            except psutil.Error:
+                pass
         except (ImportError, OSError):
             pass
+        if pid is not None and self._process is None:
+            self.method = "unavailable_external_process"
 
     def start(self) -> None:
         if self._process is None:
@@ -87,6 +144,8 @@ class _ProcessTreeMemorySampler:
             if self._thread is not None:
                 self._thread.join(timeout=max(1.0, self.interval_sec * 3))
             return self.peak_kb, self.method
+        if self._external_pid is not None:
+            return 0, self.method
         return self._resource_fallback_kb(), self.method
 
     def _loop(self) -> None:
@@ -139,6 +198,18 @@ def _git_sha() -> str:
     return "unknown"
 
 
+def _implementation_digest() -> str:
+    """Identify dirty local implementation, not just the last committed HEAD."""
+    digest = hashlib.sha256()
+    paths = sorted((REPO_ROOT / "src").rglob("*.py")) + [Path(__file__).resolve()]
+    for path in paths:
+        digest.update(path.relative_to(REPO_ROOT).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("input", type=Path)
@@ -146,6 +217,10 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--encoder", default=None)
     ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument(
+        "--sample-disk", action="store_true",
+        help="Sample work/output directory bytes; use a dedicated output directory.",
+    )
     ap.add_argument(
         "--accept-watermark-risk",
         action="store_true",
@@ -168,6 +243,7 @@ def main() -> int:
         help="Write the exact Plan used by this run for registered QA metrics.",
     )
     args = ap.parse_args()
+    implementation_digest = _implementation_digest()
 
     profile = load_profile(args.profile)
     plan = build_plan(args.input, profile, args.encoder)
@@ -190,6 +266,9 @@ def main() -> int:
             segments_seen.add(seg)
 
     memory_sampler = _ProcessTreeMemorySampler()
+    disk_sampler = _DiskUsageSampler([args.work_dir, args.out.parent]) if args.sample_disk else None
+    if disk_sampler is not None:
+        disk_sampler.start()
     memory_sampler.start()
     start = time.monotonic()
     try:
@@ -208,6 +287,8 @@ def main() -> int:
         )
     finally:
         rss_kb, rss_method = memory_sampler.stop()
+        if disk_sampler is not None:
+            disk_sampler.stop()
     wall = time.monotonic() - start
 
     row: dict[str, str | int | float] = {
@@ -244,6 +325,7 @@ def main() -> int:
             "schema_version": 1,
             "yt_uniquifier_version": yt_uniq_version,
             "git_sha": _git_sha(),
+            "implementation_sha256_at_start": implementation_digest,
             "py_version": platform.python_version(),
             "platform": f"{platform.system()}-{platform.machine()}",
             "input": str(args.input),
@@ -261,6 +343,13 @@ def main() -> int:
             "rss_method": rss_method,
             "segments_seen": len(segments_seen),
             "per_phase_sec": {k: round(v, 2) for k, v in phase_totals.items()},
+            "disk_peak_logical_bytes": disk_sampler.peak_bytes if disk_sampler else None,
+            "disk_measurement": {
+                "method": "deduplicated_logical_file_sizes_1s_sampled_lower_bound",
+                "enabled": disk_sampler is not None,
+                "read_errors": disk_sampler.errors if disk_sampler else None,
+                "scope": "work and dedicated output directories; not device I/O",
+            },
         }
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(

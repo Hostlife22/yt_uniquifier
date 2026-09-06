@@ -423,6 +423,12 @@ def _check_timeline_rate(plan: Plan) -> list[PreflightFinding]:
             raw_rate = transform.params.get("rate", 1.0)
             if isinstance(raw_rate, (int, float)):
                 video_rate *= float(raw_rate)
+        elif transform.id == "video.subtitles" and abs(video_rate - 1.0) > 1e-6:
+            return [PreflightFinding(
+                code="timeline.aux_stream_rate", severity="fail",
+                message="Subtitle burn-in after a playback-rate change uses the wrong clock.",
+                suggestion="Place video.subtitles before video.speed to keep captions aligned.",
+            )]
         elif transform.id == "audio.pitch_tempo":
             raw_tempo = transform.params.get("tempo", 1.0)
             if isinstance(raw_tempo, (int, float)):
@@ -443,27 +449,19 @@ def _check_timeline_rate(plan: Plan) -> list[PreflightFinding]:
                 "value, or remove both rate changes."
             ),
         )]
-    if len(selected_audio) > 1 and abs(video_rate - 1.0) > 1e-6:
-        return [PreflightFinding(
-            code="timeline.passthrough_audio_rate", severity="fail",
-            message=(
-                "Playback-rate changes cannot preserve additional stream-copy "
-                "audio tracks in sync."
-            ),
-            suggestion="Use audio_tracks: first, or remove the playback-rate change.",
-        )]
     if abs(video_rate - 1.0) > 1e-6 and (
-        plan.source.subtitle or plan.source.chapters
+        any(stream.codec.lower() not in {"subrip", "srt"} for stream in plan.source.subtitle)
+        or any(stream.kind == "data" for stream in get_auxiliary_streams(plan.source))
     ):
         return [PreflightFinding(
             code="timeline.aux_stream_rate", severity="fail",
             message=(
-                "Playback-rate changes require retiming subtitle and chapter "
-                "timestamps, which is not yet supported safely."
+                "Playback-rate changes support SRT timing only; other subtitle "
+                "payloads and timed data (including ASS animations and timecode) "
+                "have not been qualified for retiming."
             ),
             suggestion=(
-                "Remove video.speed for this source, or remove/retime subtitles "
-                "and chapters before processing."
+                "Remove video.speed or supply separately reviewed SRT subtitles."
             ),
         )]
     return []

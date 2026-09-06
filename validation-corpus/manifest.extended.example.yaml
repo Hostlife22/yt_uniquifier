@@ -1,0 +1,62 @@
+schema_version: 1
+matrix:
+  workers: 1
+  variants:
+    - id: current
+      profile: ../src/yt_uniquifier/profiles/soft.yaml
+      encoder: libx264
+    - id: medium
+      profile: ../src/yt_uniquifier/profiles/medium.yaml
+      encoder: libx264
+    - id: hdr_current
+      profile: ../src/yt_uniquifier/profiles/cid_aware_hdr_to_sdr.yaml
+      encoder: libx264
+    - id: tonemap_only
+      profile: profiles/tonemap-review.yaml
+      encoder: libx264
+cases:
+  - id: natural-4k-surround
+    source: media/natural-4k-surround-30s.mkv
+    rights_status: licensed
+    rights_reference: open-sources.yaml#tears-of-steel-4k + open-sources.yaml#tears-of-steel-surround
+    media_class: sdr
+    variants: [current, medium]
+    review_cues:
+      - Native 3840x1714; original 5.1 mix, no artificial loop
+      - Independently published editions require editorial alignment review
+  - id: hdr-dark-skin-highlight
+    source: media/hdr10-dark-highlight-30s.mp4
+    rights_status: licensed
+    rights_reference: open-sources.yaml#meridian-p3pq + DERIVATIONS.md
+    media_class: hdr10
+    variants: [hdr_current, tonemap_only]
+    review_cues:
+      - Natural-picture derived PQ, not camera-native HDR qualification
+      - Dark detail, skin, practical highlights; review on an appropriate display
+  - id: hlg-motion
+    source: media/hlg-motion-30s.mp4
+    rights_status: licensed
+    rights_reference: open-sources.yaml#meridian-p3pq + DERIVATIONS.md
+    media_class: hlg
+    variants: [hdr_current, tonemap_only]
+    review_cues:
+      - Natural-picture derived HLG, not a native HLG master
+      - Motion continuity and highlight clipping require human review
+  - id: intolerance-176m
+    source: media/intolerance-1916.mkv
+    rights_status: public_domain
+    rights_reference: open-sources.yaml#intolerance-1916 + DERIVATIONS.md
+    media_class: sdr
+    variants: [current]
+    review_cues:
+      - Continuous historical 400x300 film; video only, no A/V sync qualification
+      - Public-domain status must be checked for the deployment jurisdiction
+  - id: birth-of-a-nation-180m
+    source: media/birth-of-a-nation-1915.ogv
+    rights_status: public_domain
+    rights_reference: open-sources.yaml#birth-of-a-nation-1915
+    media_class: sdr
+    variants: [current]
+    review_cues:
+      - Continuous 180-minute archival A/V, not a modern 4K film benchmark
+      - Racist historical content retained for technical testing, not endorsement

@@ -1,5 +1,16 @@
 # Production Audit: yt_uniquifier
 
+## Extended qualification findings — 2026-09-06
+
+Natural 4K/5.1 uncovered post-loudnorm resampling/AAC peak overshoot, corrected
+locally with bounded re-render from source and a decoded delivery-peak gate.
+Staged media is now checked before atomic replacement, not only after publication.
+`BENCHMARKS.md` records raw versus registered metrics and the loudness/headroom
+tradeoff; neither completed measurement nor a high registered score implies
+production approval. Existing pipeline, profile engine and QA implementation are
+reused. ASS/bitmap retiming, public QA contract approval, natural HDR display/listening
+and published GHCR verification remain explicitly incomplete.
+
 Дата аудита: 2026-09-02
 Базовый коммит: `2c8d677` (`v1.3.3`, `main`)
 Режим аудита: исходный production-код не изменялся до согласования плана.

@@ -84,7 +84,7 @@ def _main_audio_bitrate(plan: Plan) -> str:
     return f"{channels * 128}k"
 
 
-def _main_audio_tail_filter(plan: Plan) -> str:
+def _main_audio_tail_filter(plan: Plan, *, post_gain_db: float = 0.0) -> str:
     """Return an exact 48 kHz sample contract for the declared video timeline.
 
     Stateful tempo and loudness filters may retain/drop a small tail when they
@@ -97,12 +97,15 @@ def _main_audio_tail_filter(plan: Plan) -> str:
         1,
         round(expected_output_duration(plan) * OUTPUT_AUDIO_SAMPLE_RATE),
     )
-    return (
+    tail = (
         f"aresample={OUTPUT_AUDIO_SAMPLE_RATE},"
         f"apad=whole_len={target_samples},"
         f"atrim=end_sample={target_samples},"
         "asetpts=N/SR/TB"
     )
+    if post_gain_db:
+        tail += f",volume={post_gain_db:.6f}dB"
+    return tail
 
 
 def _audio_transform_params(plan: Plan, tc: TransformConfig) -> Any:
@@ -835,6 +838,7 @@ def build_main_audio_command(
     audio_output: Path,
     *,
     loudnorm_measurement: LoudnormMeasurement | None = None,
+    post_gain_db: float = 0.0,
 ) -> tuple[BuiltCommand, LoudnormMeasurement | None]:
     """Build an ffmpeg command that processes ONLY the main audio dorozhka.
 
@@ -895,7 +899,9 @@ def build_main_audio_command(
     # from the actual sample count after the complete audio chain.
     contiguous_label = alloc.next("a")
     a_chains.append(
-        _wrap_chain_str(a_label, _main_audio_tail_filter(plan), contiguous_label)
+        _wrap_chain_str(
+            a_label, _main_audio_tail_filter(plan, post_gain_db=post_gain_db), contiguous_label,
+        )
     )
     a_label = contiguous_label
 
@@ -930,6 +936,7 @@ def build_main_audio_command_windowed(
     audio_output: Path,
     *,
     loudnorm_measurement: LoudnormMeasurement | None = None,
+    post_gain_db: float = 0.0,
 ) -> tuple[BuiltCommand, LoudnormMeasurement | None]:
     """Per-window audio processing for `seed_strategy='divergent'`.
 
@@ -1074,7 +1081,7 @@ def build_main_audio_command_windowed(
     all_chains.append(
         _wrap_chain_str(
             final_label,
-            _main_audio_tail_filter(plan),
+            _main_audio_tail_filter(plan, post_gain_db=post_gain_db),
             contiguous_label,
         )
     )

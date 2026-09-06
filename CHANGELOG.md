@@ -14,6 +14,22 @@ the last tag.
 
 ### Changed
 
+- Add manual Docker `publish=false` qualification: both architecture smokes run
+  without changing GHCR tags; existing publication defaults remain unchanged.
+- Verify main-audio true peak after AAC delivery, not only before encoding; retry
+  from the original source with bounded linked headroom and fail closed if the
+  ceiling still cannot be met. Revalidate cached audio and final output. Peak
+  safety may lower integrated loudness; retain measured evidence in the audio log.
+- Validate staged media before atomic final replacement, preserving the previous
+  output when correctness/decoded-peak validation or optional sanitization fails.
+- Support matching playback-rate changes for secondary audio, SRT timestamps and
+  durations, and chapters through the existing concat path. Additional audio gets
+  tempo-only processing; timed ASS/bitmap payloads remain explicitly unsupported.
+  Final validation checks chapter boundaries as well as chapter count.
+- Extend natural-content qualification with checksum-pinned 4K/5.1 and long-form
+  sources, bounded-memory decoded frame/sample/PTS diagnostics, sampled disk use,
+  separate QA RAM/time measurement and lossless human-listening review assets.
+  Benchmark measurement completion is explicitly not production acceptance.
 - Make manual release qualification execute the full Linux/macOS/Windows/AppImage,
   embedded-version, SBOM, checksum and keyless-signing path without creating a tag;
   only draft publication remains tag-gated.

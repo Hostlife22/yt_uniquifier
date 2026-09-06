@@ -182,6 +182,18 @@ def inspect_output_contract(
         failures.append(MediaInvariantFailure(
             "chapters.count", expected_chapters, len(result.chapters),
         ))
+    else:
+        timeline_scale = expected_output_duration(plan) / plan.source.duration_sec
+        for index, (original, actual) in enumerate(zip(
+            plan.source.chapters, result.chapters, strict=True,
+        )):
+            for field in ("start_sec", "end_sec"):
+                expected_time = float(getattr(original, field)) * timeline_scale
+                actual_time = float(getattr(actual, field))
+                if abs(expected_time - actual_time) > 0.002:
+                    failures.append(MediaInvariantFailure(
+                        f"chapters.{index}.{field}", expected_time, actual_time,
+                    ))
 
     _compare_auxiliary_streams(
         failures,

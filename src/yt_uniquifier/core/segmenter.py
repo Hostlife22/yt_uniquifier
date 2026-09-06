@@ -11,10 +11,12 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import math
 import os
 import secrets
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from bisect import bisect_left
@@ -27,7 +29,7 @@ from yt_uniquifier.core.auxiliary_streams import (
     unsupported_auxiliary_streams,
 )
 from yt_uniquifier.core.errors import PipelineError
-from yt_uniquifier.core.models import AudioStream, Plan, Segment
+from yt_uniquifier.core.models import AudioStream, Chapter, Plan, Segment
 from yt_uniquifier.core.output_reservation import (
     RunAdmission,
     RunAdmissionError,
@@ -44,11 +46,15 @@ from yt_uniquifier.core.resource_budget import resource_pool_dir
 from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
+from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.transforms.audio_loudnorm import (
     LoudnormMeasurement,
+    LoudnormParams,
+    _parse_measurement,
     normalization_mode_for,
     parse_reported_normalization_mode,
 )
+from yt_uniquifier.core.transforms.audio_pitch import cascade_atempo
 from yt_uniquifier.core.utils.ffmpeg_paths import ffmpeg_bin, ffprobe_bin
 
 _log = logging.getLogger(__name__)
@@ -985,14 +991,11 @@ def process_main_audio(
     temp_out = work_dir / (
         f".main_audio.{os.getpid()}.{secrets.token_hex(4)}.part.m4a"
     )
-    if plan.profile.seed_strategy == "divergent":
-        cmd, measurement = build_main_audio_command_windowed(
-            plan, temp_out, loudnorm_measurement=loudnorm_measurement
-        )
-    else:
-        cmd, measurement = build_main_audio_command(
-            plan, temp_out, loudnorm_measurement=loudnorm_measurement
-        )
+    builder = (
+        build_main_audio_command_windowed
+        if plan.profile.seed_strategy == "divergent" else build_main_audio_command
+    )
+    cmd, measurement = builder(plan, temp_out, loudnorm_measurement=loudnorm_measurement)
     if not cmd.args:
         return None, measurement
     # Defense-in-depth: re-probe rubberband availability right before
@@ -1001,19 +1004,110 @@ def process_main_audio(
     # incident (see audio_windows.verify_audio_filters_available docstring).
     verify_audio_filters_available(plan)
     audio_log = out.with_suffix(".m4a.log")
+    peak_target = next((
+        LoudnormParams.model_validate(transform.params).true_peak
+        for transform in plan.profile.transforms
+        if transform.enabled and transform.id == "audio.loudnorm"
+    ), None)
     try:
-        run_ffmpeg(
-            cmd, output=temp_out, on_event=on_event, cancel_token=cancel_token,
-            pause_token=pause_token,
-            log_path=audio_log,
-        )
-        if not temp_out.is_file() or temp_out.stat().st_size <= 0:
-            raise PipelineError("main audio encode produced no usable output")
+        gain_db = 0.0
+        peak: float | None = None
+        for attempt in range(3):
+            run_ffmpeg(
+                cmd, output=temp_out, on_event=on_event, cancel_token=cancel_token,
+                pause_token=pause_token,
+                log_path=audio_log,
+            )
+            if not temp_out.is_file() or temp_out.stat().st_size <= 0:
+                raise PipelineError("main audio encode produced no usable output")
+            if peak_target is None:
+                break
+            peak_log = work_dir / f"main_audio.delivery-peak-{attempt}.log"
+            peak = _measure_encoded_audio_peak(
+                temp_out, peak_log, on_event=on_event, cancel_token=cancel_token,
+                pause_token=pause_token,
+            )
+            if peak == -math.inf or (math.isfinite(peak) and peak <= peak_target + 0.1):
+                break
+            if not math.isfinite(peak) or attempt == 2:
+                raise PipelineError("encoded audio exceeds the requested true-peak ceiling")
+            # Re-render from the original source, never another AAC generation.
+            # A constant linked gain preserves the surround image and transients;
+            # peak safety takes precedence over hitting integrated LUFS exactly.
+            gain_db += peak_target - peak - 0.3
+            if on_event is not None:
+                on_event(RunEvent(kind="log", payload={
+                    "stage": "audio_delivery_peak", "attempt": attempt + 1,
+                    "measured_dbtp": peak, "target_dbtp": peak_target,
+                    "gain_db": gain_db,
+                    "message": "AAC peak overshoot: re-rendering source with linked headroom; "
+                    "integrated loudness may be lower than its target",
+                }))
+            cmd, measurement = builder(
+                plan, temp_out, loudnorm_measurement=measurement, post_gain_db=gain_db,
+            )
         _record_loudnorm_mode(plan, measurement, audio_log, on_event)
+        if peak_target is not None:
+            evidence = {
+                "attempts": attempt + 1, "post_gain_db": gain_db,
+                "target_dbtp": peak_target,
+                "delivered_dbtp": peak if peak is not None and math.isfinite(peak) else None,
+                "integrated_target_may_be_lower": gain_db < 0,
+            }
+            with audio_log.open("a", encoding="utf-8") as handle:
+                handle.write("\n[yt-uniquifier] audio_delivery " + json.dumps(evidence) + "\n")
         os.replace(temp_out, out)
     finally:
         temp_out.unlink(missing_ok=True)
     return out, measurement
+
+
+def _measure_encoded_audio_peak(
+    path: Path,
+    log: Path,
+    *,
+    on_event: Callable[[RunEvent], None] | None,
+    cancel_token: CancelToken | None,
+    pause_token: PauseToken | None,
+) -> float:
+    command = BuiltCommand(args=[
+        ffmpeg_bin(), "-hide_banner", "-nostats", "-i", str(path),
+        "-map", "0:a:0", "-af", "loudnorm=print_format=json", "-f", "null", os.devnull,
+    ])
+    run_ffmpeg(
+        command, output=Path(os.devnull), log_path=log, on_event=on_event,
+        cancel_token=cancel_token, pause_token=pause_token,
+    )
+    with log.open("rb") as handle:
+        handle.seek(max(0, log.stat().st_size - _LOUDNORM_LOG_TAIL_BYTES))
+        measurement = _parse_measurement(handle.read().decode("utf-8", errors="replace"))
+    return measurement.input_tp
+
+
+def require_audio_delivery_peak(
+    plan: Plan, output: Path, *,
+    on_event: Callable[[RunEvent], None] | None = None,
+    cancel_token: CancelToken | None = None,
+) -> None:
+    """Apply the encoded peak gate to cached audio and final muxed output too."""
+    if not selected_audio_relative_indices(plan.source, plan.profile.audio_tracks):
+        return
+    target = next((
+        LoudnormParams.model_validate(transform.params).true_peak
+        for transform in plan.profile.transforms
+        if transform.enabled and transform.id == "audio.loudnorm"
+    ), None)
+    if target is None:
+        return
+    with tempfile.TemporaryDirectory(prefix="audio_delivery_peak_") as directory:
+        peak = _measure_encoded_audio_peak(
+            output, Path(directory) / "measurement.log", on_event=on_event,
+            cancel_token=cancel_token, pause_token=None,
+        )
+    if peak != -math.inf and (not math.isfinite(peak) or peak > target + 0.1):
+        raise PipelineError(
+            f"encoded main audio true peak {peak:g} dBTP exceeds {target:g} dBTP target"
+        )
 
 
 def _record_loudnorm_mode(
@@ -1080,6 +1174,9 @@ def concat_segments(
     subtitle_codecs: list[str] | None = None,
     auxiliary_streams: list[AuxiliaryStream] | None = None,
     target_duration_sec: float | None = None,
+    timeline_rate: float = 1.0,
+    chapters: list[Chapter] | None = None,
+    validate_staged: Callable[[Path], None] | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
     cancel_token: CancelToken | None = None,
 ) -> None:
@@ -1093,8 +1190,28 @@ def concat_segments(
     """
     if not video_segments:
         raise PipelineError("no video segments to concat")
+    if not math.isfinite(timeline_rate) or timeline_rate <= 0:
+        raise PipelineError("timeline rate must be finite and positive")
+    retiming = abs(timeline_rate - 1.0) > 1e-6
+    if retiming and any(codec.lower() not in {"subrip", "srt"} for codec in subtitle_codecs or []):
+        raise PipelineError(
+            "retiming requires SRT subtitles; other subtitle payloads are unqualified"
+        )
 
     work_dir.mkdir(parents=True, exist_ok=True)
+    if retiming and chapters:
+        # Titles/dispositions remain applied by build_metadata_args. Avoid putting
+        # unescaped user strings in ffmetadata; only numeric chapter intervals here.
+        chapter_file = work_dir / "retimed-chapters.ffmeta"
+        chapter_text = [";FFMETADATA1"]
+        for chapter in chapters:
+            chapter_text.extend([
+                "[CHAPTER]", "TIMEBASE=1/1000000",
+                f"START={round(chapter.start_sec / timeline_rate * 1000000)}",
+                f"END={round(chapter.end_sec / timeline_rate * 1000000)}",
+            ])
+        chapter_file.write_text("\n".join(chapter_text) + "\n", encoding="utf-8")
+        map_chapters_from = chapter_file
     concat_list = work_dir / "concat.txt"
     # ffmpeg concat demuxer wraps paths in single quotes; literal `'` inside
     # a path must be escaped as `'\''` (close, escaped-quote, reopen).
@@ -1132,6 +1249,8 @@ def concat_segments(
     chapter_idx = add_input(map_chapters_from)
 
     auxiliary_streams = auxiliary_streams or []
+    if retiming and any(stream.kind == "data" for stream in auxiliary_streams):
+        raise PipelineError("retiming timed data streams is not qualified")
     unsupported_auxiliary = unsupported_auxiliary_streams(
         auxiliary_streams, output.suffix.lower().lstrip("."),
     )
@@ -1222,6 +1341,27 @@ def concat_segments(
     else:
         cmd += ["-an"]
     cmd += subtitle_args
+    if retiming:
+        for output_idx in range(1, len(selected_audio)):
+            # Extra tracks receive only timeline correction, not the main track's
+            # pitch/EQ/loudness transforms. Pad delayed audio before tempo so its
+            # start offset scales with the same video timeline.
+            audio_filter = f"aresample=48000:first_pts=0,{cascade_atempo(timeline_rate)}"
+            if target_duration_sec is not None:
+                samples = round(target_duration_sec * 48000)
+                audio_filter += f",apad=whole_len={samples},atrim=end_sample={samples}"
+            audio_filter += ",asetpts=N/SR/TB"
+            cmd += [
+                f"-filter:a:{output_idx}", audio_filter,
+                f"-c:a:{output_idx}", "aac", f"-b:a:{output_idx}", "512k",
+                f"-ar:a:{output_idx}", "48000",
+            ]
+        if subtitle_codecs:
+            cmd += [
+                "-bsf:s",
+                f"setts=pts=PTS/{timeline_rate:.12g}:dts=DTS/{timeline_rate:.12g}"
+                f":duration=DURATION/{timeline_rate:.12g}",
+            ]
     if chapter_idx is not None:
         cmd += ["-map_chapters", str(chapter_idx)]
     else:
@@ -1292,7 +1432,12 @@ def concat_segments(
         tmp_output.unlink(missing_ok=True)
         raise PipelineError("concat reported success but produced no output")
     try:
+        if validate_staged is not None:
+            validate_staged(tmp_output)
         os.replace(tmp_output, output)
     except OSError as exc:
         tmp_output.unlink(missing_ok=True)
         raise PipelineError(f"could not publish final output {output}: {exc}") from exc
+    except BaseException:
+        tmp_output.unlink(missing_ok=True)
+        raise

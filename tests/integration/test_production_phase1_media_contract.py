@@ -28,6 +28,60 @@ PROFILES_DIR = Path(__file__).parents[2] / "src" / "yt_uniquifier" / "profiles"
 PGS_FIXTURE = Path(__file__).parents[1] / "fixtures" / "pgs" / "minimal.sup.b64"
 
 
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("rate", [0.5, 0.98, 1.02, 2.0])
+@pytest.mark.parametrize("container", ["mp4", "mov", "mkv"])
+def test_retime_secondary_audio_srt_and_chapters(
+    media_contract_source: Path, tmp_path: Path, isolated_cache: Path,
+    rate: float, container: str,
+) -> None:
+    source = tmp_path / "two-tracks.mkv"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-i", str(media_contract_source),
+        "-map", "0:v", "-map", "0:a", "-map", "0:a", "-map", "0:s",
+        "-map_chapters", "0", "-c", "copy", str(source),
+    ], check=True, timeout=30)
+    profile = Profile(
+        name="retiming-contract", output_container=container, audio_tracks="all",
+        skip_watermark_check=True, transforms=[
+            TransformConfig(id="video.speed", params={"rate": rate}),
+            TransformConfig(id="audio.pitch_tempo", params={"pitch": 1.0, "tempo": rate}),
+        ],
+    )
+    plan = build_plan(source, profile, encoder_override="libx264")
+    output = tmp_path / f"retimed.{container}"
+    run_full(plan, RunOptions(work_dir=tmp_path / "work", output=output))
+    result = probe(output)
+    assert len(result.audio) == 2
+    for original, actual in zip(plan.source.chapters, result.chapters, strict=True):
+        assert actual.start_sec == pytest.approx(original.start_sec / rate, abs=0.002)
+        assert actual.end_sec == pytest.approx(original.end_sec / rate, abs=0.002)
+        assert actual.title == original.title
+    def packets(path: Path) -> list[dict[str, str]]:
+        payload = subprocess.run([
+            "ffprobe", "-v", "error", "-select_streams", "s:0", "-show_packets",
+            "-show_entries", "packet=pts_time,duration_time,size", "-of", "json", str(path),
+        ], check=True, capture_output=True, text=True, timeout=30)
+        return [p for p in json.loads(payload.stdout)["packets"] if int(p["size"]) > 2]
+    original_packets, actual_packets = packets(source), packets(output)
+    assert len(original_packets) == len(actual_packets)
+    for original_packet, actual_packet in zip(original_packets, actual_packets, strict=True):
+        for field in ("pts_time", "duration_time"):
+            assert float(actual_packet[field]) == pytest.approx(
+                float(original_packet[field]) / rate, abs=0.003,
+            )
+    for index in range(2):
+        decoded = subprocess.run([
+            "ffmpeg", "-v", "error", "-i", str(output), "-map", f"0:a:{index}",
+            "-c:a", "pcm_s16le", "-f", "s16le", "-",
+        ], capture_output=True, check=True, timeout=30)
+        samples = len(decoded.stdout) // (2 * result.audio[index].channels)
+        assert samples / result.audio[index].sample_rate == pytest.approx(
+            plan.source.duration_sec / rate, abs=0.05,
+        )
+
+
 def _audio_duration(path: Path) -> float:
     value = subprocess.run(
         [

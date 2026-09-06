@@ -104,12 +104,8 @@ COMPATIBILITY_GRAPH: tuple[CompatibilityRule, ...] = (
         "Video rate and main-audio tempo must match.",
     ),
     CompatibilityRule(
-        "timeline.passthrough_audio_rate", "temporal", ("video.speed",), "fail",
-        "Retiming cannot keep additional stream-copy audio tracks synchronized.",
-    ),
-    CompatibilityRule(
         "timeline.aux_stream_rate", "temporal", ("video.speed",), "fail",
-        "Retiming subtitles and chapters is not implemented safely.",
+        "Retiming supports SRT and chapters; other subtitle payloads remain unqualified.",
     ),
     CompatibilityRule(
         "quality.target_vmaf.unregistered_reference", "quality",

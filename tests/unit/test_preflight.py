@@ -77,6 +77,34 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     assert not has_fail(f)
 
 
+def test_retiming_timecode_data_remains_fail_closed(tmp_path: Path) -> None:
+    from yt_uniquifier.core.auxiliary_streams import AuxiliaryStream, set_auxiliary_streams
+    from yt_uniquifier.core.preflight import _check_timeline_rate
+
+    source = _source(tmp_path, container="mov")
+    set_auxiliary_streams(source, (
+        AuxiliaryStream(index=2, kind="data", codec="unknown", codec_tag="tmcd"),
+    ))
+    plan = _plan(source, [
+        TransformConfig(id="video.speed", params={"rate": 1.02}),
+        TransformConfig(id="audio.pitch_tempo", params={"tempo": 1.02}),
+    ], output_container="mov")
+    assert _codes(_check_timeline_rate(plan)) == {"timeline.aux_stream_rate"}
+
+
+def test_burned_subtitles_must_precede_retiming_even_when_final_rate_is_one(tmp_path: Path) -> None:
+    from yt_uniquifier.core.preflight import _check_timeline_rate
+
+    source = _source(tmp_path)
+    transforms = [
+        TransformConfig(id="video.speed", params={"rate": 2}),
+        TransformConfig(id="video.subtitles", params={"path": "captions.srt"}),
+        TransformConfig(id="video.speed", params={"rate": 0.5}),
+    ]
+    assert _codes(_check_timeline_rate(_plan(source, transforms))) == {"timeline.aux_stream_rate"}
+    assert _check_timeline_rate(_plan(source, [transforms[1], transforms[0], transforms[2]])) == []
+
+
 def test_job_encoder_capability_failure_is_preflight_fail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

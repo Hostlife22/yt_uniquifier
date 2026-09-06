@@ -6,6 +6,25 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
+Extended Intel Mac review (2026-09-06): manual release dry-run `34024023809`
+passed at `6049a71`; six artifact checksums and seven OIDC/cosign bundles were
+independently verified locally. Subsequent dirty-worktree changes still need
+their own committed CI/release evidence. The correct registry package uses a hyphen:
+`ghcr.io/hostlife22/yt-uniquifier`, not the repository's underscore. Its `edge`
+digest `sha256:be51edeaf94f6d2d7878e7c20633e9099024a2ea5dca71eba2d352fc3faba210`
+has verified amd64/arm64 manifests, per-platform SPDX/SLSA and a valid cosign OIDC
+signature. However it identifies old revision `09ac191`, not current HEAD.
+The earlier HTTP 403 was for the wrong package path and is not an access blocker.
+Manual Docker qualification can now use `publish=false` to run both architecture
+smokes without replacing any registry tag; a current release image is still pending.
+
+Natural 5.1 review exposed encoded peak overshoot: the complete stream measured
++0.27 dBTP despite loudnorm reporting -1.50 dBTP before delivery. The local fix
+re-rendered audio from the original with linked headroom and measured -3.38 dBTP,
+with no full-scale samples in the reviewed excerpt. Stereo/5.1 regression tests
+pass locally. Cross-platform CI and human loudness/listening acceptance remain
+required. The earlier +1.40 dBTP input-seek excerpt was not full-file evidence.
+
 - [ ] Release commit/tag immutable; worktree clean.
 - [x] Package metadata, CLI command/option, GUI runtime, web OpenAPI, wheel and local
       macOS bundle runtime/plist agree on `1.5.0`; tagged Linux/Windows artifacts remain

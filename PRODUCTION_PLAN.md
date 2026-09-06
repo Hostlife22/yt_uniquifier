@@ -7,6 +7,27 @@ Phase 2/3 production guardrails реализованы в candidate `v1.5.0`. О
 
 ## Статус на 2026-09-05
 
+### Дополнение: расширенная квалификация на Intel Mac, 2026-09-06
+
+- Реализован retiming дополнительных аудиодорожек, SRT и chapters через существующий
+  concat: 12 реальных MP4/MOV/MKV тестов (×0,5/0,98/1,02/2). ASS/PGS/timed data
+  остаются fail-closed; их payload-aware retiming не заявляется завершённым.
+- Добавлены streaming frame/sample/PTS diagnostics, sampled disk accounting,
+  отдельные QA RAM/time и lossless listening review. Они переиспользуют текущие
+  benchmark/QA/core, не создают второй processing pipeline.
+- Реальные процессы проверяют общий disk registry и recovery после аварии владельца;
+  повторный NFSv4 Docker lab прошёл 80/80 lease и 4 SIGKILL publication boundaries.
+- Manual release dry-run `34024023809` на `6049a71` завершён: три GUI платформы,
+  AppImage, шесть checksums и семь cosign bundles. Это evidence базового HEAD,
+  не ещё не закоммиченных последующих изменений.
+- Расширенные natural 4K/5.1, HDR→SDR и 176/180-minute прогоны сохраняются в
+  `validation-corpus/results/extended-*`; окончательные результаты публикуются
+  только после их завершения. Timings под общей нагрузкой — не isolated baseline.
+- Новый public QA contract вынесен в draft `specs/28-qa-correctness-loudness-rfc.md`:
+  до подтверждения владельца поля моделей и CLI не меняются.
+
+### Предыдущий baseline
+
 - **DONE:** 1.1–1.6; final media contract из 0.1; timeline compatibility guard из
   2.1; stereo-layout guard и layout-aware AAC rates из 3.2; duplicate/concurrency
   web guards; correctness-aware QA verdict; job-specific encoder probe; runner

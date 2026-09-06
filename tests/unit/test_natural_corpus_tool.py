@@ -11,6 +11,23 @@ from tools import natural_corpus
 from tools.natural_corpus import load_manifest
 
 
+def test_measured_qa_does_not_imply_quality_acceptance() -> None:
+    from yt_uniquifier.core.models import QAReport
+
+    report = QAReport(
+        input_md5="source", output_md5="output", input_size_bytes=1, output_size_bytes=2,
+        input_duration_sec=1, output_duration_sec=1, duration_match=True,
+        phash_samples=1, phash_distance_min=0, phash_distance_mean=0,
+        phash_distance_max=0, phash_similarity=1, vmaf_mean=3.7,
+        vmaf_registered_mean=93.8, ssim_mean=0.89,
+    )
+    result = natural_corpus._qa_verdict(report.model_dump())
+    assert result["status"] == "red"
+    assert result["correctness"] == "valid"
+    assert result["quality"] == "fail"
+    assert natural_corpus._qa_verdict({})["status"] == "NOT VERIFIED"
+
+
 def _local_profile(tmp_path: Path) -> Path:
     profile = tmp_path / "soft.yaml"
     shutil.copy2("src/yt_uniquifier/profiles/soft.yaml", profile)

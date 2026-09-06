@@ -58,6 +58,7 @@ from yt_uniquifier.core.segmenter import (
     plan_segments,
     process_main_audio,
     process_video_segments_parallel,
+    require_audio_delivery_peak,
 )
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
 from yt_uniquifier.core.telemetry import TelemetryConfig
@@ -651,8 +652,28 @@ def _run_full_body(
 
     # Main audio (cached via state.json).
     main_audio = store.get_main_audio()
+    if main_audio is not None and main_audio.exists():
+        try:
+            require_audio_delivery_peak(
+                plan, main_audio, on_event=emit, cancel_token=cancel_token,
+            )
+        except PipelineError:
+            if cancel_token is not None and cancel_token.is_cancelled():
+                raise
+            emit(RunEvent(kind="log", payload={
+                "phase": "main_audio", "message": "cached audio failed delivery peak gate; "
+                "re-rendering audio while retaining completed video segments",
+            }))
+            main_audio = None
     measurement = store.get_loudnorm()
     if main_audio is None or not main_audio.exists():
+        # A rejected cached track was previously considered finished work. Reserve
+        # its replacement before writing another AAC file beside the old cache.
+        _resize_workspace_reservation(
+            disk_reservations,
+            math.ceil(estimate_audio_bytes(plan.source) * DISK_SAFETY_FACTOR),
+            cancel_token, emit,
+        )
         main_audio, measurement = process_main_audio(
             plan, options.work_dir,
             loudnorm_measurement=measurement,
@@ -696,6 +717,34 @@ def _run_full_body(
     selected_audio_indices = selected_audio_relative_indices(
         plan.source, plan.profile.audio_tracks,
     )
+
+    def prepare_staged_output(staged: Path) -> None:
+        # Optional second-pass normalization must finish before publication too.
+        if options.sanitize_bitstream:
+            from yt_uniquifier.core.sanitizer import (
+                needs_sanitization,
+                reject_for_hdr_or_hevc,
+                sanitize_bitstream,
+            )
+            reject_for_hdr_or_hevc(plan.profile.keep_hdr, plan.encoder)
+            if needs_sanitization(plan.encoder):
+                emit(RunEvent(kind="log", payload={
+                    "phase": "sanitize",
+                    "message": f"re-encoding {plan.encoder.vendor} output via libx264",
+                }))
+                sanitize_bitstream(
+                    staged, staged, cancel_token=cancel_token,
+                    on_event=lambda event: emit(RunEvent(
+                        kind=event.kind, payload={**event.payload, "phase": "sanitize"},
+                    )),
+                )
+            else:
+                emit(RunEvent(kind="log", payload={
+                    "phase": "sanitize",
+                    "message": "encoder is already libx264 — skipping (no-op)",
+                }))
+        _validate_final_output(plan, staged, emit, cancel_token)
+
     concat_segments(
         final_segments,
         main_audio,
@@ -709,43 +758,18 @@ def _run_full_body(
         subtitle_codecs=[stream.codec for stream in plan.source.subtitle],
         auxiliary_streams=list(get_auxiliary_streams(plan.source)),
         target_duration_sec=expected_output_duration(plan),
+        timeline_rate=plan.source.duration_sec / expected_output_duration(plan),
+        chapters=plan.source.chapters,
+        validate_staged=prepare_staged_output,
         on_event=lambda event: emit(RunEvent(
             kind=event.kind,
             payload={**event.payload, "phase": "concat"},
         )),
         cancel_token=cancel_token,
     )
-    # Optional interoperability normalization (second-pass libx264).
-    if options.sanitize_bitstream:
-        from yt_uniquifier.core.sanitizer import (
-            needs_sanitization,
-            reject_for_hdr_or_hevc,
-            sanitize_bitstream,
-        )
-        reject_for_hdr_or_hevc(plan.profile.keep_hdr, plan.encoder)
-        if needs_sanitization(plan.encoder):
-            emit(RunEvent(kind="log", payload={
-                "phase": "sanitize",
-                "message": f"re-encoding {plan.encoder.vendor} output via libx264",
-            }))
-            sanitize_bitstream(
-                options.output,
-                options.output,
-                cancel_token=cancel_token,
-                on_event=lambda event: emit(RunEvent(
-                    kind=event.kind,
-                    payload={**event.payload, "phase": "sanitize"},
-                )),
-            )
-        else:
-            emit(RunEvent(kind="log", payload={
-                "phase": "sanitize",
-                "message": "encoder is already libx264 — skipping (no-op)",
-            }))
-
-    # Publication bytes now occupy real space and no more final-output writes
-    # remain. Release the logical reservation before the potentially long full
-    # decode validation pass.
+    # The staged bytes were fully validated before atomic publication; scanning
+    # the identical file again would duplicate a full movie decode/peak pass.
+    # Completed-run resume still revalidates its existing published output.
     _resize_disk_reservation(
         disk_reservations,
         "final output",
@@ -753,7 +777,6 @@ def _run_full_body(
         cancel_token,
         emit,
     )
-    _validate_final_output(plan, options.output, emit, cancel_token)
     store.set_output(options.output)
 
     emit(RunEvent(kind="done", payload={"output": str(options.output)}))
@@ -979,6 +1002,7 @@ def _validate_final_output(
         )),
         cancel_token=cancel_token,
     )
+    require_audio_delivery_peak(plan, output, on_event=emit, cancel_token=cancel_token)
 
 
 # v0.7 R5 / F4 — post-job notification dispatch.

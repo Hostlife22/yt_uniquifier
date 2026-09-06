@@ -1,0 +1,10 @@
+name: review-conservative-tonemap
+description: Review candidate only; existing Hable tonemap without added crop/noise/color jitter.
+transforms:
+  - id: video.tonemap_sdr
+    params: {algorithm: hable, peak: 1000.0, desat: 0.0}
+keep_hdr: false
+target_codec: h264
+output_container: mp4
+audio_tracks: all
+skip_watermark_check: true

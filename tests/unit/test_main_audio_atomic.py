@@ -69,6 +69,7 @@ def test_dynamic_loudnorm_fallback_is_logged_and_emitted(
         lambda *args, **kwargs: (BuiltCommand(args=["ffmpeg"]), measurement),
     )
     monkeypatch.setattr(segmenter, "verify_audio_filters_available", lambda plan: None)
+    monkeypatch.setattr(segmenter, "_measure_encoded_audio_peak", lambda *args, **kwargs: -1.5)
 
     def successful_encode(command: Any, *, output: Path, **kwargs: Any) -> None:
         del command
@@ -129,3 +130,44 @@ def test_ffmpeg_linear_to_dynamic_fallback_gets_distinct_reason(
         events[0].payload["fallback_reason"]
         == "ffmpeg_rejected_linear_constraints"
     )
+
+
+@pytest.mark.parametrize("peaks, succeeds", [([1.4, -1.8], True), ([1.4, 1.4, 1.4], False)])
+def test_encoded_peak_retry_is_bounded_and_renders_from_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peaks: list[float], succeeds: bool,
+) -> None:
+    plan = _plan(_src(tmp_path), [TransformConfig(id="audio.loudnorm")])
+    work = tmp_path / "work"
+    work.mkdir()
+    old = work / "main_audio.m4a"
+    old.write_bytes(b"previous")
+    gains: list[float] = []
+    seen_plans = []
+
+    def builder(original: Any, destination: Path, **kwargs: Any) -> tuple[BuiltCommand, None]:
+        assert destination != old
+        seen_plans.append(original)
+        gains.append(kwargs.get("post_gain_db", 0.0))
+        return BuiltCommand(args=["ffmpeg"]), None
+
+    def encode(command: Any, *, output: Path, **kwargs: Any) -> None:
+        output.write_bytes(b"new-encoded")
+
+    iterator = iter(peaks)
+    monkeypatch.setattr(segmenter, "build_main_audio_command", builder)
+    monkeypatch.setattr(segmenter, "verify_audio_filters_available", lambda _: None)
+    monkeypatch.setattr(segmenter, "run_ffmpeg", encode)
+    monkeypatch.setattr(segmenter, "_measure_encoded_audio_peak", lambda *a, **kw: next(iterator))
+    if succeeds:
+        result, _ = segmenter.process_main_audio(plan, work)
+        assert result == old
+        assert old.read_bytes() == b"new-encoded"
+    else:
+        with pytest.raises(PipelineError, match="true-peak ceiling"):
+            segmenter.process_main_audio(plan, work)
+        assert old.read_bytes() == b"previous"
+    assert len(gains) == len(peaks)
+    assert gains[0] == 0.0
+    assert gains[1] == pytest.approx(-3.2)
+    assert all(original is plan for original in seen_plans)
+    assert not list(work.glob(".main_audio.*.part.m4a"))
