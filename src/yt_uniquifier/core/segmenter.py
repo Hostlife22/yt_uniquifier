@@ -47,6 +47,7 @@ from yt_uniquifier.core.runner import CancelToken, PauseToken, RunEvent
 from yt_uniquifier.core.runner import run as run_ffmpeg
 from yt_uniquifier.core.seed_resolver import derive_segment_seed
 from yt_uniquifier.core.stream_policy import selected_audio_relative_indices
+from yt_uniquifier.core.subtitle_timing import prepare_retimed_srt
 from yt_uniquifier.core.transforms.audio_loudnorm import (
     LoudnormMeasurement,
     LoudnormParams,
@@ -1199,7 +1200,7 @@ def concat_segments(
         )
 
     work_dir.mkdir(parents=True, exist_ok=True)
-    if retiming and chapters:
+    if chapters:
         # Titles/dispositions remain applied by build_metadata_args. Avoid putting
         # unescaped user strings in ffmetadata; only numeric chapter intervals here.
         chapter_file = work_dir / "retimed-chapters.ffmeta"
@@ -1247,6 +1248,18 @@ def concat_segments(
     main_audio_idx = add_input(main_audio)
     media_idx = add_input(media_source)
     chapter_idx = add_input(map_chapters_from)
+    retimed_subtitle_indices: list[int] = []
+    if retiming and subtitle_codecs:
+        if media_source is None:
+            raise PipelineError("subtitle retiming requires the original media source")
+        for index in range(len(subtitle_codecs)):
+            subtitle_path = prepare_retimed_srt(
+                media_source, index, work_dir, timeline_rate,
+                on_event=on_event, cancel_token=cancel_token,
+            )
+            subtitle_input = add_input(subtitle_path)
+            assert subtitle_input is not None
+            retimed_subtitle_indices.append(subtitle_input)
 
     auxiliary_streams = auxiliary_streams or []
     if retiming and any(stream.kind == "data" for stream in auxiliary_streams):
@@ -1281,7 +1294,11 @@ def concat_segments(
     for relative_idx in selected_audio[1:]:
         cmd += ["-map", f"{passthrough_idx}:a:{relative_idx}?"]
     subtitle_idx = media_idx if media_idx is not None else 0
-    cmd += ["-map", f"{subtitle_idx}:s?"]
+    if retimed_subtitle_indices:
+        for subtitle_input in retimed_subtitle_indices:
+            cmd += ["-map", f"{subtitle_input}:s:0"]
+    else:
+        cmd += ["-map", f"{subtitle_idx}:s?"]
     attachments = [stream for stream in auxiliary_streams if stream.kind == "attachment"]
     data_streams = [stream for stream in auxiliary_streams if stream.kind == "data"]
     attached_pictures = [
@@ -1356,12 +1373,6 @@ def concat_segments(
                 f"-c:a:{output_idx}", "aac", f"-b:a:{output_idx}", "512k",
                 f"-ar:a:{output_idx}", "48000",
             ]
-        if subtitle_codecs:
-            cmd += [
-                "-bsf:s",
-                f"setts=pts=PTS/{timeline_rate:.12g}:dts=DTS/{timeline_rate:.12g}"
-                f":duration=DURATION/{timeline_rate:.12g}",
-            ]
     if chapter_idx is not None:
         cmd += ["-map_chapters", str(chapter_idx)]
     else:
@@ -1377,6 +1388,9 @@ def concat_segments(
     if target_duration_sec is not None and target_duration_sec > 0:
         cmd += ["-t", f"{target_duration_sec:.6f}"]
     cmd += metadata_args
+    # Do not shift every track to compensate for an AAC encoder-delay packet.
+    # Matroska's automatic policy otherwise moves video/subtitles by ~21 ms.
+    cmd += ["-avoid_negative_ts", "disabled"]
     for index, auxiliary in enumerate(attachments):
         for key, value in (
             ("filename", auxiliary.filename),

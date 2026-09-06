@@ -14,6 +14,13 @@ the last tag.
 
 ### Changed
 
+- Preserve explicit chapter clocks and disable AAC-priming-induced global mux
+  shifts across FFmpeg versions. Retime extracted canonical SRT cue headers instead
+  of packet timestamps, preserving subtitle payload on FFmpeg 5/6/9. MP4/MOV with
+  a leading chapter gap now fail preflight; MKV preserves the gap.
+- Specify the known original audio layout during final resampling, fixing FFmpeg 5
+  loudnorm/apad negotiation without guessing surround layouts from channel count.
+  Bump the internal encode policy so old delivery artifacts are not silently reused.
 - Add manual Docker `publish=false` qualification: both architecture smokes run
   without changing GHCR tags; existing publication defaults remain unchanged.
 - Make the smoke test's private temporary root traversable by the container UID

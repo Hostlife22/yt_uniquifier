@@ -9,6 +9,7 @@ from tests.conftest import needs_ffmpeg
 from yt_uniquifier.core.errors import PipelineError
 from yt_uniquifier.core.models import Profile, TransformConfig
 from yt_uniquifier.core.orchestrator import build_plan
+from yt_uniquifier.core.probe import probe
 from yt_uniquifier.core.segmenter import process_main_audio, require_audio_delivery_peak
 from yt_uniquifier.core.transforms.audio_loudnorm import measure
 
@@ -41,6 +42,7 @@ def test_encoded_audio_and_cached_peak_gate(
     work.mkdir()
     audio, _ = process_main_audio(plan, work)
     assert audio is not None
+    assert probe(audio).audio[0].channels == channels
     assert measure(audio).input_tp <= -1.4
     require_audio_delivery_peak(plan, audio)
     assert "audio_delivery" in (work / "main_audio.m4a.log").read_text()

@@ -98,6 +98,7 @@ def preflight(
     findings.extend(_check_target_vmaf_reference(plan))
     findings.extend(_check_quality_risks(plan))
     findings.extend(_check_container_metadata_loss(plan))
+    findings.extend(_check_chapter_container(plan))
     if verify_encoder_capability and source.video:
         findings.extend(_check_encoder_capability(plan))
     return findings
@@ -305,6 +306,21 @@ def _check_quality_risks(plan: Plan) -> list[PreflightFinding]:
             ),
         ))
     return findings
+
+
+def _check_chapter_container(plan: Plan) -> list[PreflightFinding]:
+    from yt_uniquifier.core.pipeline import expected_output_duration
+
+    if plan.profile.output_container not in {"mp4", "mov"} or not plan.source.chapters:
+        return []
+    scale = expected_output_duration(plan) / max(plan.source.duration_sec, 0.001)
+    if plan.source.chapters[0].start_sec * scale <= 0.002:
+        return []
+    return [PreflightFinding(
+        code="chapters.leading_gap.unsupported", severity="fail",
+        message="MP4/MOV chapter tracks cannot reliably preserve a non-zero first chapter start.",
+        suggestion="Use MKV to retain the leading chapter gap without changing its timing.",
+    )]
 
 
 def _check_container_metadata_loss(plan: Plan) -> list[PreflightFinding]:

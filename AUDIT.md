@@ -9,7 +9,9 @@ Staged media is now checked before atomic replacement, not only after publicatio
 tradeoff; neither completed measurement nor a high registered score implies
 production approval. Existing pipeline, profile engine and QA implementation are
 reused. ASS/bitmap retiming, public QA contract approval, natural HDR display/listening
-and published GHCR verification remain explicitly incomplete.
+and current-revision GHCR publication remain explicitly incomplete. The existing
+old `edge` image's signature, architecture manifests and attestations were verified;
+see the digest/revision in `PRODUCTION_CHECKLIST.md`.
 
 Дата аудита: 2026-09-02
 Базовый коммит: `2c8d677` (`v1.3.3`, `main`)

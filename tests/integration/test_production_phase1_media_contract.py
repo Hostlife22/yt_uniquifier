@@ -38,9 +38,12 @@ def test_retime_secondary_audio_srt_and_chapters(
 ) -> None:
     source = tmp_path / "two-tracks.mkv"
     subprocess.run([
-        "ffmpeg", "-v", "error", "-i", str(media_contract_source),
+        "ffmpeg", "-v", "error", "-copyts", "-i", str(media_contract_source),
         "-map", "0:v", "-map", "0:a", "-map", "0:a", "-map", "0:s",
-        "-map_chapters", "0", "-c", "copy", str(source),
+        # Keep the original explicit chapter origin when duplicating audio.
+        # Default negative-PTS shifting on FFmpeg 6 adds a spurious leading gap;
+        # the unsupported real leading-gap contract has its own regression below.
+        "-map_chapters", "0", "-c", "copy", "-avoid_negative_ts", "disabled", str(source),
     ], check=True, timeout=30)
     profile = Profile(
         name="retiming-contract", output_container=container, audio_tracks="all",
@@ -71,6 +74,11 @@ def test_retime_secondary_audio_srt_and_chapters(
             assert float(actual_packet[field]) == pytest.approx(
                 float(original_packet[field]) / rate, abs=0.003,
             )
+    caption = subprocess.run([
+        "ffmpeg", "-v", "error", "-i", str(output), "-map", "0:s:0",
+        "-c:s", "srt", "-f", "srt", "-",
+    ], capture_output=True, text=True, check=True, timeout=30).stdout
+    assert "Authorized caption" in caption
     for index in range(2):
         decoded = subprocess.run([
             "ffmpeg", "-v", "error", "-i", str(output), "-map", f"0:a:{index}",
@@ -80,6 +88,40 @@ def test_retime_secondary_audio_srt_and_chapters(
         assert samples / result.audio[index].sample_rate == pytest.approx(
             plan.source.duration_sec / rate, abs=0.05,
         )
+
+
+@needs_ffmpeg
+@pytest.mark.integration
+@pytest.mark.parametrize("container", ["mp4", "mov", "mkv"])
+def test_real_leading_chapter_gap_is_preserved_or_rejected_before_encode(
+    media_contract_source: Path, tmp_path: Path, isolated_cache: Path, container: str,
+) -> None:
+    metadata = tmp_path / "gap.ffmeta"
+    metadata.write_text(
+        ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=400\nEND=2500\ntitle=Gap\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "gap.mkv"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-copyts", "-i", str(media_contract_source),
+        "-f", "ffmetadata", "-i", str(metadata), "-map", "0", "-map_chapters", "1",
+        "-c", "copy", "-avoid_negative_ts", "disabled", str(source),
+    ], check=True, timeout=30)
+    plan = build_plan(source, Profile(
+        name="chapter-gap", output_container=container, skip_watermark_check=True,
+    ), encoder_override="libx264")
+    assert plan.source.chapters[0].start_sec == pytest.approx(0.4, abs=0.002)
+    options = RunOptions(work_dir=tmp_path / "gap-work", output=tmp_path / f"gap.{container}")
+    if container in {"mp4", "mov"}:
+        with pytest.raises(PreflightFailure, match="chapters.leading_gap.unsupported"):
+            run_full(plan, options)
+        assert not options.output.exists()
+        assert not list(options.work_dir.glob("**/segment*.mkv"))
+    else:
+        run_full(plan, options)
+        chapter = probe(options.output).chapters[0]
+        assert chapter.start_sec == pytest.approx(0.4, abs=0.002)
+        assert chapter.end_sec == pytest.approx(2.5, abs=0.002)
 
 
 def _audio_duration(path: Path) -> float:

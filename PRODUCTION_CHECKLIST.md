@@ -6,9 +6,10 @@ release blockers, поэтому checklist намеренно не отмече�
 
 ## 1. Scope and release identity
 
-Extended Intel Mac review (2026-09-06): manual release dry-run `34024023809`
-passed at `6049a71`; six artifact checksums and seven OIDC/cosign bundles were
-independently verified locally. Subsequent dirty-worktree changes still need
+Extended Intel Mac review (2026-09-06): manual release dry-run `34026381605`
+passed at `1305a3a`; six artifact checksums and seven OIDC/cosign bundles were
+independently verified locally. Docker `34027164490` passed both architectures at
+`eeda84a` with publication disabled. Subsequent timestamp fixes still need
 their own committed CI/release evidence. The correct registry package uses a hyphen:
 `ghcr.io/hostlife22/yt-uniquifier`, not the repository's underscore. Its `edge`
 digest `sha256:be51edeaf94f6d2d7878e7c20633e9099024a2ea5dca71eba2d352fc3faba210`

@@ -8,6 +8,7 @@ import pytest
 
 from yt_uniquifier.core.models import (
     AudioStream,
+    Chapter,
     EncoderCandidate,
     HDRInfo,
     Plan,
@@ -75,6 +76,23 @@ def test_clean_source_passes(tmp_path: Path) -> None:
     plan = _plan(src, [TransformConfig(id="audio.loudnorm")])
     f = preflight(src, plan, plan.encoder)
     assert not has_fail(f)
+
+
+@pytest.mark.parametrize("container, blocked", [("mp4", True), ("mov", True), ("mkv", False)])
+def test_leading_chapter_gap_is_never_silently_discarded(
+    tmp_path: Path, container: str, blocked: bool,
+) -> None:
+    from yt_uniquifier.core.preflight import _check_chapter_container
+
+    source = _source(tmp_path).model_copy(update={
+        "chapters": [Chapter(start_sec=0.023, end_sec=3.0)],
+    })
+    plan = _plan(source, [], output_container=container)
+    findings = _check_chapter_container(plan)
+    assert bool(findings) == blocked
+    if blocked:
+        assert findings[0].severity == "fail"
+        assert findings[0].code == "chapters.leading_gap.unsupported"
 
 
 def test_retiming_timecode_data_remains_fail_closed(tmp_path: Path) -> None:

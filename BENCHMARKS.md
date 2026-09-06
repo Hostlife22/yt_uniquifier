@@ -8,6 +8,13 @@ sources are not synthesized loops. Historical low-resolution films do not qualif
 modern 4K movies. HDR cases remain explicitly derived natural-picture PQ/HLG, not
 camera-native HDR10 evidence.
 
+Local verification: broad `make check` completed with 1747 passed / 55 expected
+skips before the final cross-version timestamp corrections. The corrected tree
+then passed 1479 unit/contracts, native FFmpeg 9's 19 media contracts, FFmpeg 5/6
+container/rate matrices (16 each), and real leading-chapter-gap and stereo/5.1
+encoded-peak tests. Ruff, strict mypy (163 source files), and wheel build passed.
+These separate runs are not represented as a final full-suite run on one revision.
+
 - 4K soft cell: 31.436 s, encode 82.72 s, sampled process-tree RSS 2,456,372 KiB,
   output 41,973,462 bytes, raw VMAF 3.728567 versus registered 93.811511,
   registered SSIM 0.986410. High registered quality does not remove the original
@@ -23,7 +30,8 @@ camera-native HDR10 evidence.
   source/current/corrected LUFS are -23.17/-13.68/-16.64. This is a peak-safety fix,
   not a claim to still meet -14 LUFS or to pass human listening.
 - Stereo review: source/current/medium excerpt LUFS -9.49/-13.24/-13.26 and
-  peaks +0.77/-1.50/-1.50 dBTP in the initial excerpt experiment. Retain full-file
+  peaks +0.77/-1.50/-1.50 dBTP, confirmed by decode-before-trim re-extraction.
+  Source has 352/417 full-scale samples, both processed excerpts have zero. Retain full-file
   and excerpt scopes separately; cuts can alter measured boundary transients.
 - Numeric counters are streamed, not retained per frame in RAM. Disk values are
   1-second sampled logical-file lower bounds for work/output directories, excluding
@@ -35,14 +43,25 @@ camera-native HDR10 evidence.
   not establish lip-sync between the independently published video/audio editions.
 - 176-minute video-only encode completed: 18 segments, 1,451.65 s pipeline wall,
   245,832 KiB sampled RSS, 2,042,135,805 sampled workspace/output bytes and
-  1,022,159,764-byte output. Full QA/decode accounting is still pending.
+  1,022,159,764-byte output. Full decode counted 317,288 source and output frames,
+  zero missing/non-increasing PTS; video endpoint delta is -2 ms. The runner exits
+  1 (incomplete), correctly reflecting unavailable required registered metrics.
 - First HDR natural-picture pair: current registered VMAF/SSIM 78.623/0.958818;
   tonemap-only proposed 89.128/0.995036. Each score uses its own transformed
   reference, so the difference does not prove that the tone curve itself is better.
   Raw HDR-to-SDR VMAF is not a perceptual HDR mastering verdict.
+- All four PQ/HLG cells completed; every output retained 1799 decoded frames,
+  with zero missing/non-increasing PTS. HLG current/proposed registered VMAF is
+  79.237/91.031 and SSIM 0.958846/0.995706. Human HDR approval remains unverified.
+  QA peak RSS reached 9,954,512 KiB, versus approximately 1 GiB for those encodes;
+  deployment RAM budgets must account for QA separately.
+- Full 176-minute registered reference was refused by its disk guard:
+  38,074,558,128 estimated bytes versus 29,061,047,910 allowed bytes. No disk
+  safety override was used. Raw VMAF/SSIM are 39.207605/0.902761; registered
+  quality is **NOT VERIFIED** on this film.
 
 Reports/audio live under ignored `validation-corpus/results/extended-*` and
-`listening-*`. Final long-form, HDR matrix and current-commit CI results are pending;
+`listening-*`. Final long-form decode accounting and corrected CI results are pending;
 no uncompleted experiment is counted as passed. Human visual/HDR/listening verdicts
 are **NOT VERIFIED**.
 

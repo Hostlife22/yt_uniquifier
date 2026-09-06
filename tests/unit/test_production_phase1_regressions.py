@@ -10,11 +10,29 @@ from tests.unit.test_pipeline_graph import _plan, _src
 from yt_uniquifier.core.calibration.loop import _evaluate_sscd
 from yt_uniquifier.core.models import AudioStream, TransformConfig
 from yt_uniquifier.core.pipeline import (
+    _main_audio_channel_args,
+    _main_audio_tail_filter,
     build_main_audio_command,
     build_main_audio_command_windowed,
     compute_plan_hash,
     expected_output_duration,
 )
+
+
+@pytest.mark.parametrize("channels, layout, expected", [
+    (1, None, ":ochl=mono"), (2, None, ":ochl=stereo"),
+    (6, "5.1(side)", ":ochl=5.1(side)"), (6, None, "aresample=48000,"),
+    (2, "stereo,volume=0", "aresample=48000,"),
+])
+def test_audio_tail_preserves_known_layout_without_guessing_surround(
+    tmp_path: Path, channels: int, layout: str | None, expected: str,
+) -> None:
+    source = _src(tmp_path).model_copy(update={"audio": [AudioStream(
+        index=1, codec="aac", sample_rate=48000, channels=channels, channel_layout=layout,
+    )]})
+    assert expected in _main_audio_tail_filter(_plan(source, []))
+    channel_args = _main_audio_channel_args(_plan(source, []))
+    assert channel_args == (["-ac", str(channels)] if channels > 2 and layout is None else [])
 
 
 def test_asetrate_uses_actual_input_sample_rate_and_outputs_48k(tmp_path: Path) -> None:
@@ -60,7 +78,7 @@ def test_profile_loudness_target_is_used_when_transform_has_no_override(
     command, _ = build_main_audio_command(plan, tmp_path / "audio.m4a")
 
     assert "loudnorm=I=-16.0" in command.filter_complex
-    assert "aresample=48000,apad=whole_len=240000" in command.filter_complex
+    assert "aresample=48000:ochl=stereo,apad=whole_len=240000" in command.filter_complex
     assert "atrim=end_sample=240000" in command.filter_complex
     assert "asetpts=N/SR/TB" in command.filter_complex
     assert command.filter_complex.endswith(f"[{command.output_audio_label}]")
@@ -141,7 +159,7 @@ def test_window_overlap_equals_crossfade_duration(tmp_path: Path) -> None:
     assert "atrim=start=0.0000:end=60.0500" in command.filter_complex
     assert "atrim=start=59.9500:end=120.0000" in command.filter_complex
     assert "acrossfade=d=0.1" in command.filter_complex
-    assert "aresample=48000,apad=whole_len=5760000" in command.filter_complex
+    assert "aresample=48000:ochl=stereo,apad=whole_len=5760000" in command.filter_complex
     assert "atrim=end_sample=5760000" in command.filter_complex
     assert "asetpts=N/SR/TB" in command.filter_complex
     assert command.filter_complex.endswith(f"[{command.output_audio_label}]")

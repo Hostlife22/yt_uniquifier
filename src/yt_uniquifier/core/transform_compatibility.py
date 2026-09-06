@@ -121,6 +121,10 @@ COMPATIBILITY_GRAPH: tuple[CompatibilityRule, ...] = (
         "MP4/MOV cannot represent every MKV stream disposition.",
     ),
     CompatibilityRule(
+        "chapters.leading_gap.unsupported", "container", (), "fail",
+        "A non-zero first chapter start requires MKV for reliable timing preservation.",
+    ),
+    CompatibilityRule(
         "aux.attachments.unsupported", "container", (), "fail",
         "Attachments require a container that preserves attachment streams.",
     ),

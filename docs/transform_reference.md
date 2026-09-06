@@ -28,7 +28,7 @@ unsupported stream/container mapping.
 | `video.noise` | Add film-grain-like luma/chroma noise | Direct quality/size cost; amplifies later encoding loss | Slow | Float-RGB linear-light wrapper used when preserving HDR | VFR-safe; noise + sharpen compounds ringing and bitrate |
 | `video.subpixel_sharpen` | Mild unsharp mask | May ring edges; often increases bitrate | Medium | Supported, but inspect HDR highlights | VFR-safe; avoid stacking with added noise without measured QA |
 | `video.temporal_jitter` | Experimental timestamp-based blackout/drop effect | Destructive flashes/judder; bitrate varies | Medium | Technically supported, visually unqualified for HDR | Timestamp-grid works with VFR; invalidates raw-source VMAF and is excluded from quality-first profiles |
-| `video.speed` | Change playback rate with `setpts` | Motion cadence changes; file size follows duration | Fast | Supported | Requires matching `audio.pitch_tempo.tempo`; incompatible with copied extra audio, subtitles, or chapters until they can be retimed |
+| `video.speed` | Change playback rate with `setpts` | Motion cadence changes; file size follows duration | Fast video; additional audio requires AAC encoding | Supported | Requires matching `audio.pitch_tempo.tempo`; extra audio receives tempo only, SRT cue times and chapter boundaries scale together. ASS/bitmap/timed-data retiming remains unsupported |
 
 ## Audio transforms
 
@@ -59,8 +59,10 @@ quality-sensitive edge across the requested domains.
 | Audio | `audio.haas_stereo` + non-stereo main track | Fail |
 | Audio | duplicate loudnorm or any audio operation after loudnorm | Fail |
 | Audio/temporal | video speed differs from main-audio tempo | Fail: A/V desync |
-| Temporal | speed + extra copied audio track | Fail: extra track cannot be retimed |
-| Temporal/container | speed + subtitles or chapters | Fail: auxiliary timestamps cannot be retimed safely |
+| Temporal | speed + extra audio track | Tempo-only AAC processing; preserve track metadata and exact target audio sample count |
+| Temporal/container | speed + SRT or chapters | Canonical SRT extraction/retiming and explicit chapter clock; no packet-BSF dependency |
+| Temporal/container | speed + ASS/bitmap subtitles or timed data | Fail: payload-aware retiming is not qualified |
+| Container | first chapter starts after zero → MP4/MOV | Fail: these chapter tracks cannot reliably preserve a leading gap; select MKV |
 | Quality | target VMAF + geometry, overlay, mirror, temporal, subtitle, or tonemap operation | Fail: raw reference is not registered |
 | Container | image subtitle → MP4/MOV | Fail; select MKV |
 | Container | unsupported attachments/data or dispositions → MP4/MOV | Fail or warn according to whether data would be lost |

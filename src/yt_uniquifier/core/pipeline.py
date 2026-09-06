@@ -69,7 +69,7 @@ BLEND_B_ID = "video.blend_b"
 OUTPUT_AUDIO_SAMPLE_RATE = 48_000
 # Increment whenever an internal encode policy changes in a way that makes existing
 # completed segments unsafe to reuse under the same package development version.
-_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v3"
+_ENCODE_POLICY_REVISION = "encoder-bitstream-policy-v4"
 
 
 def _main_audio_bitrate(plan: Plan) -> str:
@@ -82,6 +82,19 @@ def _main_audio_bitrate(plan: Plan) -> str:
     if channels <= 6:
         return "512k"
     return f"{channels * 128}k"
+
+
+def _main_audio_channel_args(plan: Plan) -> list[str]:
+    selected = selected_audio_relative_indices(plan.source, plan.profile.audio_tracks)
+    if not selected:
+        return []
+    stream = plan.source.audio[selected[0]]
+    # Some PCM containers omit the speaker mask. Keep the channel count explicit
+    # so FFmpeg 5 can negotiate AAC, retaining FFmpeg's existing default layout
+    # assumption. This does not establish the source's unknown speaker identities.
+    if not stream.channel_layout and stream.channels > 2:
+        return ["-ac", str(stream.channels)]
+    return []
 
 
 def _main_audio_tail_filter(plan: Plan, *, post_gain_db: float = 0.0) -> str:
@@ -97,8 +110,19 @@ def _main_audio_tail_filter(plan: Plan, *, post_gain_db: float = 0.0) -> str:
         1,
         round(expected_output_duration(plan) * OUTPUT_AUDIO_SAMPLE_RATE),
     )
+    selected = selected_audio_relative_indices(plan.source, plan.profile.audio_tracks)
+    layout = None
+    if selected:
+        stream = plan.source.audio[selected[0]]
+        layout = stream.channel_layout or {1: "mono", 2: "stereo"}.get(stream.channels)
+    # FFmpeg 5 cannot always negotiate loudnorm -> aresample -> apad layouts.
+    # Preserve the known input layout, never infer a surround speaker mapping
+    # from its channel count. Accept only a filter-safe named layout/mask.
+    layout_option = (
+        f":ochl={layout}" if layout and re.fullmatch(r"[A-Za-z0-9_.()+]+", layout) else ""
+    )
     tail = (
-        f"aresample={OUTPUT_AUDIO_SAMPLE_RATE},"
+        f"aresample={OUTPUT_AUDIO_SAMPLE_RATE}{layout_option},"
         f"apad=whole_len={target_samples},"
         f"atrim=end_sample={target_samples},"
         "asetpts=N/SR/TB"
@@ -916,6 +940,7 @@ def build_main_audio_command(
         "-map", f"[{a_label}]",
         "-c:a", "aac", "-b:a", _main_audio_bitrate(plan),
         "-ar", str(OUTPUT_AUDIO_SAMPLE_RATE),
+        *_main_audio_channel_args(plan),
         "-map_metadata", "-1",
         str(audio_output),
     ]
@@ -1098,6 +1123,7 @@ def build_main_audio_command_windowed(
         "-map", f"[{final_label}]",
         "-c:a", "aac", "-b:a", _main_audio_bitrate(plan),
         "-ar", str(OUTPUT_AUDIO_SAMPLE_RATE),
+        *_main_audio_channel_args(plan),
         "-map_metadata", "-1",
         str(audio_output),
     ]
