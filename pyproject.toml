@@ -120,7 +120,7 @@ dev = [
     # dims tail) and mutmut-driven mutation testing of core/.  Both
     # ship dev-only — production installs don't need them.
     "hypothesis~=6.108",
-    "mutmut~=2.5",
+    "mutmut>=2.5,<4.0",
     # Signature contract tests generate Ed25519 signatures; keep the
     # production feature optional while making the dev test closure complete.
     "cryptography>=50,<51",
