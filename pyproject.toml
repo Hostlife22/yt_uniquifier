@@ -28,7 +28,7 @@ dependencies = [
     # the first release that fixes the 2026 image-decoder advisories; permissive
     # old bounds otherwise let a fresh install resolve a known-vulnerable wheel.
     "Pillow>=12.3,<13",
-    "structlog~=24.1",
+    "structlog>=24.1,<27.0",
     "jinja2~=3.1",
     # Pause/resume uses native POSIX signals on Unix. Windows has no
     # equivalent stdlib API, so psutil is a runtime requirement there;
